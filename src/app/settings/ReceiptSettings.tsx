@@ -14,7 +14,8 @@ import {
   AlignLeft,
   Layout,
   Database,
-  Download
+  Download,
+  RefreshCw
 } from 'lucide-react';
 
 const DEFAULT_SETTINGS: ReceiptSettingsType = {
