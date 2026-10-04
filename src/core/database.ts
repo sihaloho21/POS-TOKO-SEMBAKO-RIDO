@@ -2,6 +2,7 @@ import Dexie, { type Table } from 'dexie';
 import type { 
   User, 
   Product, 
+  ProductCost,
   Bundle,
   Customer,
   Supplier,
@@ -17,12 +18,15 @@ import type {
   CashierShift,
   StockOpname,
   DigitalService,
+  LoyaltyEvent,
+  PaymentMethod,
   SyncQueueItem 
 } from './types';
 
 export class LocalDatabase extends Dexie {
   users!: Table<User>;
   products!: Table<Product>;
+  productCosts!: Table<ProductCost>;
   bundles!: Table<Bundle>;
   customers!: Table<Customer>;
   suppliers!: Table<Supplier>;
@@ -39,14 +43,16 @@ export class LocalDatabase extends Dexie {
   stockOpnames!: Table<StockOpname>;
   digitalServices!: Table<DigitalService>;
   loyaltyEvents!: Table<LoyaltyEvent>;
+  paymentMethods!: Table<PaymentMethod>;
   settings!: Table<any>;
   syncQueue!: Table<SyncQueueItem>;
 
   constructor() {
     super('HarapanJayaDB');
-    this.version(5).stores({
+    this.version(6).stores({
       users: 'userId, role, status',
       products: 'productId, barcode, sku, categoryId, productType, status',
+      productCosts: 'productId',
       bundles: 'bundleId, status',
       customers: 'customerId, name, phone, status',
       suppliers: 'supplierId, name, status',
@@ -63,6 +69,7 @@ export class LocalDatabase extends Dexie {
       stockOpnames: 'opnameId, status, createdAt',
       digitalServices: 'serviceId, transactionId, serviceType, status',
       loyaltyEvents: 'loyaltyEventId, customerId, referenceId, timestamp',
+      paymentMethods: 'id, type, status',
       settings: 'id',
       syncQueue: '++queueId, entityType, entityId, status, createdAt'
     });

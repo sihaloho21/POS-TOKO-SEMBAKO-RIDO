@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { db } from '@/core/database';
 import { useLiveQuery } from 'dexie-react-hooks';
 import type { ReceiptSettings as ReceiptSettingsType } from '@/core/types';
+import { BackupService } from '@/core/services/backup-service';
 import { 
   Printer, 
   Store, 
@@ -11,7 +12,9 @@ import {
   CheckCircle,
   FileText,
   AlignLeft,
-  Layout
+  Layout,
+  Database,
+  Download
 } from 'lucide-react';
 
 const DEFAULT_SETTINGS: ReceiptSettingsType = {
@@ -86,7 +89,7 @@ export default function ReceiptSettings() {
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Nama Toko</label>
                 <input 
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
-                  value={formData.storeName}
+                  value={formData.storeName || ''}
                   onChange={e => setFormData({ ...formData, storeName: e.target.value })}
                 />
               </div>
@@ -95,7 +98,7 @@ export default function ReceiptSettings() {
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Alamat</label>
                 <textarea 
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500 min-h-[80px]"
-                  value={formData.address}
+                  value={formData.address || ''}
                   onChange={e => setFormData({ ...formData, address: e.target.value })}
                 />
               </div>
@@ -104,7 +107,7 @@ export default function ReceiptSettings() {
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Nomor Telepon</label>
                 <input 
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
-                  value={formData.phone}
+                  value={formData.phone || ''}
                   onChange={e => setFormData({ ...formData, phone: e.target.value })}
                 />
               </div>
@@ -139,9 +142,31 @@ export default function ReceiptSettings() {
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Pesan Penutup (Footer)</label>
                 <textarea 
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500 min-h-[80px]"
-                  value={formData.footerMessage}
+                  value={formData.footerMessage || ''}
                   onChange={e => setFormData({ ...formData, footerMessage: e.target.value })}
                 />
+              </div>
+            </div>
+          </div>
+          <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-6">
+            <h3 className="font-black text-slate-900 uppercase tracking-tight flex items-center gap-2">
+              <Database size={20} className="text-blue-600" />
+              Data Management
+            </h3>
+            
+            <div className="space-y-4">
+              <div className="p-6 bg-slate-50 rounded-2xl border border-slate-100">
+                <h4 className="text-xs font-black text-slate-900 uppercase tracking-tight mb-2">Local Backup</h4>
+                <p className="text-[10px] text-slate-500 font-medium mb-6 leading-relaxed">
+                  Ekspor seluruh basis data lokal (IndexedDB) ke dalam format ZIP terkompresi. Simpan file ini sebagai cadangan manual di perangkat Anda.
+                </p>
+                <button 
+                  onClick={() => BackupService.createBackup()}
+                  className="w-full flex items-center justify-center gap-2 px-6 py-4 bg-white border border-slate-200 text-slate-900 rounded-xl font-black text-xs uppercase tracking-widest hover:bg-slate-50 hover:border-slate-300 transition-all shadow-sm"
+                >
+                  <Download size={18} className="text-blue-600" />
+                  Backup Now (.zip)
+                </button>
               </div>
             </div>
           </div>

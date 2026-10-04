@@ -1,4 +1,4 @@
-export type UserRole = 'OWNER' | 'KASIR';
+export type UserRole = 'OWNER' | 'MANAGER' | 'KASIR' | 'WAREHOUSE';
 
 export interface User {
   userId: string;
@@ -6,6 +6,7 @@ export interface User {
   role: UserRole;
   pinHash: string; // 6 digit hashed
   status: 'ACTIVE' | 'INACTIVE';
+  permissions?: string[]; // Granular permissions if needed
   createdAt: string;
   updatedAt: string;
 }
@@ -33,11 +34,18 @@ export interface Product {
   resellerGajianRule?: { markupPercent: number };
   minimumStock: number;
   targetStock: number;
-  hpp: number; // Current WAC
+  priceAlertThreshold?: number; // In percent, e.g., 10 for 10%
   stock: number; // In base unit
   status: 'ACTIVE' | 'INACTIVE';
   photoUrl?: string;
+  tags?: string[];
   createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProductCost {
+  productId: string;
+  hpp: number;
   updatedAt: string;
 }
 
@@ -94,7 +102,7 @@ export interface TransactionItem {
   discount: number;
   netPrice: number;
   subtotal: number;
-  hppSnapshot: number; 
+  hppSnapshot?: number; 
 }
 
 export interface Transaction {
@@ -125,7 +133,7 @@ export interface Receivable {
   paidAmount: number;
   remainingAmount: number;
   dueDate: string;
-  status: 'OPEN' | 'PARTIAL' | 'PAID' | 'OVERDUE';
+  status: 'OPEN' | 'PARTIAL' | 'PAID' | 'OVERDUE' | 'VOIDED';
   createdAt: string;
 }
 
@@ -166,7 +174,7 @@ export interface FinanceEvent {
   storageId: 'WARUNG' | 'IKAN' | 'UANG_DIGITAL';
   direction: 'IN' | 'OUT';
   referenceId: string;
-  referenceType: 'TRANSACTION' | 'PURCHASE' | 'RECEIVABLE_PAYMENT' | 'ADJUSTMENT' | 'EXPENSE' | 'CAPITAL' | 'PRIVE' | 'INTERNAL_TRANSFER' | 'SERVICE_REVENUE' | 'MDR_COST';
+  referenceType: 'TRANSACTION' | 'PURCHASE' | 'RECEIVABLE_PAYMENT' | 'ADJUSTMENT' | 'EXPENSE' | 'CAPITAL' | 'PRIVE' | 'INTERNAL_TRANSFER' | 'SERVICE_REVENUE' | 'MDR_COST' | 'VOID' | 'RETURN';
   userId: string;
   deviceId: string;
   timestamp: string;
@@ -274,6 +282,14 @@ export interface DigitalService {
   total: number;
   providerReference?: string;
   status: 'PENDING' | 'SUCCESS' | 'FAILED';
+}
+
+export interface PaymentMethod {
+  id: string;
+  name: string;
+  type: 'CASH' | 'QRIS' | 'CARD' | 'TRANSFER';
+  mdrPercent: number;
+  status: 'ACTIVE' | 'INACTIVE';
 }
 
 export interface ReceiptSettings {

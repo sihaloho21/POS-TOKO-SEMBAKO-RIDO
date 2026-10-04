@@ -75,26 +75,30 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
 
   const currentShift = useLiveQuery(() => ShiftService.getCurrentShift('device-1'), []);
 
-  const isOwner = currentUser?.role === 'OWNER';
+  const userRole = currentUser?.role || 'KASIR';
+  const isOwner = userRole === 'OWNER';
+  const isManager = userRole === 'MANAGER' || isOwner;
+  const isWarehouse = userRole === 'WAREHOUSE' || isManager;
+  const isKasir = userRole === 'KASIR' || isManager;
 
   const navItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={18} /> },
-    { id: 'pos', label: 'POS', icon: <ShoppingCart size={18} /> },
-    { id: 'transactions', label: 'Transactions', icon: <History size={18} /> },
-    { id: 'inventory', label: 'Inventory', icon: <Package size={18} />, hidden: !isOwner },
-    { id: 'fish', label: 'Fish Management', icon: <Fish size={18} />, hidden: !isOwner },
-    { id: 'bundles', label: 'Bundles & Packages', icon: <Layers size={18} />, hidden: !isOwner },
-    { id: 'customers', label: 'Customers', icon: <Users size={18} /> },
-    { id: 'digital', label: 'Digital Services', icon: <Smartphone size={18} /> },
-    { id: 'shift', label: 'Cashier Shift', icon: <ClipboardList size={18} /> },
-    { id: 'stock-opname', label: 'Stock Opname', icon: <ClipboardList size={18} />, hidden: !isOwner },
-    { id: 'suppliers', label: 'Suppliers', icon: <Truck size={18} />, hidden: !isOwner },
-    { id: 'purchases', label: 'Purchases', icon: <ShoppingBag size={18} />, hidden: !isOwner },
-    { id: 'supplier-return', label: 'Supplier Return', icon: <Archive size={18} />, hidden: !isOwner },
-    { id: 'receivables', label: 'Receivables', icon: <CreditCard size={18} /> },
-    { id: 'finance', label: 'Finance', icon: <TrendingUp size={18} />, hidden: !isOwner },
+    { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={18} />, hidden: !isWarehouse && !isKasir },
+    { id: 'pos', label: 'POS', icon: <ShoppingCart size={18} />, hidden: !isKasir },
+    { id: 'transactions', label: 'Transactions', icon: <History size={18} />, hidden: !isKasir && !isManager },
+    { id: 'inventory', label: 'Inventory', icon: <Package size={18} />, hidden: !isWarehouse },
+    { id: 'fish', label: 'Fish Management', icon: <Fish size={18} />, hidden: !isWarehouse },
+    { id: 'bundles', label: 'Bundles & Packages', icon: <Layers size={18} />, hidden: !isWarehouse },
+    { id: 'customers', label: 'Customers', icon: <Users size={18} />, hidden: !isKasir },
+    { id: 'digital', label: 'Digital Services', icon: <Smartphone size={18} />, hidden: !isKasir },
+    { id: 'shift', label: 'Cashier Shift', icon: <ClipboardList size={18} />, hidden: !isKasir },
+    { id: 'stock-opname', label: 'Stock Opname', icon: <ClipboardList size={18} />, hidden: !isWarehouse },
+    { id: 'suppliers', label: 'Suppliers', icon: <Truck size={18} />, hidden: !isWarehouse },
+    { id: 'purchases', label: 'Purchases', icon: <ShoppingBag size={18} />, hidden: !isWarehouse },
+    { id: 'supplier-return', label: 'Supplier Return', icon: <Archive size={18} />, hidden: !isWarehouse },
+    { id: 'receivables', label: 'Receivables', icon: <CreditCard size={18} />, hidden: !isKasir },
+    { id: 'finance', label: 'Finance', icon: <TrendingUp size={18} />, hidden: !isManager },
     { id: 'audit', label: 'Audit Log', icon: <ShieldCheck size={18} />, hidden: !isOwner },
-    { id: 'conflicts', label: 'Conflicts', icon: <AlertTriangle size={18} />, badge: conflictCount },
+    { id: 'conflicts', label: 'Conflicts', icon: <AlertTriangle size={18} />, badge: conflictCount, hidden: !isManager },
     { id: 'system-health', label: 'System Health', icon: <Activity size={18} />, hidden: !isOwner },
     { id: 'settings', label: 'Settings', icon: <Settings size={18} /> },
   ];

@@ -9,11 +9,11 @@ export class PrintService {
       address: 'Jl. Raya Cikande No. 123',
       phone: '0812-3456-7890',
       footerMessage: 'Terima kasih telah berbelanja!',
-      paperWidth: '58mm'
+      paperWidth: '58mm',
+      showPoints: true,
+      showSavings: true,
+      id: 'current'
     };
-
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
 
     const is58mm = settings.paperWidth === '58mm';
     const width = is58mm ? '200px' : '300px';
@@ -86,26 +86,45 @@ export class PrintService {
             <span>${transaction.total.toLocaleString()}</span>
           </div>
 
+          ${settings.showPoints && transaction.loyaltyPointsEarned > 0 ? `
+            <div class="dashed"></div>
+            <div class="flex-between">
+              <span>POIN DIPEROLEH</span>
+              <span>+${transaction.loyaltyPointsEarned}</span>
+            </div>
+          ` : ''}
+
           <div class="dashed"></div>
 
           <div class="center footer">
             <p style="white-space: pre-line;">${settings.footerMessage}</p>
             <p style="margin-top: 10px; font-size: 0.7em;">Powered by Harapan Jaya POS</p>
           </div>
-
-          <script>
-            window.onload = function() {
-              window.print();
-              window.onafterprint = function() {
-                window.close();
-              };
-            };
-          </script>
         </body>
       </html>
     `;
 
-    printWindow.document.write(html);
-    printWindow.document.close();
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentWindow?.document;
+    if (doc) {
+      doc.open();
+      doc.write(html);
+      doc.close();
+
+      setTimeout(() => {
+        iframe.contentWindow?.print();
+        setTimeout(() => {
+          document.body.removeChild(iframe);
+        }, 100);
+      }, 500);
+    }
   }
 }

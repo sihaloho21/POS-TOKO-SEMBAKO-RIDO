@@ -25,15 +25,17 @@ export default function SupplierReturn() {
 
   const suppliers = useLiveQuery(() => db.suppliers.where('status').equals('ACTIVE').toArray());
   const products = useLiveQuery(() => db.products.where('status').equals('ACTIVE').toArray());
+  const costs = useLiveQuery(() => db.productCosts.toArray());
 
   const addItem = (product: any) => {
     if (items.find(i => i.productId === product.productId)) return;
+    const hpp = costs?.find(c => c.productId === product.productId)?.hpp || 0;
     setItems([...items, { 
       productId: product.productId, 
       name: product.name, 
       quantity: 1, 
       unit: product.baseUnit, 
-      price: product.hpp 
+      price: hpp 
     }]);
   };
 
@@ -139,7 +141,7 @@ export default function SupplierReturn() {
                 >
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-bold text-slate-900 uppercase truncate">{p.name}</p>
-                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">HPP: Rp {p.hpp.toLocaleString()}</p>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">HPP: Rp {(costs?.find(c => c.productId === p.productId)?.hpp || 0).toLocaleString()}</p>
                   </div>
                   <Plus size={16} className="text-slate-300 group-hover:text-blue-500 transition-all" />
                 </button>
@@ -185,7 +187,7 @@ export default function SupplierReturn() {
                           <input 
                             type="number"
                             className="w-16 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-black text-center"
-                            value={item.quantity}
+                            value={item.quantity ?? 1}
                             onChange={(e) => updateItem(item.productId, 'quantity', Number(e.target.value))}
                           />
                           <span className="text-[10px] font-black text-slate-400 uppercase">{item.unit}</span>
@@ -195,7 +197,7 @@ export default function SupplierReturn() {
                         <input 
                           type="number"
                           className="w-24 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-black text-right"
-                          value={item.price}
+                          value={item.price ?? 0}
                           onChange={(e) => updateItem(item.productId, 'price', Number(e.target.value))}
                         />
                       </td>

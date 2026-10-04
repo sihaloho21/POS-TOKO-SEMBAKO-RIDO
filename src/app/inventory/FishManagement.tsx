@@ -9,12 +9,16 @@ import {
   Weight,
   TrendingUp,
   History,
-  Trash2
+  Trash2,
+  Lock
 } from 'lucide-react';
 import { ProductModal } from './ProductModal';
-import type { Product } from '@/core/types';
+import type { Product, ProductCost } from '@/core/types';
+import { useAuthStore } from '@/core/auth-store';
 
 export default function FishManagement() {
+  const { currentUser } = useAuthStore();
+  const isOwner = currentUser?.role === 'OWNER';
   const [search, setSearch] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   
@@ -25,6 +29,10 @@ export default function FishManagement() {
     ).toArray(),
     [search]
   );
+
+  const costs = useLiveQuery(() => isOwner ? db.productCosts.toArray() : Promise.resolve([] as ProductCost[]), [isOwner]);
+
+  const getHpp = (productId: string) => costs?.find(c => c.productId === productId)?.hpp || 0;
 
   return (
     <div className="space-y-8">
@@ -60,9 +68,16 @@ export default function FishManagement() {
           </div>
           <div>
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Estimasi Nilai Stok</p>
-            <p className="text-xl font-black text-slate-900 tabular-nums">
-              Rp {fishProducts?.reduce((acc, p) => acc + (p.stock * p.hpp), 0).toLocaleString()}
-            </p>
+            {isOwner ? (
+              <p className="text-xl font-black text-slate-900 tabular-nums">
+                Rp {fishProducts?.reduce((acc, p) => acc + (p.stock * getHpp(p.productId)), 0).toLocaleString()}
+              </p>
+            ) : (
+              <div className="flex items-center gap-2 text-slate-300">
+                <Lock size={14} />
+                <span className="text-xs font-bold uppercase tracking-widest">Tersembunyi</span>
+              </div>
+            )}
           </div>
         </div>
         <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex items-center gap-4">
@@ -96,9 +111,9 @@ export default function FishManagement() {
               <tr className="bg-slate-50/50 text-slate-400 text-[10px] uppercase tracking-widest font-black">
                 <th className="px-6 py-4">Jenis Ikan</th>
                 <th className="px-6 py-4">Harga Jual / KG</th>
-                <th className="px-6 py-4">WAC / KG (Modal)</th>
+                {isOwner && <th className="px-6 py-4">WAC / KG (Modal)</th>}
                 <th className="px-6 py-4">Stok (KG)</th>
-                <th className="px-6 py-4">Margin / KG</th>
+                {isOwner && <th className="px-6 py-4">Margin / KG</th>}
                 <th className="px-6 py-4 text-right">Aksi</th>
               </tr>
             </thead>
@@ -116,20 +131,24 @@ export default function FishManagement() {
                   <td className="px-6 py-4">
                     <p className="text-sm font-black text-slate-900 tabular-nums">Rp {p.normalPrice.toLocaleString()}</p>
                   </td>
-                  <td className="px-6 py-4">
-                    <p className="text-sm font-black text-blue-600 tabular-nums">Rp {p.hpp.toLocaleString()}</p>
-                  </td>
+                  {isOwner && (
+                    <td className="px-6 py-4">
+                      <p className="text-sm font-black text-blue-600 tabular-nums">Rp {getHpp(p.productId).toLocaleString()}</p>
+                    </td>
+                  )}
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-black text-slate-900 tabular-nums">{p.stock.toFixed(2)}</span>
                       <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest">KG</span>
                     </div>
                   </td>
-                  <td className="px-6 py-4">
-                    <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-lg">
-                      + Rp {(p.normalPrice - p.hpp).toLocaleString()}
-                    </span>
-                  </td>
+                  {isOwner && (
+                    <td className="px-6 py-4">
+                      <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-lg">
+                        + Rp {(p.normalPrice - getHpp(p.productId)).toLocaleString()}
+                      </span>
+                    </td>
+                  )}
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-all">
                       <button className="p-2 text-slate-400 hover:text-blue-600"><History size={18} /></button>

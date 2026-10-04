@@ -2,58 +2,23 @@ import React from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/core/database';
 import { 
-  TrendingUp, 
-  TrendingDown, 
-  Wallet, 
-  ShoppingCart, 
-  Users, 
-  Package, 
-  AlertTriangle,
-  ArrowUpRight,
-  ArrowDownRight,
-  Calculator,
-  RefreshCw
+  RefreshCw,
+  Package,
+  Users
 } from 'lucide-react';
-import { 
-  AreaChart, 
-  Area, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  ResponsiveContainer,
-  BarChart,
-  Bar
-} from 'recharts';
-
-function StatCard({ label, value, trend, icon, color }: any) {
-  return (
-    <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm hover:shadow-md transition-all">
-      <div className="flex justify-between items-start mb-4">
-        <div className={`p-3 rounded-2xl ${color} bg-opacity-10 ${color.replace('text', 'bg')}`}>
-          {icon}
-        </div>
-        {trend && (
-          <div className={`flex items-center gap-1 text-[10px] font-black uppercase tracking-widest ${trend > 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-            {trend > 0 ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}
-            {Math.abs(trend)}%
-          </div>
-        )}
-      </div>
-      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{label}</p>
-      <p className="text-2xl font-black text-slate-900 tabular-nums">{value}</p>
-    </div>
-  );
-}
-
 import { SummaryCards } from './SummaryCards';
+import { LowStockBanner } from './LowStockBanner';
+import { SalesTrendChart } from './SalesTrendChart';
+import { InventoryProjectionsWidget } from './InventoryProjectionsWidget';
 
-export default function Dashboard() {
+export default function Dashboard({ onTabChange }: { onTabChange: (tab: string) => void }) {
   const transactions = useLiveQuery(() => db.transactions.toArray());
-  const financeEvents = useLiveQuery(() => db.financeEvents.toArray());
   const products = useLiveQuery(() => db.products.toArray());
   const customers = useLiveQuery(() => db.customers.toArray());
-  const conflicts = useLiveQuery(() => db.conflicts.where('status').equals('PENDING').count());
+  
+  const lowStockProducts = useLiveQuery(() => 
+    db.products.filter(p => p.status === 'ACTIVE' && p.stock <= p.minimumStock).toArray()
+  );
 
   // Real-time Storage Balances
   const balances = useLiveQuery(async () => {
@@ -67,18 +32,9 @@ export default function Dashboard() {
     return store;
   });
 
-  const chartData = [
-    { name: '06:00', value: 4000 },
-    { name: '09:00', value: 3000 },
-    { name: '12:00', value: 2000 },
-    { name: '15:00', value: 2780 },
-    { name: '18:00', value: 1890 },
-    { name: '21:00', value: 2390 },
-  ];
-
   return (
     <div className="space-y-8 pb-10">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Owner Dashboard</h2>
           <p className="text-slate-500 text-sm font-medium">Monitoring performa bisnis Harapan Jaya secara real-time.</p>
@@ -90,40 +46,23 @@ export default function Dashboard() {
         </div>
       </div>
 
+      <LowStockBanner 
+        products={lowStockProducts || []} 
+        onAction={() => onTabChange('inventory')} 
+      />
+
       <SummaryCards />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2 bg-white p-8 rounded-3xl border border-slate-200 shadow-sm">
-          <div className="flex justify-between items-center mb-8">
-            <h3 className="font-black text-slate-900 uppercase tracking-tight">Sales Analytics (By Hour)</h3>
-            <div className="flex gap-2">
-              <span className="w-3 h-3 rounded-full bg-blue-500" />
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Transactions</span>
-            </div>
-          </div>
-          <div className="h-80 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData}>
-                <defs>
-                  <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.1}/>
-                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 'bold', fill: '#94a3b8' }} />
-                <YAxis hide />
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#0f172a', border: 'none', borderRadius: '12px', color: '#fff' }}
-                  itemStyle={{ color: '#fff', fontSize: '12px', fontWeight: 'bold' }}
-                />
-                <Area type="monotone" dataKey="value" stroke="#3b82f6" strokeWidth={4} fillOpacity={1} fill="url(#colorValue)" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
+        <div className="lg:col-span-2">
+          <SalesTrendChart transactions={transactions || []} />
         </div>
 
-        <div className="bg-slate-900 p-8 rounded-3xl text-white relative overflow-hidden flex flex-col">
+        <InventoryProjectionsWidget />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="bg-slate-900 p-8 rounded-3xl text-white relative overflow-hidden flex flex-col min-h-[400px]">
           <h3 className="font-black uppercase tracking-widest text-sm mb-8">Storage Balances</h3>
           <div className="space-y-6 flex-1">
             <div className="space-y-2">
@@ -161,9 +100,7 @@ export default function Dashboard() {
             </p>
           </div>
         </div>
-      </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm">
           <h3 className="font-black text-slate-900 uppercase tracking-tight mb-6 flex items-center gap-2">
             <Package size={20} className="text-blue-600" /> Top Performing Products

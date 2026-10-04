@@ -161,7 +161,7 @@ export default function DigitalServices() {
                 <input
                   required
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-bold text-slate-900"
-                  value={formData.ref}
+                  value={formData.ref || ''}
                   onChange={(e) => setFormData({ ...formData, ref: e.target.value })}
                   placeholder="0812xxxx atau ID Pelanggan"
                 />
@@ -174,7 +174,7 @@ export default function DigitalServices() {
                     type="number"
                     required
                     className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-bold text-slate-900 tabular-nums"
-                    value={formData.principal}
+                    value={formData.principal || ''}
                     onChange={(e) => setFormData({ ...formData, principal: e.target.value })}
                   />
                 </div>
@@ -184,7 +184,7 @@ export default function DigitalServices() {
                     type="number"
                     required
                     className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-bold text-slate-900 tabular-nums"
-                    value={formData.fee}
+                    value={formData.fee || ''}
                     onChange={(e) => setFormData({ ...formData, fee: e.target.value })}
                   />
                 </div>

@@ -9,13 +9,23 @@ import {
   Phone,
   CreditCard,
   History,
-  Trophy
+  Trophy,
+  ShoppingBag,
+  Edit
 } from 'lucide-react';
 import { LoyaltyHistory } from './LoyaltyHistory';
+import { RecentActivity } from './RecentActivity';
+import { CustomerBalance } from './CustomerBalance';
+import { CustomerModal } from './CustomerModal';
+import type { Customer } from '@/core/types';
 
 export default function Customers() {
   const [search, setSearch] = useState('');
   const [viewingLoyaltyId, setViewingLoyaltyId] = useState<string | null>(null);
+  const [viewingActivityId, setViewingActivityId] = useState<string | null>(null);
+  const [viewingBalanceId, setViewingBalanceId] = useState<string | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingCustomer, setEditingCustomer] = useState<Customer | undefined>(undefined);
 
   const customers = useLiveQuery(
     () => db.customers.filter(c => c.name.toLowerCase().includes(search.toLowerCase()) || (c.phone || '').includes(search)).toArray(),
@@ -29,7 +39,13 @@ export default function Customers() {
           <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Database Pelanggan</h2>
           <p className="text-slate-500 text-sm font-medium">Kelola member, loyalty poin, dan piutang pelanggan.</p>
         </div>
-        <button className="flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-xl font-black text-xs uppercase tracking-widest hover:bg-blue-500 transition-all shadow-lg shadow-blue-200">
+        <button 
+          onClick={() => {
+            setEditingCustomer(undefined);
+            setIsModalOpen(true);
+          }}
+          className="flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-xl font-black text-xs uppercase tracking-widest hover:bg-blue-500 transition-all shadow-lg shadow-blue-200"
+        >
           <UserPlus size={18} />
           Tambah Pelanggan
         </button>
@@ -105,18 +121,69 @@ export default function Customers() {
                       <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-all">
                           <button 
-                            onClick={() => setViewingLoyaltyId(viewingLoyaltyId === customer.customerId ? null : customer.customerId)}
+                            onClick={() => {
+                              setViewingBalanceId(viewingBalanceId === customer.customerId ? null : customer.customerId);
+                              setViewingActivityId(null);
+                              setViewingLoyaltyId(null);
+                            }}
+                            className={`p-2 rounded-lg transition-all ${viewingBalanceId === customer.customerId ? 'bg-amber-600 text-white shadow-lg' : 'text-slate-400 hover:text-amber-600 hover:bg-amber-50'}`}
+                            title="Status Piutang & Kredit"
+                          >
+                            <CreditCard size={18} />
+                          </button>
+                          <button 
+                            onClick={() => {
+                              setViewingActivityId(viewingActivityId === customer.customerId ? null : customer.customerId);
+                              setViewingLoyaltyId(null);
+                              setViewingBalanceId(null);
+                            }}
+                            className={`p-2 rounded-lg transition-all ${viewingActivityId === customer.customerId ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'}`}
+                            title="Aktivitas Belanja"
+                          >
+                            <ShoppingBag size={18} />
+                          </button>
+                          <button 
+                            onClick={() => {
+                              setViewingLoyaltyId(viewingLoyaltyId === customer.customerId ? null : customer.customerId);
+                              setViewingActivityId(null);
+                              setViewingBalanceId(null);
+                            }}
                             className={`p-2 rounded-lg transition-all ${viewingLoyaltyId === customer.customerId ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'}`}
                             title="Riwayat Poin"
                           >
                             <History size={18} />
                           </button>
-                          <button className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-all">
-                            <MoreVertical size={18} />
+                          <button 
+                            onClick={() => {
+                              setEditingCustomer(customer);
+                              setIsModalOpen(true);
+                            }}
+                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                            title="Edit Pelanggan"
+                          >
+                            <Edit size={18} />
                           </button>
                         </div>
                       </td>
                     </tr>
+                    {viewingBalanceId === customer.customerId && (
+                      <tr>
+                        <td colSpan={5} className="px-6 py-6 bg-slate-50/30">
+                          <div className="max-w-3xl mx-auto">
+                            <CustomerBalance customerId={customer.customerId} />
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    {viewingActivityId === customer.customerId && (
+                      <tr>
+                        <td colSpan={5} className="px-6 py-6 bg-slate-50/30">
+                          <div className="max-w-3xl mx-auto">
+                            <RecentActivity customerId={customer.customerId} />
+                          </div>
+                        </td>
+                      </tr>
+                    )}
                     {viewingLoyaltyId === customer.customerId && (
                       <tr>
                         <td colSpan={5} className="px-6 py-6 bg-slate-50/30">
@@ -133,6 +200,15 @@ export default function Customers() {
           </table>
         </div>
       </div>
+      {isModalOpen && (
+        <CustomerModal 
+          customer={editingCustomer}
+          onClose={() => {
+            setIsModalOpen(false);
+            setEditingCustomer(undefined);
+          }}
+        />
+      )}
     </div>
   );
 }

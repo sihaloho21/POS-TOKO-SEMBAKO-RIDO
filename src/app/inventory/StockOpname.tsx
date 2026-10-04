@@ -137,7 +137,7 @@ export default function StockOpname() {
                             className={`w-24 px-3 py-2 border rounded-xl text-center text-xs font-black tabular-nums transition-all ${
                               diff === 0 ? 'bg-slate-50 border-slate-200' : diff > 0 ? 'bg-emerald-50 border-emerald-200 text-emerald-600' : 'bg-rose-50 border-rose-200 text-rose-600'
                             }`}
-                            value={item.physicalQty}
+                            value={item.physicalQty ?? 0}
                             onChange={(e) => handleUpdateQty(item.productId, Number(e.target.value))}
                           />
                         </td>

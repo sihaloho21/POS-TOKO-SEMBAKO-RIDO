@@ -1,27 +1,30 @@
-# Security Specification - Toko Sembako Rido
+# Security Specification - Harapan Jaya POS
 
-## Data Invariants
-1. A transaction must have a valid `cashierId`.
-2. A `stockMovement` must be linked to a valid `productId`.
-3. Only `OWNER` can view `purchases`, `financeEvents`, and `auditLogs`.
-4. `KASIR` can create transactions but cannot void or update them once completed (unless owner).
-5. All IDs must match `^[a-zA-Z0-9_\-]+$`.
+## 1. Data Invariants
+- **Append-Only Ledgers**: FinanceEvents, StockMovements, and AuditLogs are append-only. No deletion or direct editing of existing events allowed.
+- **WAC Integrity**: Historical HPP/WAC snapshots in transactions must never change once the transaction is COMPLETED.
+- **Identity Lock**: Every event (Transaction, FinanceEvent, etc.) must be linked to a valid User ID and Device ID.
+- **Role Isolation**: Only 'OWNER' can read HPP, Profit, and Total Liquid Assets. 'KASIR' is limited to sales-related data and their own shift reconciliation.
+- **Atomic Sync**: SyncQueue items are processed idempotently based on their unique Global ID.
 
-## The Dirty Dozen Payloads
-1. **Identity Spoofing**: Create a transaction with a different user's `cashierId`.
-2. **Privilege Escalation**: Update a user's role from `KASIR` to `OWNER`.
-3. **Ghost Field Injection**: Add `isAdmin: true` to a user document.
-4. **ID Poisoning**: Create a product with a 2KB junk string as ID.
-5. **PII Leakage**: Unauthorized reading of customer phone/address by a non-authenticated user.
-6. **State Shortcutting**: Updating a transaction status directly to `COMPLETED` without items.
-7. **Resource Poisoning**: Sending a 1MB message string in a notification.
-8. **Orphaned Record**: Creating a `stockMovement` for a non-existent `productId`.
-9. **Timestamp Spoofing**: Providing a `createdAt` in the past instead of `request.time`.
-10. **Immutable Violation**: Changing the `transactionId` of an existing transaction.
-11. **Sync Bypass**: Writing directly to `auditLogs` as a `KASIR` without an owner role.
-12. **Recursive Cost Attack**: Listing all `transactions` without any query filters.
+## 2. The "Dirty Dozen" Payloads (Attacks)
+1. **HPP Leak**: Kasir tries to fetch `product_costs` collection. (Expected: PERMISSION_DENIED)
+2. **Ledger Erasure**: User tries to DELETE a FinanceEvent. (Expected: PERMISSION_DENIED)
+3. **Price Manipulation**: Kasir tries to UPDATE `normalPrice` in a Product document. (Expected: PERMISSION_DENIED - Only Owner can edit master data)
+4. **Historical Re-writing**: User tries to UPDATE the `total` of a COMPLETED transaction from 3 days ago. (Expected: PERMISSION_DENIED)
+5. **Role Escalation**: Kasir tries to UPDATE their own `role` to 'OWNER' in the `users` collection. (Expected: PERMISSION_DENIED)
+6. **Balance Faking**: User tries to CREATE a FinanceEvent with a backdated timestamp. (Expected: PERMISSION_DENIED - Must use server time)
+7. **Ghost Sale**: Kasir tries to CREATE a Transaction without an active Shift document. (Expected: PERMISSION_DENIED)
+8. **Inventory Poisoning**: User tries to CREATE a StockMovement with an invalid `productId`. (Expected: PERMISSION_DENIED)
+9. **Debt Wipe**: User tries to DELETE a Receivable (Debt) document. (Expected: PERMISSION_DENIED - Must use Reversal event)
+10. **Loyalty Injection**: User tries to CREATE a LoyaltyEvent with 1,000,000 points. (Expected: PERMISSION_DENIED - Limit checks)
+11. **Multi-device Override**: Device A tries to UPDATE a document that Device B already modified with a higher version/timestamp. (Expected: Conflict check)
+12. **Shadow Audit**: User tries to CREATE an AuditLog entry that hides a previous action. (Expected: PERMISSION_DENIED - System managed)
 
-## Test Runner (Logic Check)
-- `PERMISSION_DENIED` for any write where `request.auth.uid` doesn't match `cashierId` (for transactions).
-- `PERMISSION_DENIED` for `KASIR` attempting to read `/financeEvents`.
-- `PERMISSION_DENIED` for any field not in `hasOnly`.
+## 3. Test Runner Invariants
+The `firestore.rules` will be validated against these pillars:
+- `isSignedIn()`: Must be authenticated.
+- `isOwner()`: Verified via a trusted `users/{uid}` document where `role == 'OWNER'`.
+- `isValidId()`: Path variables must follow strict patterns.
+- `immutable()`: Fields like `createdAt` cannot change.
+- `serverTimestamp()`: Use `request.time` for all temporal logic.

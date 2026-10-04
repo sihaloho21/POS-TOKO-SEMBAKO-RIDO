@@ -11,7 +11,17 @@ export class ProductService {
 
   static async exportToCSV(): Promise<void> {
     const products = await this.getAllProducts();
-    const csv = Papa.unparse(products);
+    const costs = await db.productCosts.toArray();
+    
+    const exportData = products.map(p => {
+      const cost = costs.find(c => c.productId === p.productId);
+      return {
+        ...p,
+        hpp: cost?.hpp || 0
+      };
+    });
+
+    const csv = Papa.unparse(exportData);
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
@@ -37,16 +47,18 @@ export class ProductService {
               const productData: Partial<Product> = {
                 ...row,
                 normalPrice: Number(row.normalPrice || 0),
-                hpp: Number(row.hpp || 0),
                 stock: Number(row.stock || 0),
                 minimumStock: Number(row.minimumStock || 0),
                 targetStock: Number(row.targetStock || 0),
+                priceAlertThreshold: row.priceAlertThreshold ? Number(row.priceAlertThreshold) : undefined,
                 status: row.status === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE',
               };
+
+              const hpp = Number(row.hpp || 0);
               
               if (!productData.name) throw new Error('Missing name');
               
-              await this.saveProduct(productData);
+              await this.saveProduct(productData, hpp);
               success++;
             } catch (error) {
               console.error('Failed to import row:', row, error);
@@ -62,10 +74,13 @@ export class ProductService {
     });
   }
 
-  static async saveProduct(formData: Partial<Product>): Promise<string> {
+  static async saveProduct(formData: Partial<Product>, hpp?: number): Promise<string> {
     const isNew = !formData.productId;
     const productId = formData.productId || uuidv4();
     const timestamp = new Date().toISOString();
+
+    const oldProduct = isNew ? undefined : await db.products.get(productId);
+    const oldCost = isNew ? undefined : await db.productCosts.get(productId);
 
     // 1. Logic for SKU generation
     let sku = formData.sku;
@@ -89,7 +104,7 @@ export class ProductService {
       baseUnit: formData.baseUnit || 'PCS',
       status: formData.status || 'ACTIVE',
       normalPrice: Number(formData.normalPrice || 0),
-      hpp: Number(formData.hpp || 0),
+      priceAlertThreshold: formData.priceAlertThreshold ? Number(formData.priceAlertThreshold) : undefined,
       stock: Number(formData.stock || 0),
       minimumStock: Number(formData.minimumStock || 0),
       targetStock: Number(formData.targetStock || 0),
@@ -100,6 +115,31 @@ export class ProductService {
     };
 
     await db.products.put(finalProduct);
+
+    // 3. Handle HPP (Separately)
+    if (hpp !== undefined) {
+      const productCost = {
+        productId,
+        hpp,
+        updatedAt: timestamp
+      };
+      await db.productCosts.put(productCost);
+      
+      await db.syncQueue.add({
+        entityType: 'productCosts',
+        entityId: productId,
+        action: isNew ? 'CREATE' : 'UPDATE',
+        payload: productCost,
+        status: 'PENDING',
+        retryCount: 0,
+        createdAt: timestamp
+      });
+    }
+
+    // Check for price fluctuations
+    if (oldProduct && oldCost && hpp !== undefined) {
+      await this.checkPriceFluctuation(oldProduct, oldCost.hpp, finalProduct, hpp);
+    }
 
     await AuditEngine.log({
       userId: 'SYSTEM',
@@ -254,6 +294,38 @@ export class ProductService {
           createdAt: notif.createdAt
         });
       }
+    }
+  }
+  
+  static async checkPriceFluctuation(oldProduct: Product, oldHpp: number, newProduct: Product, newHpp: number): Promise<void> {
+    if (!newProduct.priceAlertThreshold) return;
+    
+    if (oldHpp === 0) return; 
+    
+    const fluctuationPercent = Math.abs((newHpp - oldHpp) / oldHpp) * 100;
+    
+    if (fluctuationPercent >= newProduct.priceAlertThreshold) {
+      const notificationId = `PRICE_ALERT_${newProduct.productId}_${new Date().getTime()}`;
+      const notif = {
+        notificationId,
+        severity: 'URGENT' as const,
+        referenceId: newProduct.productId,
+        message: `Alert Harga! HPP ${newProduct.name} berfluktuasi ${fluctuationPercent.toFixed(1)}% (Rp ${oldHpp.toLocaleString()} -> Rp ${newHpp.toLocaleString()}).`,
+        isRead: false,
+        createdAt: new Date().toISOString()
+      };
+      
+      await db.notifications.put(notif);
+      
+      await db.syncQueue.add({
+        entityType: 'notifications',
+        entityId: notificationId,
+        action: 'CREATE',
+        payload: notif,
+        status: 'PENDING',
+        retryCount: 0,
+        createdAt: notif.createdAt
+      });
     }
   }
 }

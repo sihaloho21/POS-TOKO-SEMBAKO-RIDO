@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { db } from '@/core/database';
 import { useLiveQuery } from 'dexie-react-hooks';
+import { InventoryPredictionService, type InventoryPrediction } from '@/core/services/inventory-prediction-service';
 import { 
   Package, 
   Search, 
@@ -13,24 +14,48 @@ import {
   Download,
   Upload,
   History,
-  Filter
+  Filter,
+  QrCode,
+  Barcode,
+  TrendingUp,
+  Calendar,
+  RefreshCw,
+  Flame
 } from 'lucide-react';
-import type { Product } from '@/core/types';
+import type { Product, ProductCost } from '@/core/types';
 import { ProductService } from '@/core/services/product-service';
 import { ProductModal } from './ProductModal';
 import { StockHistory } from './StockHistory';
+import { InventoryHeatmap } from './InventoryHeatmap';
+import { ShelfTalkerModule } from './ShelfTalkerModule';
+import { useAuthStore } from '@/core/auth-store';
+
+import { QRLabelModal } from './QRLabelModal';
+import { BulkBarcodeModal } from './BulkBarcodeModal';
+import { ImportModal } from './ImportModal';
+import { format } from 'date-fns';
 
 export default function Inventory() {
+  const { currentUser } = useAuthStore();
+  const isOwner = currentUser?.role === 'OWNER';
+
+  const [currentTab, setCurrentTab] = useState<'MASTER' | 'PREDICTIONS' | 'HEATMAP' | 'SHELF_TALKERS'>('MASTER');
   const [search, setSearch] = useState('');
+  
+  const predictions = useLiveQuery(() => InventoryPredictionService.getPredictions(), []);
+  const costs = useLiveQuery(() => isOwner ? db.productCosts.toArray() : Promise.resolve([] as ProductCost[]), [isOwner]);
+
   const [filterType, setFilterType] = useState<string>('ALL');
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isBulkBarcodeOpen, setIsBulkBarcodeOpen] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | undefined>(undefined);
-  const [isImporting, setIsImporting] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isBulkPriceOpen, setIsBulkPriceOpen] = useState(false);
   const [bulkAdjustment, setBulkAdjustment] = useState({ percentage: 5, type: 'INCREASE' as 'INCREASE' | 'DECREASE' });
   const [viewingHistoryId, setViewingHistoryId] = useState<string | null>(null);
+  const [viewingQRProduct, setViewingQRProduct] = useState<Product | null>(null);
   
   const products = useLiveQuery(
     () => {
@@ -88,23 +113,6 @@ export default function Inventory() {
     }
   };
 
-  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setIsImporting(true);
-    try {
-      const result = await ProductService.importFromCSV(file);
-      alert(`Import selesai! Berhasil: ${result.success}, Gagal: ${result.failed}`);
-    } catch (error) {
-      console.error('Import failed:', error);
-      alert('Gagal mengimpor data. Pastikan format CSV benar.');
-    } finally {
-      setIsImporting(false);
-      e.target.value = ''; // Reset input
-    }
-  };
-
   const handleEdit = (product: Product) => {
     setEditingProduct(product);
     setIsModalOpen(true);
@@ -149,19 +157,20 @@ export default function Inventory() {
             <Download size={18} />
             Export CSV
           </button>
-          <div className="relative">
-            <input 
-              type="file" 
-              accept=".csv" 
-              onChange={handleImport} 
-              className="absolute inset-0 opacity-0 cursor-pointer"
-              disabled={isImporting}
-            />
-            <button className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-slate-50 transition-all">
-              <Upload size={18} />
-              {isImporting ? 'Importing...' : 'Import CSV'}
-            </button>
-          </div>
+          <button 
+            onClick={() => setIsImportModalOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-slate-50 transition-all"
+          >
+            <Upload size={18} />
+            Import CSV
+          </button>
+          <button 
+            onClick={() => setIsBulkBarcodeOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-slate-50 transition-all"
+          >
+            <Barcode size={18} />
+            Bulk Barcodes
+          </button>
           <button 
             onClick={handleAdd}
             className="flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-xl font-black text-xs uppercase tracking-widest hover:bg-blue-500 transition-all shadow-lg shadow-blue-200"
@@ -172,162 +181,299 @@ export default function Inventory() {
         </div>
       </div>
 
-      <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row items-center gap-4">
-          <div className="relative flex-1 w-full">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-            <input 
-              type="text" 
-              placeholder="Cari SKU, Barcode, atau Nama Produk..."
-              className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm font-bold shadow-sm"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
-          <div className="flex items-center gap-2 w-full sm:w-auto">
-            <div className="flex bg-white border border-slate-200 rounded-xl p-1 shadow-sm overflow-hidden shrink-0">
-              {['ALL', 'ACTIVE', 'INACTIVE'].map(status => (
-                <button
-                  key={status}
-                  onClick={() => setFilterStatus(status)}
-                  className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${
-                    filterStatus === status ? 'bg-slate-900 text-white shadow-lg' : 'bg-transparent text-slate-500 hover:text-slate-700'
-                  }`}
-                >
-                  {status}
-                </button>
-              ))}
-            </div>
-            <div className="flex bg-white border border-slate-200 rounded-xl p-1 shadow-sm overflow-hidden shrink-0">
-              {['ALL', 'SEMBAKO', 'FISH', 'BUNDLE'].map(type => (
-                <button
-                  key={type}
-                  onClick={() => setFilterType(type)}
-                  className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${
-                    filterType === type ? 'bg-blue-600 text-white shadow-lg' : 'bg-transparent text-slate-500 hover:text-slate-700'
-                  }`}
-                >
-                  {type}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
+      {/* Tab Navigation */}
+      <div className="flex gap-4 border-b border-slate-200">
+        <button 
+          onClick={() => setCurrentTab('MASTER')}
+          className={`pb-4 px-2 font-black text-xs uppercase tracking-widest transition-all relative ${
+            currentTab === 'MASTER' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'
+          }`}
+        >
+          Master Inventory
+          {currentTab === 'MASTER' && <div className="absolute bottom-0 left-0 right-0 h-1 bg-blue-600 rounded-t-full" />}
+        </button>
+        <button 
+          onClick={() => setCurrentTab('PREDICTIONS')}
+          className={`pb-4 px-2 font-black text-xs uppercase tracking-widest transition-all relative ${
+            currentTab === 'PREDICTIONS' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'
+          }`}
+        >
+          Predictive Analytics
+          {currentTab === 'PREDICTIONS' && <div className="absolute bottom-0 left-0 right-0 h-1 bg-blue-600 rounded-t-full" />}
+        </button>
+        <button 
+          onClick={() => setCurrentTab('HEATMAP')}
+          className={`pb-4 px-2 font-black text-xs uppercase tracking-widest transition-all relative ${
+            currentTab === 'HEATMAP' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'
+          }`}
+        >
+          Movement Heatmap
+          {currentTab === 'HEATMAP' && <div className="absolute bottom-0 left-0 right-0 h-1 bg-blue-600 rounded-t-full" />}
+        </button>
+        <button 
+          onClick={() => setCurrentTab('SHELF_TALKERS')}
+          className={`pb-4 px-2 font-black text-xs uppercase tracking-widest transition-all relative ${
+            currentTab === 'SHELF_TALKERS' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'
+          }`}
+        >
+          Shelf Talkers
+          {currentTab === 'SHELF_TALKERS' && <div className="absolute bottom-0 left-0 right-0 h-1 bg-blue-600 rounded-t-full" />}
+        </button>
+      </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-slate-50/50 text-slate-400 text-[10px] uppercase tracking-widest font-black">
-                <th className="px-6 py-4">
-                  <input 
-                    type="checkbox" 
-                    className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                    checked={products && products.length > 0 && selectedIds.length === products.length}
-                    onChange={toggleSelectAll}
-                  />
-                </th>
-                <th className="px-2 py-4">Produk / SKU</th>
-                <th className="px-6 py-4">Tipe</th>
-                <th className="px-6 py-4">Harga Jual</th>
-                <th className="px-6 py-4">Stok (Base)</th>
-                <th className="px-6 py-4">Status</th>
-                <th className="px-6 py-4 text-right">Aksi</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {products?.map((product) => (
-                <React.Fragment key={product.productId}>
-                  <tr className={`hover:bg-slate-50/50 transition-colors group ${selectedIds.includes(product.productId) ? 'bg-blue-50/30' : ''} ${viewingHistoryId === product.productId ? 'bg-slate-50' : ''}`}>
-                    <td className="px-6 py-4">
-                      <input 
-                        type="checkbox" 
-                        className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                        checked={selectedIds.includes(product.productId)}
-                        onChange={() => toggleSelect(product.productId)}
-                      />
-                    </td>
-                    <td className="px-2 py-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-white border border-slate-100 rounded-xl flex items-center justify-center text-slate-400 shadow-sm">
-                          {product.productType === 'FISH' ? <Weight size={20} /> : <Package size={20} />}
+      {currentTab === 'MASTER' ? (
+        <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row items-center gap-4">
+            <div className="relative flex-1 w-full">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+              <input 
+                type="text" 
+                placeholder="Cari SKU, Barcode, atau Nama Produk..."
+                className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm font-bold shadow-sm"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <div className="flex bg-white border border-slate-200 rounded-xl p-1 shadow-sm overflow-hidden shrink-0">
+                {['ALL', 'ACTIVE', 'INACTIVE'].map(status => (
+                  <button
+                    key={status}
+                    onClick={() => setFilterStatus(status)}
+                    className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${
+                      filterStatus === status ? 'bg-slate-900 text-white shadow-lg' : 'bg-transparent text-slate-500 hover:text-slate-700'
+                    }`}
+                  >
+                    {status}
+                  </button>
+                ))}
+              </div>
+              <div className="flex bg-white border border-slate-200 rounded-xl p-1 shadow-sm overflow-hidden shrink-0">
+                {['ALL', 'SEMBAKO', 'FISH', 'BUNDLE'].map(type => (
+                  <button
+                    key={type}
+                    onClick={() => setFilterType(type)}
+                    className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${
+                      filterType === type ? 'bg-blue-600 text-white shadow-lg' : 'bg-transparent text-slate-500 hover:text-slate-700'
+                    }`}
+                  >
+                    {type}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-50/50 text-slate-400 text-[10px] uppercase tracking-widest font-black">
+                  <th className="px-6 py-4">
+                    <input 
+                      type="checkbox" 
+                      className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      checked={products && products.length > 0 && selectedIds.length === products.length}
+                      onChange={toggleSelectAll}
+                    />
+                  </th>
+                  <th className="px-2 py-4">Produk / SKU</th>
+                  <th className="px-6 py-4">Tipe</th>
+                  <th className="px-6 py-4">Harga Jual</th>
+                  <th className="px-6 py-4">Stok (Base)</th>
+                  <th className="px-6 py-4">Status</th>
+                  <th className="px-6 py-4 text-right">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {products?.map((product) => (
+                  <React.Fragment key={product.productId}>
+                    <tr className={`hover:bg-slate-50/50 transition-colors group ${selectedIds.includes(product.productId) ? 'bg-blue-50/30' : ''} ${viewingHistoryId === product.productId ? 'bg-slate-50' : ''}`}>
+                      <td className="px-6 py-4">
+                        <input 
+                          type="checkbox" 
+                          className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                          checked={selectedIds.includes(product.productId)}
+                          onChange={() => toggleSelect(product.productId)}
+                        />
+                      </td>
+                      <td className="px-2 py-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-white border border-slate-100 rounded-xl flex items-center justify-center text-slate-400 shadow-sm">
+                            {product.productType === 'FISH' ? <Weight size={20} /> : <Package size={20} />}
+                          </div>
+                          <div>
+                            <p className="text-sm font-bold text-slate-900 uppercase tracking-tight">{product.name}</p>
+                            <div className="flex items-center gap-2">
+                              <p className="text-[10px] text-slate-400 font-black tracking-widest uppercase">{product.sku || product.barcode}</p>
+                              {product.tags && product.tags.length > 0 && (
+                                <div className="flex gap-1">
+                                  {product.tags.map(tag => (
+                                    <span key={tag} className="text-[8px] font-black text-blue-600 bg-blue-50 px-1 py-0.5 rounded border border-blue-100 uppercase tracking-widest">
+                                      {tag}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-sm font-bold text-slate-900 uppercase tracking-tight">{product.name}</p>
-                          <p className="text-[10px] text-slate-400 font-black tracking-widest uppercase">{product.sku || product.barcode}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className="text-[10px] font-black px-2 py-1 bg-blue-50 text-blue-600 rounded-md uppercase tracking-widest">
-                        {product.productType}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <p className="text-sm font-black text-slate-900 tabular-nums">
-                        Rp {product.normalPrice.toLocaleString()}
-                      </p>
-                      <p className="text-[10px] text-emerald-600 font-black uppercase tracking-widest">WAC: Rp {product.hpp.toLocaleString()}</p>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-2">
-                        <span className={`text-sm font-black tabular-nums ${product.stock < product.minimumStock ? 'text-red-500' : 'text-slate-900'}`}>
-                          {product.stock.toLocaleString()}
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="text-[10px] font-black px-2 py-1 bg-blue-50 text-blue-600 rounded-md uppercase tracking-widest">
+                          {product.productType}
                         </span>
-                        <span className="text-[10px] text-slate-400 uppercase font-black tracking-widest">{product.baseUnit}</span>
-                        {product.stock < product.minimumStock && <AlertCircle size={14} className="text-red-500 animate-pulse" />}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <button 
-                        onClick={() => handleToggleStatus(product.productId)}
-                        className={`text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest border transition-all hover:scale-105 active:scale-95 ${
-                          product.status === 'ACTIVE' 
-                            ? 'bg-emerald-50 text-emerald-600 border-emerald-100' 
-                            : 'bg-red-50 text-red-600 border-red-100'
-                        }`}
-                      >
-                        {product.status}
-                      </button>
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                      </td>
+                      <td className="px-6 py-4">
+                        <p className="text-sm font-black text-slate-900 tabular-nums">
+                          Rp {product.normalPrice.toLocaleString()}
+                        </p>
+                        <div className="flex items-center gap-2">
+                          {isOwner && (
+                            <p className="text-[10px] text-emerald-600 font-black uppercase tracking-widest">
+                              WAC: Rp {costs?.find(c => c.productId === product.productId)?.hpp.toLocaleString() || 0}
+                            </p>
+                          )}
+                          {isOwner && product.priceAlertThreshold && (
+                            <div className="flex items-center gap-1 text-[8px] font-black text-rose-500 bg-rose-50 px-1 py-0.5 rounded border border-rose-100" title={`Threshold: ${product.priceAlertThreshold}%`}>
+                              <AlertCircle size={10} />
+                              {product.priceAlertThreshold}% ALERT
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-sm font-black tabular-nums ${product.stock < product.minimumStock ? 'text-red-500' : 'text-slate-900'}`}>
+                            {product.stock.toLocaleString()}
+                          </span>
+                          <span className="text-[10px] text-slate-400 uppercase font-black tracking-widest">{product.baseUnit}</span>
+                          {product.stock < product.minimumStock && <AlertCircle size={14} className="text-red-500 animate-pulse" />}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
                         <button 
-                          onClick={() => setViewingHistoryId(viewingHistoryId === product.productId ? null : product.productId)}
-                          className={`p-2 transition-colors ${viewingHistoryId === product.productId ? 'text-blue-600' : 'text-slate-400 hover:text-blue-600'}`}
-                          title="Lihat Riwayat Stok"
+                          onClick={() => handleToggleStatus(product.productId)}
+                          className={`text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest border transition-all hover:scale-105 active:scale-95 ${
+                            product.status === 'ACTIVE' 
+                              ? 'bg-emerald-50 text-emerald-600 border-emerald-100' 
+                              : 'bg-red-50 text-red-600 border-red-100'
+                          }`}
                         >
-                          <History size={18} />
+                          {product.status}
                         </button>
-                        <button 
-                          onClick={() => handleEdit(product)}
-                          className="p-2 text-slate-400 hover:text-blue-600 transition-colors"
-                        >
-                          <Edit size={18} />
-                        </button>
-                        <button 
-                          onClick={() => handleDelete(product.productId)}
-                          className="p-2 text-slate-400 hover:text-red-600 transition-colors"
-                        >
-                          <Trash2 size={18} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                  {viewingHistoryId === product.productId && (
-                    <tr>
-                      <td colSpan={7} className="px-6 py-6 bg-slate-50/30">
-                        <div className="max-w-4xl mx-auto">
-                          <StockHistory productId={product.productId} />
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                          <button 
+                            onClick={() => setViewingHistoryId(viewingHistoryId === product.productId ? null : product.productId)}
+                            className={`p-2 transition-colors ${viewingHistoryId === product.productId ? 'text-blue-600' : 'text-slate-400 hover:text-blue-600'}`}
+                            title="Lihat Riwayat Stok"
+                          >
+                            <History size={18} />
+                          </button>
+                          <button 
+                            onClick={() => setViewingQRProduct(product)}
+                            className="p-2 text-slate-400 hover:text-blue-600 transition-colors"
+                            title="Print QR Label"
+                          >
+                            <QrCode size={18} />
+                          </button>
+                          <button 
+                            onClick={() => handleEdit(product)}
+                            className="p-2 text-slate-400 hover:text-blue-600 transition-colors"
+                          >
+                            <Edit size={18} />
+                          </button>
+                          <button 
+                            onClick={() => handleDelete(product.productId)}
+                            className="p-2 text-slate-400 hover:text-red-600 transition-colors"
+                          >
+                            <Trash2 size={18} />
+                          </button>
                         </div>
                       </td>
                     </tr>
-                  )}
-                </React.Fragment>
-              ))}
-            </tbody>
-          </table>
+                    {viewingHistoryId === product.productId && (
+                      <tr>
+                        <td colSpan={7} className="px-6 py-6 bg-slate-50/30">
+                          <div className="max-w-4xl mx-auto">
+                            <StockHistory productId={product.productId} />
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      ) : currentTab === 'PREDICTIONS' ? (
+        <div className="space-y-6">
+          <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm relative overflow-hidden">
+            <h3 className="font-black text-slate-900 uppercase tracking-tight mb-8 flex items-center gap-2">
+              <TrendingUp size={20} className="text-blue-600" />
+              Depletion & Reorder Suggestions
+            </h3>
+            
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50 text-slate-400 text-[10px] uppercase tracking-widest font-black">
+                    <th className="px-6 py-4">Product</th>
+                    <th className="px-6 py-4">Daily Burn Rate</th>
+                    <th className="px-6 py-4">Estimated Outage</th>
+                    <th className="px-6 py-4">Suggested Reorder</th>
+                    <th className="px-6 py-4 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {predictions?.map(p => (
+                    <tr key={p.productId} className="hover:bg-slate-50/50 transition-colors group">
+                      <td className="px-6 py-4">
+                        <p className="text-sm font-black text-slate-900 uppercase">{p.name}</p>
+                      </td>
+                      <td className="px-6 py-4">
+                        <p className="text-xs font-bold text-slate-700 tabular-nums">
+                          {p.dailyBurnRate} <span className="text-[10px] text-slate-400">units / day</span>
+                        </p>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex flex-col">
+                          <div className="flex items-center gap-2">
+                            <span className={`text-xs font-black uppercase tracking-widest ${p.daysRemaining < 3 ? 'text-rose-600 animate-pulse' : p.daysRemaining < 7 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                              {p.daysRemaining > 365 ? '> 1 Year' : `${p.daysRemaining} Days Left`}
+                            </span>
+                            {p.daysRemaining < 3 && <AlertCircle size={14} className="text-rose-500" />}
+                          </div>
+                          <p className="text-[10px] text-slate-400 font-bold uppercase mt-0.5">
+                            Approx {format(new Date(p.nextOutageDate), 'dd MMM yyyy')}
+                          </p>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="inline-flex items-center gap-2 px-3 py-1 bg-blue-50 text-blue-600 rounded-lg border border-blue-100">
+                          <Plus size={12} className="stroke-[3]" />
+                          <span className="text-xs font-black tabular-nums">{p.suggestedReorderQty.toLocaleString()} Units</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <button className="p-2 text-slate-400 hover:text-blue-600 transition-colors">
+                          <RefreshCw size={18} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      ) : currentTab === 'HEATMAP' ? (
+        <InventoryHeatmap />
+      ) : (
+        <ShelfTalkerModule />
+      )}
 
       {isModalOpen && (
         <ProductModal 
@@ -367,7 +513,7 @@ export default function Inventory() {
                 <input 
                   type="number"
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-bold text-slate-900 tabular-nums shadow-sm"
-                  value={bulkAdjustment.percentage}
+                  value={bulkAdjustment.percentage ?? 0}
                   onChange={(e) => setBulkAdjustment({ ...bulkAdjustment, percentage: Number(e.target.value) })}
                 />
               </div>
@@ -389,6 +535,25 @@ export default function Inventory() {
             </div>
           </div>
         </div>
+      )}
+      {viewingQRProduct && (
+        <QRLabelModal 
+          product={viewingQRProduct} 
+          onClose={() => setViewingQRProduct(null)} 
+        />
+      )}
+      {isBulkBarcodeOpen && (
+        <BulkBarcodeModal 
+          onClose={() => setIsBulkBarcodeOpen(false)} 
+        />
+      )}
+      {isImportModalOpen && (
+        <ImportModal 
+          onClose={() => setIsImportModalOpen(false)} 
+          onSuccess={() => {
+            // No action needed, live query handles it
+          }}
+        />
       )}
     </div>
   );

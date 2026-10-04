@@ -23,16 +23,23 @@ export default function Login() {
             productId: 'p1', sku: 'B-PANDAN-5K', barcode: '888001', name: 'Beras Pandan Wangi 5kg', 
             categoryId: 'SEMBAKO', productType: 'SEMBAKO', baseUnit: 'PCS', saleUnits: ['PCS', 'DUS'],
             conversionRules: [{ fromUnit: 'PCS', toUnit: 'DUS', factor: 4 }],
-            normalPrice: 85000, hpp: 78000, stock: 100, minimumStock: 10, targetStock: 50,
+            normalPrice: 85000, stock: 100, minimumStock: 10, targetStock: 50,
+            tags: ['PROMO', 'LEBARAN'],
             status: 'ACTIVE', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() 
           },
           { 
             productId: 'p2', sku: 'IKAN-MAS', barcode: '888002', name: 'Ikan Mas Hidup', 
             categoryId: 'FISH', productType: 'FISH', baseUnit: 'KG', saleUnits: ['KG'],
             conversionRules: [],
-            normalPrice: 35000, hpp: 28000, stock: 50, minimumStock: 5, targetStock: 20,
+            normalPrice: 35000, stock: 50, minimumStock: 5, targetStock: 20,
+            tags: ['SEGAR'],
             status: 'ACTIVE', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() 
           }
+        ]);
+
+        await db.productCosts.bulkAdd([
+          { productId: 'p1', hpp: 78000, updatedAt: new Date().toISOString() },
+          { productId: 'p2', hpp: 28000, updatedAt: new Date().toISOString() }
         ]);
 
         // Seed some customers
@@ -47,6 +54,12 @@ export default function Login() {
             defaultDueDateDays: 7, loyaltyPoints: 120, status: 'ACTIVE',
             createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
           }
+        ]);
+
+        await db.paymentMethods.bulkAdd([
+          { id: 'CASH', name: 'Tunai / Cash', type: 'CASH', mdrPercent: 0, status: 'ACTIVE' },
+          { id: 'QRIS', name: 'QRIS (0.7%)', type: 'QRIS', mdrPercent: 0.7, status: 'ACTIVE' },
+          { id: 'EDC_BCA', name: 'Debit BCA (1.0%)', type: 'CARD', mdrPercent: 1.0, status: 'ACTIVE' }
         ]);
       }
       setIsInitializing(false);

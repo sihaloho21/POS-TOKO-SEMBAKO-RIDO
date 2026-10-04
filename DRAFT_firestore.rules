@@ -1,14 +1,30 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // 1. Global Safety Net
+    // Default Deny
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // --- Helpers ---
+    // Global Helpers
     function isSignedIn() {
-      return request.auth != null && request.auth.token.email_verified == true;
+      return request.auth != null;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isOwner() {
+      return isSignedIn() && getUserData().role == 'OWNER';
+    }
+
+    function isKasir() {
+      return isSignedIn() && getUserData().role == 'KASIR';
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
     function incoming() {
@@ -19,104 +35,101 @@ service cloud.firestore {
       return resource.data;
     }
 
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
-    }
-
-    function getUserData(uid) {
-      return get(/databases/$(database)/documents/users/$(uid)).data;
-    }
-
-    function isOwner() {
-      return isSignedIn() && getUserData(request.auth.uid).role == 'OWNER';
-    }
-
-    function isKasir() {
-      return isSignedIn() && (getUserData(request.auth.uid).role == 'KASIR' || getUserData(request.auth.uid).role == 'OWNER');
-    }
-
-    // --- Validation Blueprints ---
-
-    function isValidUser(data) {
-      return data.userId is string && data.userId.size() <= 128 &&
-             data.name is string && data.name.size() <= 256 &&
-             data.role in ['OWNER', 'KASIR'] &&
-             data.status in ['ACTIVE', 'INACTIVE'];
-    }
-
-    function isValidProduct(data) {
-      return data.productId is string && data.productId.size() <= 128 &&
-             data.name is string && data.name.size() <= 256 &&
-             data.normalPrice is number &&
-             data.status in ['ACTIVE', 'INACTIVE'];
-    }
-
-    function isValidTransaction(data) {
-      return data.transactionId is string && data.transactionId.size() <= 128 &&
-             data.receiptNumber is string && data.receiptNumber.size() <= 64 &&
-             data.type in ['SALE', 'GAJIAN', 'RETURN', 'VOID', 'DIGITAL_SERVICE'] &&
-             data.status in ['COMPLETED', 'PENDING', 'VOIDED', 'CANCELLED', 'HOLD'] &&
-             data.total is number &&
-             data.cashierId == request.auth.uid;
-    }
-
-    // --- Collections ---
-
+    // --- USERS ---
     match /users/{userId} {
-      allow get: if isSignedIn();
-      allow list: if isOwner();
-      allow create: if isOwner() && isValidUser(incoming()) && incoming().userId == userId;
-      allow update: if isOwner() && isValidUser(incoming()) && (
-        incoming().diff(existing()).affectedKeys().hasOnly(['name', 'role', 'pinHash', 'status', 'updatedAt'])
+      allow read: if isSignedIn();
+      allow create: if isOwner() && isValidId(userId);
+      allow update: if isOwner() && (
+        incoming().role == existing().role || isOwner() // Owner can change roles, but common check
       );
     }
 
+    // --- PRODUCTS ---
     match /products/{productId} {
-      allow read: if isKasir();
-      allow create: if isOwner() && isValidProduct(incoming()) && incoming().productId == productId;
-      allow update: if isOwner() && isValidProduct(incoming()) && (
-        incoming().diff(existing()).affectedKeys().hasOnly(['sku', 'barcode', 'name', 'categoryId', 'productType', 'baseUnit', 'normalPrice', 'hpp', 'stock', 'status', 'updatedAt'])
-      );
+      allow read: if isSignedIn();
+      allow create, update, delete: if isOwner() && isValidId(productId);
     }
 
+    // --- PRODUCT COSTS (OWNER ONLY) ---
+    match /productCosts/{productId} {
+      allow read, write: if isOwner() && isValidId(productId);
+    }
+
+    // --- BUNDLES ---
+    match /bundles/{bundleId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isOwner() && isValidId(bundleId);
+    }
+
+    // --- CUSTOMERS ---
     match /customers/{customerId} {
-      allow read: if isKasir();
-      allow create: if isKasir() && isValidId(customerId);
-      allow update: if isKasir() && isValidId(customerId);
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(customerId);
+      allow update: if isSignedIn();
     }
 
-    match /transactions/{transactionId} {
-      allow get: if isKasir();
-      allow list: if isKasir() && resource.data.cashierId == request.auth.uid; // Secured list
-      allow create: if isKasir() && isValidTransaction(incoming()) && incoming().transactionId == transactionId;
-      allow update: if isOwner() && isValidTransaction(incoming());
+    // --- TRANSACTIONS (Append-Only Logic) ---
+    match /transactions/{txId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(txId) && (
+        incoming().status == 'COMPLETED' || incoming().status == 'HOLD'
+      );
+      // No updates to completed transactions except status for VOID/RETURN
+      allow update: if isSignedIn() && (
+        (existing().status == 'HOLD' && incoming().status == 'COMPLETED') ||
+        (existing().status == 'COMPLETED' && (incoming().status == 'VOIDED' || incoming().status == 'RETURNED'))
+      ) && incoming().total == existing().total; // Cannot change total
     }
 
+    // --- LEDGERS (Append-Only) ---
     match /financeEvents/{eventId} {
       allow read: if isOwner();
-      allow create: if isKasir() && isValidId(eventId);
+      allow create: if isSignedIn() && isValidId(eventId);
     }
 
     match /stockMovements/{movementId} {
       allow read: if isOwner();
-      allow create: if isKasir() && isValidId(movementId);
+      allow create: if isSignedIn() && isValidId(movementId);
     }
 
-    match /auditLogs/{auditId} {
+    match /auditLogs/{logId} {
       allow read: if isOwner();
-      allow create: if isKasir() && isValidId(auditId);
+      allow create: if isSignedIn() && isValidId(logId);
     }
 
-    // Fallback for other collections mentioned in blueprint
-    match /bundles/{id} { allow read, write: if isOwner(); }
-    match /suppliers/{id} { allow read, write: if isOwner(); }
-    match /receivables/{id} { allow read: if isKasir(); allow write: if isOwner(); }
-    match /purchases/{id} { allow read, write: if isOwner(); }
-    match /conflicts/{id} { allow read, write: if isOwner(); }
-    match /notifications/{id} { allow read, write: if isKasir(); }
-    match /shifts/{id} { allow read, write: if isKasir(); }
-    match /stockOpnames/{id} { allow read, write: if isOwner(); }
-    match /digitalServices/{id} { allow read: if isKasir(); allow write: if isOwner(); }
-    match /loyaltyEvents/{id} { allow read, write: if isOwner(); }
+    // --- SHIFTS ---
+    match /shifts/{shiftId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(shiftId);
+      allow update: if isSignedIn() && (
+        existing().status == 'OPEN' && incoming().status == 'CLOSED'
+      );
+    }
+
+    // --- SYNC QUEUE ---
+    match /syncQueue/{queueId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // --- OTHER COLLECTIONS ---
+    match /receivables/{id} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+    }
+    
+    match /purchases/{id} {
+      allow read: if isSignedIn();
+      allow create, update: if isOwner();
+    }
+
+    match /digitalServices/{id} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+    }
+
+    match /loyaltyEvents/{id} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+    }
   }
 }

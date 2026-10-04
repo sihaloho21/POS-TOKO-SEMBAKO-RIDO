@@ -14,7 +14,7 @@ export class LoyaltyEngine {
     let eligibleAmount = 0;
     for (const item of transaction.items) {
       const product = await db.products.get(item.productId);
-      if (product && product.productType === 'SEMBAKO') {
+      if (product && product.productType !== 'FISH' && product.productType !== 'DIGITAL') {
         eligibleAmount += item.subtotal;
       }
     }
@@ -64,6 +64,28 @@ export class LoyaltyEngine {
       retryCount: 0,
       createdAt: event.timestamp
     });
+  }
+
+  static async recordReversalEvent(customerId: string, points: number, transactionId: string): Promise<void> {
+    if (points <= 0) return;
+
+    const event: LoyaltyEvent = {
+      loyaltyEventId: uuidv4(),
+      customerId,
+      type: 'REVERSAL',
+      points: -points,
+      referenceId: transactionId,
+      referenceType: 'TRANSACTION',
+      timestamp: new Date().toISOString()
+    };
+
+    await db.loyaltyEvents.add(event);
+
+    const customer = await db.customers.get(customerId);
+    if (customer) {
+      const newTotal = Math.max(0, (customer.loyaltyPoints || 0) - points);
+      await db.customers.update(customerId, { loyaltyPoints: newTotal });
+    }
   }
 
   static async getHistory(customerId: string): Promise<LoyaltyEvent[]> {

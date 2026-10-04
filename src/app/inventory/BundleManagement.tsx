@@ -83,7 +83,6 @@ export default function BundleManagement() {
       normalPrice: bundle.price,
       minimumStock: 0,
       targetStock: 0,
-      hpp: 0, // Calculated during sale
       stock: 0, // No physical stock for bundles
       status: 'ACTIVE',
       createdAt: new Date().toISOString(),
@@ -171,7 +170,7 @@ export default function BundleManagement() {
                 <input
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-bold text-slate-900"
                   placeholder="Contoh: Paket Sembako Hemat"
-                  value={newBundle.name}
+                  value={newBundle.name || ''}
                   onChange={e => setNewBundle({ ...newBundle, name: e.target.value })}
                 />
               </div>
@@ -181,7 +180,7 @@ export default function BundleManagement() {
                 <input
                   type="number"
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-bold text-slate-900 tabular-nums"
-                  value={newBundle.price}
+                  value={newBundle.price ?? 0}
                   onChange={e => setNewBundle({ ...newBundle, price: Number(e.target.value) })}
                 />
               </div>
@@ -199,7 +198,7 @@ export default function BundleManagement() {
                         <input 
                           type="number"
                           className="w-16 px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-center"
-                          value={comp.qty}
+                          value={comp.qty ?? 1}
                           onChange={e => updateCompQty(comp.productId, Number(e.target.value))}
                         />
                         <button onClick={() => removeComponent(comp.productId)} className="text-red-500 hover:text-red-600">

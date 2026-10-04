@@ -18,21 +18,39 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   isAuthenticated: false,
 
   initializeAuth: async () => {
-    try {
-      // Ensure we are signed into Firebase to satisfy Firestore rules
-      // Note: If this fails with auth/admin-restricted-operation, it means
-      // Anonymous Auth is disabled in the Firebase Console.
-      if (!auth.currentUser) {
-        await signInAnonymously(auth).catch(err => {
-          if (err.code === 'auth/admin-restricted-operation') {
-            console.warn('Anonymous Auth is disabled in Firebase Console. Using public rules fallback.');
-          } else {
-            throw err;
-          }
-        });
+    // Prevent multiple concurrent initialization attempts
+    if (get().isAuthenticated && auth.currentUser) return;
+
+    const maxRetries = 3;
+    let attempt = 0;
+
+    const trySignIn = async () => {
+      try {
+        if (!auth.currentUser) {
+          await signInAnonymously(auth);
+        }
+      } catch (error: any) {
+        if (error.code === 'auth/admin-restricted-operation') {
+          console.warn('Anonymous Auth is disabled in Firebase Console. Using public rules fallback.');
+          return;
+        }
+        
+        if (error.code === 'auth/network-request-failed' && attempt < maxRetries) {
+          attempt++;
+          console.warn(`Auth attempt ${attempt} failed (network). Retrying in ${attempt * 2}s...`);
+          await new Promise(resolve => setTimeout(resolve, attempt * 2000));
+          return trySignIn();
+        }
+        
+        throw error;
       }
+    };
+
+    try {
+      await trySignIn();
     } catch (error) {
-      console.error('Firebase Auth failed:', error);
+      console.error('Firebase Auth failed definitively:', error);
+      // We don't rethrow here to allow the app to work in local-only mode
     }
   },
 

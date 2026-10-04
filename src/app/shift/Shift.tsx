@@ -11,9 +11,11 @@ import {
   History, 
   ArrowRight,
   CheckCircle,
-  AlertTriangle
+  AlertTriangle,
+  Printer
 } from 'lucide-react';
 import { format } from 'date-fns';
+import { ShiftReportService } from '@/core/utils/shift-report-service';
 
 export default function Shift() {
   const { currentUser } = useAuthStore();
@@ -51,6 +53,10 @@ export default function Shift() {
     setIsLoading(true);
     try {
       await ShiftService.closeShift(currentShift.shiftId, Number(actualCash));
+      const closedShift = await db.shifts.get(currentShift.shiftId);
+      if (closedShift && currentUser) {
+        ShiftReportService.printReconciliationReceipt(closedShift, currentUser);
+      }
       setActualCash('');
     } catch (error: any) {
       alert(error.message);
@@ -173,18 +179,30 @@ export default function Shift() {
                   </div>
                 </div>
                 {s.status === 'CLOSED' && (
-                  <div className="text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <p className="text-xs font-black text-slate-900 tabular-nums">Rp {s.actualCash?.toLocaleString()}</p>
-                      {s.actualCash !== s.expectedCash ? (
-                        <AlertTriangle size={14} className="text-amber-500" />
-                      ) : (
-                        <CheckCircle size={14} className="text-emerald-500" />
-                      )}
+                  <div className="flex items-center gap-4">
+                    <div className="text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <p className="text-xs font-black text-slate-900 tabular-nums">Rp {s.actualCash?.toLocaleString()}</p>
+                        {s.actualCash !== s.expectedCash ? (
+                          <AlertTriangle size={14} className="text-amber-500" />
+                        ) : (
+                          <CheckCircle size={14} className="text-emerald-500" />
+                        )}
+                      </div>
+                      <p className={`text-[10px] font-black uppercase tracking-widest ${s.actualCash === s.expectedCash ? 'text-emerald-600' : 'text-rose-600'}`}>
+                        {s.actualCash === s.expectedCash ? 'RECONCILED' : `SELISIH: Rp ${( (s.actualCash || 0) - (s.expectedCash || 0) ).toLocaleString()}`}
+                      </p>
                     </div>
-                    <p className={`text-[10px] font-black uppercase tracking-widest ${s.actualCash === s.expectedCash ? 'text-emerald-600' : 'text-rose-600'}`}>
-                      {s.actualCash === s.expectedCash ? 'RECONCILED' : `SELISIH: Rp ${( (s.actualCash || 0) - (s.expectedCash || 0) ).toLocaleString()}`}
-                    </p>
+                    <button 
+                      onClick={async () => {
+                        const user = await db.users.get(s.userId);
+                        if (user) ShiftReportService.printReconciliationReceipt(s, user);
+                      }}
+                      className="p-2 text-slate-400 hover:text-blue-600 hover:bg-white rounded-xl transition-all"
+                      title="Reprint Reconciliation"
+                    >
+                      <Printer size={18} />
+                    </button>
                   </div>
                 )}
               </div>

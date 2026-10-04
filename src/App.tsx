@@ -4,6 +4,7 @@ import Login from './app/auth/Login';
 import DashboardLayout from './app/layout/DashboardLayout';
 import Dashboard from './app/dashboard/Dashboard';
 import POS from './app/pos/POS';
+import { SalesHistory } from './app/pos/SalesHistory';
 import Inventory from './app/inventory/Inventory';
 import Finance from './app/finance/Finance';
 import Customers from './app/customers/Customers';
@@ -16,9 +17,12 @@ import ConflictCenter from './app/conflicts/ConflictCenter';
 import Shift from './app/shift/Shift';
 import StockOpname from './app/inventory/StockOpname';
 import SupplierReturn from './app/purchases/SupplierReturn';
+import Purchases from './app/purchases/Purchases';
 import ReceiptSettings from './app/settings/ReceiptSettings';
 import { SyncEngine } from './core/sync-engine';
 import { ProductService } from './core/services/product-service';
+
+import { BackupService } from './core/services/backup-service';
 
 export default function App() {
   const { isAuthenticated, initializeAuth } = useAuthStore();
@@ -30,6 +34,9 @@ export default function App() {
     
     // Start background sync
     SyncEngine.start();
+
+    // Data maintenance tasks
+    BackupService.scheduleAutoBackup();
 
     // Check low stock
     ProductService.checkLowStock();
@@ -48,9 +55,11 @@ export default function App() {
   const renderContent = () => {
     switch (currentTab) {
       case 'dashboard':
-        return <Dashboard />;
+        return <Dashboard onTabChange={setCurrentTab} />;
       case 'pos':
         return <POS />;
+      case 'transactions':
+        return <SalesHistory />;
       case 'inventory':
         return <Inventory />;
       case 'fish':
@@ -69,6 +78,8 @@ export default function App() {
         return <StockOpname />;
       case 'supplier-return':
         return <SupplierReturn />;
+      case 'purchases':
+        return <Purchases />;
       case 'conflicts':
         return <ConflictCenter />;
       case 'audit':

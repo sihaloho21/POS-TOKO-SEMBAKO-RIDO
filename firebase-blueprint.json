@@ -28,13 +28,24 @@
         "productType": { "type": "string", "enum": ["SEMBAKO", "FISH", "SIDE_PRODUCT", "DIGITAL", "BUNDLE", "PACKAGE"] },
         "baseUnit": { "type": "string", "maxLength": 32 },
         "normalPrice": { "type": "number" },
-        "hpp": { "type": "number" },
+        "priceAlertThreshold": { "type": "number" },
         "stock": { "type": "number" },
         "status": { "type": "string", "enum": ["ACTIVE", "INACTIVE"] },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["productId", "name", "productType", "normalPrice", "status", "createdAt", "updatedAt"]
+    },
+    "ProductCost": {
+      "title": "Product Cost",
+      "description": "Sensitive HPP/WAC data",
+      "type": "object",
+      "properties": {
+        "productId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "hpp": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["productId", "hpp", "updatedAt"]
     },
     "Bundle": {
       "title": "Bundle",
@@ -226,11 +237,27 @@
         "timestamp": { "type": "string", "format": "date-time" }
       },
       "required": ["loyaltyEventId", "customerId", "type", "points", "timestamp"]
+    },
+    "SyncQueueItem": {
+      "title": "Sync Queue Item",
+      "description": "Local-to-Cloud sync tasks",
+      "type": "object",
+      "properties": {
+        "queueId": { "type": "string" },
+        "entityType": { "type": "string" },
+        "entityId": { "type": "string" },
+        "action": { "type": "string", "enum": ["CREATE", "UPDATE", "DELETE"] },
+        "payload": { "type": "object" },
+        "status": { "type": "string", "enum": ["PENDING", "SYNCED", "FAILED"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["entityType", "entityId", "action", "payload", "status", "createdAt"]
     }
   },
   "firestore": {
     "users": { "schema": "User", "description": "System users" },
     "products": { "schema": "Product", "description": "Inventory master" },
+    "productCosts": { "schema": "ProductCost", "description": "Owner-only HPP data" },
     "bundles": { "schema": "Bundle", "description": "Product bundles" },
     "customers": { "schema": "Customer", "description": "Customer database" },
     "suppliers": { "schema": "Supplier", "description": "Suppliers" },
@@ -245,6 +272,7 @@
     "shifts": { "schema": "CashierShift", "description": "Cashier shifts" },
     "stockOpnames": { "schema": "StockOpname", "description": "Stock takes" },
     "digitalServices": { "schema": "DigitalService", "description": "Digital service records" },
-    "loyaltyEvents": { "schema": "LoyaltyEvent", "description": "Loyalty program history" }
+    "loyaltyEvents": { "schema": "LoyaltyEvent", "description": "Loyalty program history" },
+    "syncQueue": { "schema": "SyncQueueItem", "description": "Cloud sync queue" }
   }
 }
