@@ -29,6 +29,7 @@ import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { db } from '@/core/database';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { motion, AnimatePresence } from 'motion/react';
+import { ShiftService } from '@/core/services/shift-service';
 
 interface NavItemProps {
   icon: React.ReactNode;
@@ -72,6 +73,8 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
     () => db.conflicts.where('status').equals('PENDING').count()
   );
 
+  const currentShift = useLiveQuery(() => ShiftService.getCurrentShift('device-1'), []);
+
   const isOwner = currentUser?.role === 'OWNER';
 
   const navItems = [
@@ -84,8 +87,10 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
     { id: 'customers', label: 'Customers', icon: <Users size={18} /> },
     { id: 'digital', label: 'Digital Services', icon: <Smartphone size={18} /> },
     { id: 'shift', label: 'Cashier Shift', icon: <ClipboardList size={18} /> },
+    { id: 'stock-opname', label: 'Stock Opname', icon: <ClipboardList size={18} />, hidden: !isOwner },
     { id: 'suppliers', label: 'Suppliers', icon: <Truck size={18} />, hidden: !isOwner },
     { id: 'purchases', label: 'Purchases', icon: <ShoppingBag size={18} />, hidden: !isOwner },
+    { id: 'supplier-return', label: 'Supplier Return', icon: <Archive size={18} />, hidden: !isOwner },
     { id: 'receivables', label: 'Receivables', icon: <CreditCard size={18} /> },
     { id: 'finance', label: 'Finance', icon: <TrendingUp size={18} />, hidden: !isOwner },
     { id: 'audit', label: 'Audit Log', icon: <ShieldCheck size={18} />, hidden: !isOwner },
@@ -168,7 +173,7 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
               
               <div className="flex items-center gap-1.5 border-r border-slate-200 pr-3 text-[10px] font-bold text-slate-500">
                 <ClipboardList size={12} />
-                SH-001
+                {currentShift ? currentShift.shiftId.slice(-6).toUpperCase() : 'NO SHIFT'}
               </div>
 
               {pendingSyncCount !== undefined && pendingSyncCount > 0 && (

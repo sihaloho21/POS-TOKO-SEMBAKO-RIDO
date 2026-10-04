@@ -14,6 +14,9 @@ import BundleManagement from './app/inventory/BundleManagement';
 import FishManagement from './app/inventory/FishManagement';
 import ConflictCenter from './app/conflicts/ConflictCenter';
 import Shift from './app/shift/Shift';
+import StockOpname from './app/inventory/StockOpname';
+import SupplierReturn from './app/purchases/SupplierReturn';
+import ReceiptSettings from './app/settings/ReceiptSettings';
 import { SyncEngine } from './core/sync-engine';
 import { ProductService } from './core/services/product-service';
 
@@ -62,12 +65,18 @@ export default function App() {
         return <DigitalServices />;
       case 'shift':
         return <Shift />;
+      case 'stock-opname':
+        return <StockOpname />;
+      case 'supplier-return':
+        return <SupplierReturn />;
       case 'conflicts':
         return <ConflictCenter />;
       case 'audit':
         return <AuditLog />;
       case 'system-health':
         return <SystemHealth />;
+      case 'settings':
+        return <ReceiptSettings />;
       default:
         return (
           <div className="flex flex-col items-center justify-center h-full text-slate-400">

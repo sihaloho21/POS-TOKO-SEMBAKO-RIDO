@@ -220,6 +220,25 @@ export interface Notification {
   createdAt: string;
 }
 
+export interface StockOpnameItem {
+  productId: string;
+  nameSnapshot: string;
+  expectedQty: number;
+  physicalQty: number;
+}
+
+export interface StockOpname {
+  opnameId: string;
+  status: 'DRAFT' | 'COMPLETED';
+  createdBy: string;
+  deviceId: string;
+  items: StockOpnameItem[];
+  finalizedBy?: string;
+  finalizedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface CashierShift {
   shiftId: string;
   userId: string;
@@ -255,4 +274,27 @@ export interface DigitalService {
   total: number;
   providerReference?: string;
   status: 'PENDING' | 'SUCCESS' | 'FAILED';
+}
+
+export interface ReceiptSettings {
+  id: string; // 'current'
+  storeName: string;
+  address: string;
+  phone: string;
+  logoUrl?: string;
+  headerMessage?: string;
+  footerMessage: string;
+  showPoints: boolean;
+  showSavings: boolean;
+  paperWidth: '58mm' | '80mm';
+}
+
+export interface LoyaltyEvent {
+  loyaltyEventId: string;
+  customerId: string;
+  type: 'EARN' | 'REDEEM' | 'REVERSAL';
+  points: number;
+  referenceId: string; // transactionId or redeemId
+  referenceType: 'TRANSACTION' | 'REDEEM' | 'ADJUSTMENT';
+  timestamp: string;
 }

@@ -12,6 +12,7 @@ import type {
 } from './types';
 import { addDays } from 'date-fns';
 import { AuditEngine } from './audit-engine';
+import { LoyaltyEngine } from './loyalty-engine';
 
 export class TransactionEngine {
   static async createSale(params: {
@@ -31,19 +32,6 @@ export class TransactionEngine {
     const subtotal = params.items.reduce((acc, item) => acc + item.subtotal, 0);
     const total = subtotal - params.discount;
 
-    // 1. Fetch Customer if exists
-    let customer: Customer | undefined;
-    if (params.customerId) {
-      customer = await db.customers.get(params.customerId);
-    }
-
-    // 2. Loyalty Point Calculation (PRD 16: Sembako only by default)
-    let pointsEarned = 0;
-    if (params.type === 'SALE' && customer && !customer.isReseller) {
-      // Points calculated only for non-fish items by default (simplified logic)
-      pointsEarned = Math.ceil(total / 10000);
-    }
-
     const transaction: Transaction = {
       transactionId,
       receiptNumber: `REC-${Date.now()}`,
@@ -59,9 +47,14 @@ export class TransactionEngine {
       total,
       paymentMethodId: params.paymentMethodId,
       moneyStorageId: params.moneyStorageId,
-      loyaltyPointsEarned: pointsEarned,
+      loyaltyPointsEarned: 0, // Calculated below
       clientTimestamp: timestamp,
     };
+
+    // 1. Calculate Loyalty Points
+    if (params.type === 'SALE' && params.customerId) {
+      transaction.loyaltyPointsEarned = await LoyaltyEngine.calculatePoints(transaction);
+    }
 
     // 3. Persist Transaction
     await db.transactions.add(transaction);
@@ -166,12 +159,8 @@ export class TransactionEngine {
     }
 
     // 6. Update Customer Loyalty & Audit
-    if (pointsEarned > 0 && customer) {
-      const newPoints = customer.loyaltyPoints + pointsEarned;
-      await db.customers.update(customer.customerId, {
-        loyaltyPoints: newPoints
-      });
-      await this.addToQueue('customers', customer.customerId, 'UPDATE', { ...customer, loyaltyPoints: newPoints });
+    if (transaction.loyaltyPointsEarned > 0 && params.customerId) {
+      await LoyaltyEngine.recordEarnEvent(params.customerId, transaction.loyaltyPointsEarned, transactionId);
     }
 
     // 7. FINAL LOGGING

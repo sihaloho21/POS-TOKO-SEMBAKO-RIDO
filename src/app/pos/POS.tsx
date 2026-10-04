@@ -18,11 +18,14 @@ import {
   Weight,
   PauseCircle,
   X,
-  PlayCircle
+  PlayCircle,
+  AlertTriangle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import type { Product, TransactionItem, Customer, Transaction } from '@/core/types';
 import { v4 as uuidv4 } from 'uuid';
+import { ShiftService } from '@/core/services/shift-service';
+import { PrintService } from '@/core/utils/print-service';
 
 export function WeightModal({ product, onConfirm, onClose }: { product: Product, onConfirm: (kg: number) => void, onClose: () => void }) {
   const [weight, setWeight] = useState('');
@@ -73,6 +76,8 @@ export default function POS() {
   const [moneyStorageId, setMoneyStorageId] = useState<'WARUNG' | 'IKAN' | 'UANG_DIGITAL'>('WARUNG');
   
   const [weightProduct, setWeightProduct] = useState<Product | null>(null);
+
+  const currentShift = useLiveQuery(() => ShiftService.getCurrentShift('device-1'), []);
 
   // Hotkeys handling (PRD 97)
   useEffect(() => {
@@ -164,7 +169,7 @@ export default function POS() {
   const subtotal = cart.reduce((acc, item) => acc + item.subtotal, 0);
 
   const handleHold = async () => {
-    if (cart.length === 0 || !currentUser) return;
+    if (cart.length === 0 || !currentUser || !currentShift) return;
     const holdTx: Transaction = {
       transactionId: uuidv4(),
       receiptNumber: `HOLD-${Date.now()}`,
@@ -172,7 +177,7 @@ export default function POS() {
       status: 'HOLD',
       cashierId: currentUser.userId,
       deviceId: 'device-1',
-      shiftId: 'SH-001',
+      shiftId: currentShift.shiftId,
       items: cart,
       subtotal,
       discount: 0,
@@ -193,7 +198,7 @@ export default function POS() {
   };
 
   const handleCheckout = async () => {
-    if (cart.length === 0 || !currentUser || isProcessing) return;
+    if (cart.length === 0 || !currentUser || isProcessing || !currentShift) return;
     if (transactionType === 'GAJIAN' && !selectedCustomer) {
       alert('Pilih pelanggan untuk transaksi Gajian');
       return;
@@ -201,10 +206,10 @@ export default function POS() {
     
     setIsProcessing(true);
     try {
-      await TransactionEngine.createSale({
+      const transactionId = await TransactionEngine.createSale({
         cashierId: currentUser.userId,
         deviceId: 'device-1',
-        shiftId: 'SH-001',
+        shiftId: currentShift.shiftId,
         customerId: selectedCustomer?.customerId,
         items: cart,
         discount: 0,
@@ -213,6 +218,11 @@ export default function POS() {
         type: transactionType
       });
       
+      const transaction = await db.transactions.get(transactionId);
+      if (transaction) {
+        PrintService.printReceipt(transaction);
+      }
+
       setCart([]);
       setSelectedCustomer(null);
       setTransactionType('SALE');
@@ -241,6 +251,20 @@ export default function POS() {
 
   return (
     <div className="flex flex-col h-full gap-6">
+      {!currentShift && (
+        <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl flex items-center justify-between mb-2">
+          <div className="flex items-center gap-3 text-amber-800">
+            <AlertTriangle className="animate-pulse" />
+            <span className="font-bold text-sm">SHIFT BELUM DIBUKA. Buka shift terlebih dahulu untuk mulai berjualan.</span>
+          </div>
+          <button 
+            className="px-4 py-2 bg-amber-600 text-white rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-amber-700 transition-all"
+            onClick={() => { /* This would ideally trigger a redirect to Shift tab but the UI structure uses state in App.tsx */ }}
+          >
+            Buka Shift
+          </button>
+        </div>
+      )}
       <div className="flex flex-col lg:flex-row gap-6 h-full overflow-hidden">
         {/* Left Area: Product Search & Browse */}
         <div className="flex-1 flex flex-col min-h-0 bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
@@ -408,9 +432,9 @@ export default function POS() {
             
             <button
               onClick={handleCheckout}
-              disabled={cart.length === 0 || isProcessing}
+              disabled={cart.length === 0 || isProcessing || !currentShift}
               className={`w-full py-4 rounded-2xl font-black text-sm uppercase tracking-[0.2em] flex items-center justify-center gap-3 transition-all relative overflow-hidden ${
-                cart.length === 0 || isProcessing
+                cart.length === 0 || isProcessing || !currentShift
                   ? 'bg-slate-800 text-slate-600 cursor-not-allowed'
                   : 'bg-blue-600 hover:bg-blue-500 shadow-2xl shadow-blue-900/50 active:scale-[0.98]'
               }`}

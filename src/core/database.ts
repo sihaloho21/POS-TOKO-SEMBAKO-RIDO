@@ -15,6 +15,7 @@ import type {
   BusinessConflict,
   Notification,
   CashierShift,
+  StockOpname,
   DigitalService,
   SyncQueueItem 
 } from './types';
@@ -35,12 +36,15 @@ export class LocalDatabase extends Dexie {
   conflicts!: Table<BusinessConflict>;
   notifications!: Table<Notification>;
   shifts!: Table<CashierShift>;
+  stockOpnames!: Table<StockOpname>;
   digitalServices!: Table<DigitalService>;
+  loyaltyEvents!: Table<LoyaltyEvent>;
+  settings!: Table<any>;
   syncQueue!: Table<SyncQueueItem>;
 
   constructor() {
     super('HarapanJayaDB');
-    this.version(3).stores({
+    this.version(5).stores({
       users: 'userId, role, status',
       products: 'productId, barcode, sku, categoryId, productType, status',
       bundles: 'bundleId, status',
@@ -56,7 +60,10 @@ export class LocalDatabase extends Dexie {
       conflicts: 'conflictId, type, entityId, status, timestamp',
       notifications: 'notificationId, severity, isRead, createdAt',
       shifts: 'shiftId, userId, deviceId, status',
+      stockOpnames: 'opnameId, status, createdAt',
       digitalServices: 'serviceId, transactionId, serviceType, status',
+      loyaltyEvents: 'loyaltyEventId, customerId, referenceId, timestamp',
+      settings: 'id',
       syncQueue: '++queueId, entityType, entityId, status, createdAt'
     });
   }
