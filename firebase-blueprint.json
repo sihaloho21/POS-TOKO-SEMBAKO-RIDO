@@ -1,0 +1,132 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "System user (Owner or Kasir)",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string", "enum": ["OWNER", "KASIR"] },
+        "pinHash": { "type": "string" },
+        "status": { "type": "string", "enum": ["ACTIVE", "INACTIVE"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name", "role", "pinHash", "status"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Product master data",
+      "type": "object",
+      "properties": {
+        "productId": { "type": "string" },
+        "sku": { "type": "string" },
+        "barcode": { "type": "string" },
+        "name": { "type": "string" },
+        "productType": { "type": "string" },
+        "baseUnit": { "type": "string" },
+        "normalPrice": { "type": "number" },
+        "hpp": { "type": "number" },
+        "stock": { "type": "number" },
+        "status": { "type": "string" }
+      },
+      "required": ["productId", "name", "normalPrice"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "Customer/Member profile",
+      "type": "object",
+      "properties": {
+        "customerId": { "type": "string" },
+        "name": { "type": "string" },
+        "isReseller": { "type": "boolean" },
+        "creditLimit": { "type": "number" },
+        "loyaltyPoints": { "type": "number" }
+      },
+      "required": ["customerId", "name"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Business transaction",
+      "type": "object",
+      "properties": {
+        "transactionId": { "type": "string" },
+        "receiptNumber": { "type": "string" },
+        "type": { "type": "string" },
+        "status": { "type": "string" },
+        "customerId": { "type": "string" },
+        "cashierId": { "type": "string" },
+        "total": { "type": "number" },
+        "clientTimestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["transactionId", "receiptNumber", "type", "status", "total"]
+    },
+    "Receivable": {
+      "title": "Receivable",
+      "description": "Customer debt record",
+      "type": "object",
+      "properties": {
+        "receivableId": { "type": "string" },
+        "transactionId": { "type": "string" },
+        "customerId": { "type": "string" },
+        "totalAmount": { "type": "number" },
+        "paidAmount": { "type": "number" },
+        "remainingAmount": { "type": "number" },
+        "status": { "type": "string" }
+      },
+      "required": ["receivableId", "transactionId", "customerId", "totalAmount"]
+    },
+    "Purchase": {
+      "title": "Purchase",
+      "description": "Supplier purchase record",
+      "type": "object",
+      "properties": {
+        "purchaseId": { "type": "string" },
+        "supplierId": { "type": "string" },
+        "invoiceNumber": { "type": "string" },
+        "total": { "type": "number" },
+        "status": { "type": "string" }
+      },
+      "required": ["purchaseId", "supplierId", "total"]
+    },
+    "FinanceEvent": {
+      "title": "Finance Event",
+      "description": "Financial ledger entry",
+      "type": "object",
+      "properties": {
+        "financeEventId": { "type": "string" },
+        "amount": { "type": "number" },
+        "storageId": { "type": "string" },
+        "direction": { "type": "string" },
+        "referenceId": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["financeEventId", "amount", "storageId", "direction"]
+    },
+    "StockMovement": {
+      "title": "Stock Movement",
+      "description": "Inventory ledger entry",
+      "type": "object",
+      "properties": {
+        "stockMovementId": { "type": "string" },
+        "productId": { "type": "string" },
+        "quantity": { "type": "number" },
+        "type": { "type": "string" },
+        "reason": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["stockMovementId", "productId", "quantity", "type"]
+    }
+  },
+  "firestore": {
+    "users": { "schema": "User", "description": "Users" },
+    "products": { "schema": "Product", "description": "Products" },
+    "customers": { "schema": "Customer", "description": "Customers" },
+    "transactions": { "schema": "Transaction", "description": "Transactions" },
+    "receivables": { "schema": "Receivable", "description": "Receivables" },
+    "purchases": { "schema": "Purchase", "description": "Purchases" },
+    "financeEvents": { "schema": "FinanceEvent", "description": "Finance" },
+    "stockMovements": { "schema": "StockMovement", "description": "Stock" }
+  }
+}

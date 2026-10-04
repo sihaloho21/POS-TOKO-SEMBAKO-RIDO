@@ -1,0 +1,8 @@
+{
+  "name": "Harapan Jaya POS",
+  "description": "Enterprise-grade local-first POS & Business Management System for Sembako & Fish Retail.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
