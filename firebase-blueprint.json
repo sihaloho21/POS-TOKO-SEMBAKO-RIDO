@@ -5,128 +5,246 @@
       "description": "System user (Owner or Kasir)",
       "type": "object",
       "properties": {
-        "userId": { "type": "string" },
-        "name": { "type": "string" },
+        "userId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 256 },
         "role": { "type": "string", "enum": ["OWNER", "KASIR"] },
-        "pinHash": { "type": "string" },
+        "pinHash": { "type": "string", "maxLength": 128 },
         "status": { "type": "string", "enum": ["ACTIVE", "INACTIVE"] },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["userId", "name", "role", "pinHash", "status"]
+      "required": ["userId", "name", "role", "pinHash", "status", "createdAt", "updatedAt"]
     },
     "Product": {
       "title": "Product",
       "description": "Product master data",
       "type": "object",
       "properties": {
-        "productId": { "type": "string" },
-        "sku": { "type": "string" },
-        "barcode": { "type": "string" },
-        "name": { "type": "string" },
-        "productType": { "type": "string" },
-        "baseUnit": { "type": "string" },
+        "productId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "sku": { "type": "string", "maxLength": 128 },
+        "barcode": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 256 },
+        "categoryId": { "type": "string", "maxLength": 128 },
+        "productType": { "type": "string", "enum": ["SEMBAKO", "FISH", "SIDE_PRODUCT", "DIGITAL", "BUNDLE", "PACKAGE"] },
+        "baseUnit": { "type": "string", "maxLength": 32 },
         "normalPrice": { "type": "number" },
         "hpp": { "type": "number" },
         "stock": { "type": "number" },
-        "status": { "type": "string" }
+        "status": { "type": "string", "enum": ["ACTIVE", "INACTIVE"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["productId", "name", "normalPrice"]
+      "required": ["productId", "name", "productType", "normalPrice", "status", "createdAt", "updatedAt"]
+    },
+    "Bundle": {
+      "title": "Bundle",
+      "description": "Product bundles",
+      "type": "object",
+      "properties": {
+        "bundleId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 256 },
+        "price": { "type": "number" },
+        "status": { "type": "string", "enum": ["ACTIVE", "INACTIVE"] }
+      },
+      "required": ["bundleId", "name", "price", "status"]
     },
     "Customer": {
       "title": "Customer",
       "description": "Customer/Member profile",
       "type": "object",
       "properties": {
-        "customerId": { "type": "string" },
-        "name": { "type": "string" },
+        "customerId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 256 },
+        "phone": { "type": "string", "maxLength": 32 },
         "isReseller": { "type": "boolean" },
-        "creditLimit": { "type": "number" },
-        "loyaltyPoints": { "type": "number" }
+        "loyaltyPoints": { "type": "number" },
+        "status": { "type": "string", "enum": ["ACTIVE", "INACTIVE"] }
       },
-      "required": ["customerId", "name"]
+      "required": ["customerId", "name", "isReseller", "status"]
+    },
+    "Supplier": {
+      "title": "Supplier",
+      "description": "Supplier profile",
+      "type": "object",
+      "properties": {
+        "supplierId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 256 },
+        "status": { "type": "string", "enum": ["ACTIVE", "INACTIVE"] }
+      },
+      "required": ["supplierId", "name", "status"]
     },
     "Transaction": {
       "title": "Transaction",
-      "description": "Business transaction",
+      "description": "Sales transaction",
       "type": "object",
       "properties": {
-        "transactionId": { "type": "string" },
-        "receiptNumber": { "type": "string" },
-        "type": { "type": "string" },
-        "status": { "type": "string" },
-        "customerId": { "type": "string" },
-        "cashierId": { "type": "string" },
+        "transactionId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "receiptNumber": { "type": "string", "maxLength": 64 },
+        "type": { "type": "string", "enum": ["SALE", "GAJIAN", "RETURN", "VOID", "DIGITAL_SERVICE"] },
+        "status": { "type": "string", "enum": ["COMPLETED", "PENDING", "VOIDED", "CANCELLED", "HOLD"] },
         "total": { "type": "number" },
+        "cashierId": { "type": "string", "maxLength": 128 },
         "clientTimestamp": { "type": "string", "format": "date-time" }
       },
-      "required": ["transactionId", "receiptNumber", "type", "status", "total"]
+      "required": ["transactionId", "receiptNumber", "type", "status", "total", "cashierId", "clientTimestamp"]
     },
     "Receivable": {
       "title": "Receivable",
-      "description": "Customer debt record",
+      "description": "Customer debt",
       "type": "object",
       "properties": {
-        "receivableId": { "type": "string" },
-        "transactionId": { "type": "string" },
-        "customerId": { "type": "string" },
+        "receivableId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "transactionId": { "type": "string", "maxLength": 128 },
+        "customerId": { "type": "string", "maxLength": 128 },
         "totalAmount": { "type": "number" },
         "paidAmount": { "type": "number" },
-        "remainingAmount": { "type": "number" },
-        "status": { "type": "string" }
+        "status": { "type": "string", "enum": ["OPEN", "PARTIAL", "PAID", "OVERDUE"] }
       },
-      "required": ["receivableId", "transactionId", "customerId", "totalAmount"]
+      "required": ["receivableId", "transactionId", "customerId", "totalAmount", "status"]
     },
     "Purchase": {
       "title": "Purchase",
-      "description": "Supplier purchase record",
+      "description": "Supplier purchase",
       "type": "object",
       "properties": {
-        "purchaseId": { "type": "string" },
-        "supplierId": { "type": "string" },
-        "invoiceNumber": { "type": "string" },
+        "purchaseId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "supplierId": { "type": "string", "maxLength": 128 },
+        "invoiceNumber": { "type": "string", "maxLength": 128 },
         "total": { "type": "number" },
-        "status": { "type": "string" }
+        "status": { "type": "string", "enum": ["DRAFT", "CONFIRMED", "PAID", "CANCELLED"] }
       },
-      "required": ["purchaseId", "supplierId", "total"]
+      "required": ["purchaseId", "supplierId", "total", "status"]
     },
     "FinanceEvent": {
       "title": "Finance Event",
-      "description": "Financial ledger entry",
+      "description": "Money movement",
       "type": "object",
       "properties": {
-        "financeEventId": { "type": "string" },
+        "financeEventId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
         "amount": { "type": "number" },
-        "storageId": { "type": "string" },
-        "direction": { "type": "string" },
-        "referenceId": { "type": "string" },
+        "storageId": { "type": "string", "enum": ["WARUNG", "IKAN", "UANG_DIGITAL"] },
+        "direction": { "type": "string", "enum": ["IN", "OUT"] },
+        "referenceType": { "type": "string", "maxLength": 64 },
         "timestamp": { "type": "string", "format": "date-time" }
       },
-      "required": ["financeEventId", "amount", "storageId", "direction"]
+      "required": ["financeEventId", "amount", "storageId", "direction", "timestamp"]
     },
     "StockMovement": {
       "title": "Stock Movement",
-      "description": "Inventory ledger entry",
+      "description": "Inventory movement",
       "type": "object",
       "properties": {
-        "stockMovementId": { "type": "string" },
-        "productId": { "type": "string" },
+        "stockMovementId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "productId": { "type": "string", "maxLength": 128 },
         "quantity": { "type": "number" },
-        "type": { "type": "string" },
-        "reason": { "type": "string" },
+        "type": { "type": "string", "enum": ["IN", "OUT", "ADJUST"] },
         "timestamp": { "type": "string", "format": "date-time" }
       },
-      "required": ["stockMovementId", "productId", "quantity", "type"]
+      "required": ["stockMovementId", "productId", "quantity", "type", "timestamp"]
+    },
+    "AuditLog": {
+      "title": "Audit Log",
+      "description": "System activity logs",
+      "type": "object",
+      "properties": {
+        "auditId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "action": { "type": "string", "maxLength": 128 },
+        "module": { "type": "string", "maxLength": 128 },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["auditId", "userId", "action", "module", "timestamp"]
+    },
+    "BusinessConflict": {
+      "title": "Business Conflict",
+      "description": "Sync conflicts",
+      "type": "object",
+      "properties": {
+        "conflictId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "type": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "enum": ["PENDING", "RESOLVED", "REJECTED"] },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["conflictId", "type", "status", "timestamp"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "System notifications",
+      "type": "object",
+      "properties": {
+        "notificationId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "severity": { "type": "string", "enum": ["URGENT", "WARNING", "INFO"] },
+        "message": { "type": "string", "maxLength": 1024 },
+        "isRead": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["notificationId", "severity", "message", "isRead", "createdAt"]
+    },
+    "CashierShift": {
+      "title": "Cashier Shift",
+      "description": "Shift records",
+      "type": "object",
+      "properties": {
+        "shiftId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["OPEN", "CLOSED"] },
+        "startTime": { "type": "string", "format": "date-time" }
+      },
+      "required": ["shiftId", "userId", "status", "startTime"]
+    },
+    "StockOpname": {
+      "title": "Stock Opname",
+      "description": "Stock take records",
+      "type": "object",
+      "properties": {
+        "opnameId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["DRAFT", "COMPLETED"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["opnameId", "status", "createdAt"]
+    },
+    "DigitalService": {
+      "title": "Digital Service",
+      "description": "PPOB/Digital products",
+      "type": "object",
+      "properties": {
+        "serviceId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "serviceType": { "type": "string", "enum": ["PULSA", "PAKET_DATA", "TOKEN_LISTRIK", "TOPUP", "TRANSFER", "TARIK_TUNAI"] },
+        "status": { "type": "string", "enum": ["PENDING", "SUCCESS", "FAILED"] }
+      },
+      "required": ["serviceId", "serviceType", "status"]
+    },
+    "LoyaltyEvent": {
+      "title": "Loyalty Event",
+      "description": "Points earn/redeem",
+      "type": "object",
+      "properties": {
+        "loyaltyEventId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "customerId": { "type": "string", "maxLength": 128 },
+        "type": { "type": "string", "enum": ["EARN", "REDEEM", "REVERSAL"] },
+        "points": { "type": "number" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["loyaltyEventId", "customerId", "type", "points", "timestamp"]
     }
   },
   "firestore": {
-    "users": { "schema": "User", "description": "Users" },
-    "products": { "schema": "Product", "description": "Products" },
-    "customers": { "schema": "Customer", "description": "Customers" },
-    "transactions": { "schema": "Transaction", "description": "Transactions" },
-    "receivables": { "schema": "Receivable", "description": "Receivables" },
-    "purchases": { "schema": "Purchase", "description": "Purchases" },
-    "financeEvents": { "schema": "FinanceEvent", "description": "Finance" },
-    "stockMovements": { "schema": "StockMovement", "description": "Stock" }
+    "users": { "schema": "User", "description": "System users" },
+    "products": { "schema": "Product", "description": "Inventory master" },
+    "bundles": { "schema": "Bundle", "description": "Product bundles" },
+    "customers": { "schema": "Customer", "description": "Customer database" },
+    "suppliers": { "schema": "Supplier", "description": "Suppliers" },
+    "transactions": { "schema": "Transaction", "description": "Sales and returns" },
+    "receivables": { "schema": "Receivable", "description": "Customer debts" },
+    "purchases": { "schema": "Purchase", "description": "Supplier purchases" },
+    "financeEvents": { "schema": "FinanceEvent", "description": "Financial ledger" },
+    "stockMovements": { "schema": "StockMovement", "description": "Inventory ledger" },
+    "auditLogs": { "schema": "AuditLog", "description": "Audit trails" },
+    "conflicts": { "schema": "BusinessConflict", "description": "Sync conflicts" },
+    "notifications": { "schema": "Notification", "description": "System alerts" },
+    "shifts": { "schema": "CashierShift", "description": "Cashier shifts" },
+    "stockOpnames": { "schema": "StockOpname", "description": "Stock takes" },
+    "digitalServices": { "schema": "DigitalService", "description": "Digital service records" },
+    "loyaltyEvents": { "schema": "LoyaltyEvent", "description": "Loyalty program history" }
   }
 }

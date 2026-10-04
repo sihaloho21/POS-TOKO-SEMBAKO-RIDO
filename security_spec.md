@@ -1,29 +1,27 @@
 # Security Specification - Toko Sembako Rido
 
-## 1. Data Invariants
-- A `Transaction` must be created by a valid `User` with either `OWNER` or `KASIR` role.
-- A `StockMovement` or `FinanceEvent` must be linked to a `Transaction` or `Purchase`.
-- Users cannot change their own roles or PIN hashes once created.
-- Only `OWNER` can modify product HPP or perform stock adjustments.
-- `Transaction` status cannot be moved back from `COMPLETED` to `PENDING`.
+## Data Invariants
+1. A transaction must have a valid `cashierId`.
+2. A `stockMovement` must be linked to a valid `productId`.
+3. Only `OWNER` can view `purchases`, `financeEvents`, and `auditLogs`.
+4. `KASIR` can create transactions but cannot void or update them once completed (unless owner).
+5. All IDs must match `^[a-zA-Z0-9_\-]+$`.
 
-## 2. The "Dirty Dozen" Payloads (Red Team Test Cases)
-1. **Identity Spoofing**: Kasir trying to create a transaction with `cashierId` of an Owner.
-2. **Privilege Escalation**: Kasir trying to update their own role to `OWNER`.
-3. **State Shortcutting**: Creating a `Transaction` directly as `VOIDED` without a reference.
-4. **Resource Poisoning**: Injecting a 2MB string into a `barcode` field.
-5. **Unauthorized HPP Access**: Kasir trying to read the `hpp` field of a `Product`.
-6. **Orphaned Movement**: Creating a `StockMovement` without an existing `productId`.
-7. **Timestamp Spoofing**: Sending a `createdAt` date from 1970.
-8. **Shadow Field Injection**: Adding an `isAdmin: true` field to a user profile.
-9. **Direct Balance Edit**: Trying to update a calculated balance instead of adding an event.
-10. **Cross-User Leak**: Kasir trying to read the `pinHash` of another user.
-11. **Malicious ID Injection**: Creating a document with ID `../../secrets`.
-12. **Double Posting**: Attempting to create two `FinanceEvent`s with the same ID for one transaction.
+## The Dirty Dozen Payloads
+1. **Identity Spoofing**: Create a transaction with a different user's `cashierId`.
+2. **Privilege Escalation**: Update a user's role from `KASIR` to `OWNER`.
+3. **Ghost Field Injection**: Add `isAdmin: true` to a user document.
+4. **ID Poisoning**: Create a product with a 2KB junk string as ID.
+5. **PII Leakage**: Unauthorized reading of customer phone/address by a non-authenticated user.
+6. **State Shortcutting**: Updating a transaction status directly to `COMPLETED` without items.
+7. **Resource Poisoning**: Sending a 1MB message string in a notification.
+8. **Orphaned Record**: Creating a `stockMovement` for a non-existent `productId`.
+9. **Timestamp Spoofing**: Providing a `createdAt` in the past instead of `request.time`.
+10. **Immutable Violation**: Changing the `transactionId` of an existing transaction.
+11. **Sync Bypass**: Writing directly to `auditLogs` as a `KASIR` without an owner role.
+12. **Recursive Cost Attack**: Listing all `transactions` without any query filters.
 
-## 3. Implementation Plan
-- Use `isValidId` for all path variables.
-- Implement `isValidUser`, `isValidProduct`, `isValidTransaction`, etc.
-- Use `affectedKeys().hasOnly()` for updates.
-- Restrict `hpp` field visibility to `OWNER`.
-- Enforce `request.time` for all timestamps.
+## Test Runner (Logic Check)
+- `PERMISSION_DENIED` for any write where `request.auth.uid` doesn't match `cashierId` (for transactions).
+- `PERMISSION_DENIED` for `KASIR` attempting to read `/financeEvents`.
+- `PERMISSION_DENIED` for any field not in `hasOnly`.

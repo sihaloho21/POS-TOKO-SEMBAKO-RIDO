@@ -1,6 +1,6 @@
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db as localDb } from './database';
-import { db as firestoreDb } from '../firebase/config';
+import { db as firestoreDb, handleFirestoreError, OperationType } from '../firebase/config';
 import type { SyncQueueItem } from './types';
 import { addMinutes } from 'date-fns';
 
@@ -61,7 +61,11 @@ export class SyncEngine {
         serverTimestamp: serverTimestamp()
       };
 
-      await setDoc(docRef, payload, { merge: true });
+      try {
+        await setDoc(docRef, payload, { merge: true });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, collectionName);
+      }
 
       await localDb.syncQueue.update(item.queueId!, { 
         status: 'SYNCED',
