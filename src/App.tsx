@@ -18,7 +18,7 @@ import Shift from './app/shift/Shift';
 import StockOpname from './app/inventory/StockOpname';
 import SupplierReturn from './app/purchases/SupplierReturn';
 import Purchases from './app/purchases/Purchases';
-import ReceiptSettings from './app/settings/ReceiptSettings';
+import Settings from './app/settings/Settings';
 import { SyncEngine } from './core/sync-engine';
 import { ProductService } from './core/services/product-service';
 
@@ -87,7 +87,7 @@ export default function App() {
       case 'system-health':
         return <SystemHealth />;
       case 'settings':
-        return <ReceiptSettings />;
+        return <Settings />;
       default:
         return (
           <div className="flex flex-col items-center justify-center h-full text-slate-400">

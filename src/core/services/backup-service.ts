@@ -1,5 +1,5 @@
 import { db } from '../database';
-import { zipSync, strToU8 } from 'fflate';
+import { zipSync, strToU8, unzipSync, strFromU8 } from 'fflate';
 
 export class BackupService {
   static async createBackup(): Promise<void> {
@@ -9,7 +9,7 @@ export class BackupService {
       'transactions', 'receivables', 'receivablePayments', 'purchases', 
       'financeEvents', 'stockMovements', 'auditLogs', 'conflicts', 
       'notifications', 'shifts', 'stockOpnames', 'digitalServices', 
-      'loyaltyEvents', 'settings'
+      'loyaltyEvents', 'settings', 'productCosts', 'paymentMethods'
     ];
 
     for (const table of tables) {
@@ -31,6 +31,40 @@ export class BackupService {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+  }
+
+  static async restoreBackup(file: File): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        try {
+          const buffer = new Uint8Array(e.target?.result as ArrayBuffer);
+          const unzipped = unzipSync(buffer);
+          const jsonFile = unzipped['harapan_jaya_backup.json'];
+          
+          if (!jsonFile) {
+            throw new Error('Invalid backup file: harapan_jaya_backup.json not found inside ZIP.');
+          }
+
+          const jsonString = strFromU8(jsonFile);
+          const data = JSON.parse(jsonString);
+
+          // Clear and Restore tables
+          for (const [tableName, rows] of Object.entries(data)) {
+            if ((db as any)[tableName]) {
+              await (db as any)[tableName].clear();
+              await (db as any)[tableName].bulkAdd(rows);
+            }
+          }
+
+          resolve();
+        } catch (err) {
+          reject(err);
+        }
+      };
+      reader.onerror = () => reject(new Error('Failed to read file.'));
+      reader.readAsArrayBuffer(file);
+    });
   }
 
   static async scheduleAutoBackup() {

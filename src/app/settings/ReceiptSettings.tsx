@@ -89,7 +89,7 @@ export default function ReceiptSettings() {
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Nama Toko</label>
                 <input 
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
-                  value={formData.storeName || ''}
+                  value={formData.storeName ?? ''}
                   onChange={e => setFormData({ ...formData, storeName: e.target.value })}
                 />
               </div>
@@ -98,7 +98,7 @@ export default function ReceiptSettings() {
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Alamat</label>
                 <textarea 
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500 min-h-[80px]"
-                  value={formData.address || ''}
+                  value={formData.address ?? ''}
                   onChange={e => setFormData({ ...formData, address: e.target.value })}
                 />
               </div>
@@ -107,7 +107,7 @@ export default function ReceiptSettings() {
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Nomor Telepon</label>
                 <input 
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
-                  value={formData.phone || ''}
+                  value={formData.phone ?? ''}
                   onChange={e => setFormData({ ...formData, phone: e.target.value })}
                 />
               </div>
@@ -142,7 +142,7 @@ export default function ReceiptSettings() {
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Pesan Penutup (Footer)</label>
                 <textarea 
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500 min-h-[80px]"
-                  value={formData.footerMessage || ''}
+                  value={formData.footerMessage ?? ''}
                   onChange={e => setFormData({ ...formData, footerMessage: e.target.value })}
                 />
               </div>
@@ -162,11 +162,36 @@ export default function ReceiptSettings() {
                 </p>
                 <button 
                   onClick={() => BackupService.createBackup()}
-                  className="w-full flex items-center justify-center gap-2 px-6 py-4 bg-white border border-slate-200 text-slate-900 rounded-xl font-black text-xs uppercase tracking-widest hover:bg-slate-50 hover:border-slate-300 transition-all shadow-sm"
+                  className="w-full flex items-center justify-center gap-2 px-6 py-4 bg-white border border-slate-200 text-slate-900 rounded-xl font-black text-xs uppercase tracking-widest hover:bg-slate-50 hover:border-slate-300 transition-all shadow-sm mb-3"
                 >
                   <Download size={18} className="text-blue-600" />
                   Backup Now (.zip)
                 </button>
+
+                <div className="relative">
+                  <input 
+                    type="file" 
+                    accept=".zip"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (file && confirm('PERINGATAN: Restorasi akan menghapus SEMUA data saat ini dan menggantinya dengan data dari backup. Lanjutkan?')) {
+                        try {
+                          await BackupService.restoreBackup(file);
+                          alert('Data berhasil direstorasi! Aplikasi akan dimuat ulang.');
+                          window.location.reload();
+                        } catch (err) {
+                          console.error(err);
+                          alert('Gagal merestorasi data: ' + (err as Error).message);
+                        }
+                      }
+                    }}
+                    className="absolute inset-0 opacity-0 cursor-pointer"
+                  />
+                  <button className="w-full flex items-center justify-center gap-2 px-6 py-4 bg-slate-100 border border-slate-200 text-slate-500 rounded-xl font-black text-xs uppercase tracking-widest hover:bg-slate-200 transition-all">
+                    <RefreshCw size={18} />
+                    Restore From Backup
+                  </button>
+                </div>
               </div>
             </div>
           </div>

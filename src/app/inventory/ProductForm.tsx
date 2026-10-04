@@ -70,7 +70,7 @@ export function ProductForm({ product, onSave, onCancel }: ProductFormProps) {
               <input
                 required
                 className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-bold text-slate-900 shadow-sm transition-all"
-                value={formData.name || ''}
+                value={formData.name ?? ''}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 placeholder="Masukkan nama produk..."
               />
@@ -82,7 +82,7 @@ export function ProductForm({ product, onSave, onCancel }: ProductFormProps) {
             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">SKU (Internal ID)</label>
             <input
               className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-bold text-slate-900 shadow-sm"
-              value={formData.sku || ''}
+              value={formData.sku ?? ''}
               onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
               placeholder="Auto-generate jika kosong"
             />
@@ -97,7 +97,7 @@ export function ProductForm({ product, onSave, onCancel }: ProductFormProps) {
               </div>
               <input
                 className="w-full pl-11 pr-12 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-bold text-slate-900 shadow-sm"
-                value={formData.barcode || ''}
+                value={formData.barcode ?? ''}
                 onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
                 placeholder="Scan barcode..."
               />

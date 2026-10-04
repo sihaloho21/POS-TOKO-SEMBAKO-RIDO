@@ -208,12 +208,22 @@ export default function Purchases() {
                         <td className="px-6 py-4"><span className="text-xs font-bold text-slate-900 uppercase">{item.name}</span></td>
                         <td className="px-6 py-4">
                           <div className="flex items-center justify-center gap-2">
-                            <input type="number" className="w-16 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-black text-center" value={item.quantity} onChange={e => updateItem(item.productId, 'quantity', Number(e.target.value))} />
+                            <input 
+                              type="number" 
+                              className="w-16 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-black text-center" 
+                              value={item.quantity ?? 1} 
+                              onChange={e => updateItem(item.productId, 'quantity', Number(e.target.value))} 
+                            />
                             <span className="text-[10px] font-black text-slate-400 uppercase">{item.unit}</span>
                           </div>
                         </td>
                         <td className="px-6 py-4 text-right">
-                          <input type="number" className="w-28 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-black text-right" value={item.purchasePrice} onChange={e => updateItem(item.productId, 'purchasePrice', Number(e.target.value))} />
+                          <input 
+                            type="number" 
+                            className="w-28 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-black text-right" 
+                            value={item.purchasePrice ?? 0} 
+                            onChange={e => updateItem(item.productId, 'purchasePrice', Number(e.target.value))} 
+                          />
                         </td>
                         <td className="px-6 py-4 text-right font-black text-slate-900 text-xs tabular-nums">
                           Rp {(item.quantity * item.purchasePrice - item.discount).toLocaleString()}

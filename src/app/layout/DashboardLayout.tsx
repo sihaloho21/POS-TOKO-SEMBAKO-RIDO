@@ -30,6 +30,7 @@ import { db } from '@/core/database';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { motion, AnimatePresence } from 'motion/react';
 import { ShiftService } from '@/core/services/shift-service';
+import { NotificationCenter } from './NotificationCenter';
 
 interface NavItemProps {
   icon: React.ReactNode;
@@ -64,6 +65,7 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
   const { currentUser, logout } = useAuthStore();
   const isOnline = useOnlineStatus();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   
   const pendingSyncCount = useLiveQuery(
     () => db.syncQueue.where('status').anyOf(['PENDING', 'FAILED', 'SYNCING']).count()
@@ -71,6 +73,10 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
 
   const conflictCount = useLiveQuery(
     () => db.conflicts.where('status').equals('PENDING').count()
+  );
+
+  const unreadNotifications = useLiveQuery(
+    () => db.notifications.where('isRead').equals(0).count()
   );
 
   const currentShift = useLiveQuery(() => ShiftService.getCurrentShift('device-1'), []);
@@ -195,10 +201,29 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
               )}
             </div>
 
-            <button className="p-2 text-slate-400 hover:text-slate-600 relative">
-              <Bell size={20} />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border-2 border-white" />
-            </button>
+            <div className="relative">
+              <button 
+                onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
+                className={`p-2 rounded-lg transition-all ${isNotificationsOpen ? 'bg-blue-50 text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}
+              >
+                <Bell size={20} />
+                {unreadNotifications !== undefined && unreadNotifications > 0 && (
+                  <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border-2 border-white" />
+                )}
+              </button>
+
+              <AnimatePresence>
+                {isNotificationsOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                  >
+                    <NotificationCenter onClose={() => setIsNotificationsOpen(false)} />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
           </div>
         </header>
 

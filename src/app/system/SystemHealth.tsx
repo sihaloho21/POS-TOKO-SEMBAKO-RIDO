@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/core/database';
+import { IntegrityService, type IntegrityReport } from '@/core/services/integrity-service';
 import { 
   Activity, 
   Database, 
@@ -12,14 +13,15 @@ import {
   XCircle,
   RefreshCw,
   HardDrive,
-  Archive
+  Archive,
+  SearchCheck
 } from 'lucide-react';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 
 function HealthItem({ icon, label, status, detail, color }: any) {
-  const StatusIcon = status === 'OK' ? CheckCircle2 : status === 'WARNING' ? AlertTriangle : XCircle;
-  const statusColor = status === 'OK' ? 'text-emerald-500' : status === 'WARNING' ? 'text-amber-500' : 'text-red-500';
-  const bgColor = status === 'OK' ? 'bg-emerald-50' : status === 'WARNING' ? 'bg-amber-50' : 'bg-red-50';
+  const StatusIcon = status === 'OK' || status === 'PASS' ? CheckCircle2 : status === 'WARNING' ? AlertTriangle : XCircle;
+  const statusColor = status === 'OK' || status === 'PASS' ? 'text-emerald-500' : status === 'WARNING' ? 'text-amber-500' : 'text-red-500';
+  const bgColor = status === 'OK' || status === 'PASS' ? 'bg-emerald-50' : status === 'WARNING' ? 'bg-amber-50' : 'bg-red-50';
 
   return (
     <div className="flex items-center justify-between p-4 bg-white border border-slate-200 rounded-2xl shadow-sm group hover:shadow-md transition-all">
@@ -42,17 +44,40 @@ function HealthItem({ icon, label, status, detail, color }: any) {
 
 export default function SystemHealth() {
   const isOnline = useOnlineStatus();
+  const [report, setReport] = useState<IntegrityReport | null>(null);
+  const [isChecking, setIsChecking] = useState(false);
   
-  const pendingSync = useLiveQuery(() => db.syncQueue.where('status').anyOf(['PENDING', 'FAILED']).count());
+  const pendingSync = useLiveQuery(() => db.syncQueue.where('status').anyOf(['PENDING', 'FAILED', 'SYNCING']).count());
   const conflictCount = useLiveQuery(() => db.conflicts.where('status').equals('PENDING').count());
   const auditCount = useLiveQuery(() => db.auditLogs.count());
   const productCount = useLiveQuery(() => db.products.count());
 
+  const runCheck = async () => {
+    setIsChecking(true);
+    const res = await IntegrityService.runFullCheck();
+    setReport(res);
+    setIsChecking(false);
+  };
+
   return (
     <div className="space-y-8 max-w-4xl">
-      <div>
-        <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">System Health</h2>
-        <p className="text-slate-500 text-sm font-medium">Monitoring real-time integritas dan status sinkronisasi sistem.</p>
+      <div className="flex justify-between items-end">
+        <div>
+          <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">System Health</h2>
+          <p className="text-slate-500 text-sm font-medium">Monitoring real-time integritas dan status sinkronisasi sistem.</p>
+        </div>
+        <button 
+          onClick={runCheck}
+          disabled={isChecking}
+          className="flex items-center gap-2 px-6 py-3 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-800 transition-all shadow-lg disabled:bg-slate-200"
+        >
+          {isChecking ? (
+            <RefreshCw size={18} className="animate-spin" />
+          ) : (
+            <SearchCheck size={18} />
+          )}
+          {isChecking ? 'Checking...' : 'Run Full Integrity Check'}
+        </button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -92,27 +117,44 @@ export default function SystemHealth() {
           color="text-rose-600"
         />
         <HealthItem 
-          icon={<ShieldCheck size={20} />}
-          label="Integrity Check"
-          status="OK"
-          detail="Tidak ada isu integritas ledger terdeteksi"
-          color="text-teal-600"
-        />
-        <HealthItem 
           icon={<Archive size={20} />}
           label="Audit Log"
           status="OK"
           detail={`${auditCount || 0} event tercatat`}
           color="text-slate-600"
         />
-        <HealthItem 
-          icon={<HardDrive size={20} />}
-          label="Storage Usage"
-          status="OK"
-          detail="Penggunaan disk lokal optimal"
-          color="text-gray-600"
-        />
       </div>
+
+      {report && (
+        <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm">
+          <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
+            <h3 className="font-black text-slate-900 uppercase tracking-tight text-sm">Integrity Report - {new Date(report.timestamp).toLocaleTimeString()}</h3>
+            <span className={`px-4 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${report.status === 'OK' ? 'bg-emerald-100 text-emerald-600' : 'bg-red-100 text-red-600'}`}>
+              Overall: {report.status}
+            </span>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {report.checks.map((check, idx) => (
+              <div key={idx} className="p-4 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  {check.status === 'PASS' ? (
+                    <CheckCircle2 size={18} className="text-emerald-500" />
+                  ) : (
+                    <AlertTriangle size={18} className="text-rose-500" />
+                  )}
+                  <div>
+                    <p className="text-sm font-bold text-slate-900">{check.name}</p>
+                    <p className="text-xs text-slate-500 font-medium">{check.message}</p>
+                  </div>
+                </div>
+                <div className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${check.status === 'PASS' ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
+                  {check.status}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="bg-slate-900 rounded-3xl p-8 text-white relative overflow-hidden">
         <Activity className="absolute right-[-20px] top-[-20px] w-48 h-48 text-white/5 rotate-12" />
@@ -123,14 +165,6 @@ export default function SystemHealth() {
             <strong> Event-Based Ledger</strong>. Saldo tidak pernah di-overwrite secara langsung, 
             melainkan dikalkulasi ulang dari histori event untuk menjamin validitas data finansial dan stok.
           </p>
-          <div className="mt-8 flex gap-4">
-            <button className="px-6 py-3 bg-white text-slate-900 rounded-xl font-black text-xs uppercase tracking-widest hover:bg-slate-100 transition-all">
-              Run Integrity Check
-            </button>
-            <button className="px-6 py-3 bg-slate-800 text-white rounded-xl font-black text-xs uppercase tracking-widest hover:bg-slate-700 transition-all">
-              Rebuild Cache
-            </button>
-          </div>
         </div>
       </div>
     </div>
