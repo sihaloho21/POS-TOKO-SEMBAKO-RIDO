@@ -18,14 +18,16 @@ import FinanceCharts from './FinanceCharts';
 
 export default function Finance() {
   const [filterStorage, setFilterStorage] = useState('ALL');
+  const [search, setSearch] = useState('');
   
   const events = useLiveQuery(() => {
     let coll = db.financeEvents.orderBy('timestamp').reverse();
-    if (filterStorage !== 'ALL') {
-      return coll.filter(e => e.storageId === filterStorage).toArray();
-    }
-    return coll.toArray();
-  }, [filterStorage]);
+    return coll.filter(e => {
+      const matchStorage = filterStorage === 'ALL' || e.storageId === filterStorage;
+      const matchSearch = !search || e.referenceType.toLowerCase().includes(search.toLowerCase()) || e.userId.toLowerCase().includes(search.toLowerCase());
+      return matchStorage && matchSearch;
+    }).toArray();
+  }, [filterStorage, search]);
   
   const balances = useLiveQuery(async () => {
     const all = await db.financeEvents.toArray();
@@ -97,8 +99,11 @@ export default function Finance() {
           <div className="relative w-full sm:w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
             <input 
+              type="text"
               placeholder="Cari transaksi..."
-              className="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl outline-none text-xs font-bold shadow-sm"
+              value={search ?? ''}
+              onChange={e => setSearch(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl outline-none text-xs font-bold shadow-sm focus:ring-2 focus:ring-blue-500"
             />
           </div>
         </div>

@@ -87,7 +87,7 @@ export function ProductForm({ product, onSave, onCancel }: ProductFormProps) {
               placeholder="Auto-generate jika kosong"
             />
           </div>
-[truncated]
+
           <div className="space-y-2">
             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Barcode (Scanner)</label>
             <div className="relative">

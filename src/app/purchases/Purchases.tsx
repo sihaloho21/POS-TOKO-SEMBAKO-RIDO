@@ -18,16 +18,19 @@ import {
 import { PurchaseService } from '@/core/services/purchase-service';
 import { useAuthStore } from '@/core/auth-store';
 import type { Product, Supplier } from '@/core/types';
+import { SupplierModal } from '@/app/suppliers/SupplierModal';
 
 export default function Purchases() {
   const { currentUser } = useAuthStore();
   const [currentTab, setCurrentTab] = useState<'NEW' | 'HISTORY'>('NEW');
   const [selectedSupplierId, setSelectedSupplierId] = useState('');
   const [invoiceNumber, setInvoiceNumber] = useState('');
+  const [productSearch, setProductSearch] = useState('');
   const [items, setItems] = useState<{ productId: string; name: string; quantity: number; unit: string; purchasePrice: number; discount: number }[]>([]);
   const [paymentStatus, setPaymentStatus] = useState<'PAID' | 'PAYABLE'>('PAID');
   const [moneyStorageId, setMoneyStorageId] = useState<'WARUNG' | 'IKAN' | 'UANG_DIGITAL'>('WARUNG');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isSupplierModalOpen, setIsSupplierModalOpen] = useState(false);
 
   const suppliers = useLiveQuery(() => db.suppliers.where('status').equals('ACTIVE').toArray());
   const products = useLiveQuery(() => db.products.where('status').equals('ACTIVE').toArray());
@@ -107,10 +110,20 @@ export default function Purchases() {
           <div className="lg:col-span-1 space-y-6">
             <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-6">
               <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Supplier</label>
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Supplier</label>
+                  <button
+                    type="button"
+                    onClick={() => setIsSupplierModalOpen(true)}
+                    className="text-[10px] font-black text-blue-600 hover:text-blue-500 uppercase tracking-wider flex items-center gap-1"
+                  >
+                    <Plus size={12} />
+                    Tambah Baru
+                  </button>
+                </div>
                 <select 
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
-                  value={selectedSupplierId}
+                  value={selectedSupplierId ?? ''}
                   onChange={e => setSelectedSupplierId(e.target.value)}
                 >
                   <option value="">-- Pilih Supplier --</option>
@@ -122,7 +135,7 @@ export default function Purchases() {
                 <input 
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="Contoh: INV/2026/001"
-                  value={invoiceNumber}
+                  value={invoiceNumber ?? ''}
                   onChange={e => setInvoiceNumber(e.target.value)}
                 />
               </div>
@@ -148,7 +161,7 @@ export default function Purchases() {
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Sumber Dana</label>
                   <select 
                     className="w-full px-4 py-3 bg-blue-50 border border-blue-100 rounded-xl font-bold text-blue-900 outline-none focus:ring-2 focus:ring-blue-500"
-                    value={moneyStorageId}
+                    value={moneyStorageId ?? 'WARUNG'}
                     onChange={e => setMoneyStorageId(e.target.value as any)}
                   >
                     <option value="WARUNG">Kas Warung</option>
@@ -163,10 +176,19 @@ export default function Purchases() {
               <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Cari Produk</h4>
               <div className="relative mb-4">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
-                <input placeholder="Ketik nama produk..." className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold" />
+                <input 
+                  type="text"
+                  placeholder="Ketik nama produk..." 
+                  value={productSearch ?? ''}
+                  onChange={e => setProductSearch(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none" 
+                />
               </div>
               <div className="space-y-2 max-h-[300px] overflow-y-auto custom-scrollbar pr-2">
-                {products?.slice(0, 10).map(p => (
+                {products
+                  ?.filter(p => !productSearch || p.name.toLowerCase().includes(productSearch.toLowerCase()) || p.barcode.includes(productSearch) || (p.sku && p.sku.toLowerCase().includes(productSearch.toLowerCase())))
+                  .slice(0, 10)
+                  .map(p => (
                   <button key={p.productId} onClick={() => addItem(p)} className="w-full flex items-center justify-between p-3 bg-slate-50 rounded-xl hover:bg-blue-50 transition-colors group text-left">
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-bold text-slate-900 uppercase truncate">{p.name}</p>
@@ -284,6 +306,11 @@ export default function Purchases() {
           </div>
         </div>
       )}
+
+      <SupplierModal
+        isOpen={isSupplierModalOpen}
+        onClose={() => setIsSupplierModalOpen(false)}
+      />
     </div>
   );
 }

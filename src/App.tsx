@@ -17,6 +17,8 @@ import Shift from './app/shift/Shift';
 import ShiftHistory from './app/shift/ShiftHistory';
 import StockOpname from './app/inventory/StockOpname';
 import SupplierReturn from './app/purchases/SupplierReturn';
+import Purchases from './app/purchases/Purchases';
+import Suppliers from './app/suppliers/Suppliers';
 import ReceiptSettings from './app/settings/ReceiptSettings';
 import TransactionHistory from './app/transactions/TransactionHistory';
 import KasirDashboard from './app/dashboard/KasirDashboard';
@@ -122,6 +124,10 @@ export default function App() {
         return <ShiftHistory />;
       case 'stock-opname':
         return <StockOpname />;
+      case 'suppliers':
+        return <Suppliers onNavigate={setCurrentTab} />;
+      case 'purchases':
+        return <Purchases />;
       case 'supplier-return':
         return <SupplierReturn />;
       case 'conflicts':

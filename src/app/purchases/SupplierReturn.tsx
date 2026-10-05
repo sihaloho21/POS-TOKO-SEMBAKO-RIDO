@@ -19,6 +19,7 @@ export default function SupplierReturn() {
   const { currentUser } = useAuthStore();
   const [selectedSupplierId, setSelectedSupplierId] = useState('');
   const [selectedStorage, setSelectedStorage] = useState<'WARUNG' | 'IKAN' | 'UANG_DIGITAL'>('WARUNG');
+  const [productSearch, setProductSearch] = useState('');
   const [items, setItems] = useState<{ productId: string; name: string; quantity: number; unit: string; price: number }[]>([]);
   const [reason, setReason] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -90,7 +91,7 @@ export default function SupplierReturn() {
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Pilih Supplier</label>
               <select 
                 className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-                value={selectedSupplierId}
+                value={selectedSupplierId ?? ''}
                 onChange={(e) => setSelectedSupplierId(e.target.value)}
               >
                 <option value="">-- Pilih Supplier --</option>
@@ -120,7 +121,7 @@ export default function SupplierReturn() {
               <textarea 
                 className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500 transition-all min-h-[100px]"
                 placeholder="Contoh: Barang rusak / expired..."
-                value={reason}
+                value={reason ?? ''}
                 onChange={(e) => setReason(e.target.value)}
               />
             </div>
@@ -129,11 +130,20 @@ export default function SupplierReturn() {
           <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
             <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Cari Produk Untuk Diretur</h4>
             <div className="relative mb-4">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
-              <input type="text" placeholder="Scan / Cari..." className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+              <input 
+                type="text" 
+                placeholder="Scan / Cari..." 
+                value={productSearch ?? ''}
+                onChange={(e) => setProductSearch(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none focus:bg-white focus:ring-2 focus:ring-blue-500" 
+              />
             </div>
             <div className="space-y-2 max-h-[300px] overflow-y-auto custom-scrollbar pr-2">
-              {products?.slice(0, 10).map(p => (
+              {products
+                ?.filter(p => !productSearch || p.name.toLowerCase().includes(productSearch.toLowerCase()) || p.barcode.includes(productSearch) || (p.sku && p.sku.toLowerCase().includes(productSearch.toLowerCase())))
+                .slice(0, 10)
+                .map(p => (
                 <button 
                   key={p.productId}
                   onClick={() => addItem(p)}
