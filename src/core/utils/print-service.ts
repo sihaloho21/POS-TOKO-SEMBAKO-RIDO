@@ -65,16 +65,25 @@ export class PrintService {
     const is58mm = settings.paperWidth === '58mm';
     const width = is58mm ? '200px' : '300px';
 
-    const itemsHtml = transaction.items.map(item => `
-      <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
-        <span style="text-transform: uppercase; font-weight: bold;">${item.nameSnapshot}</span>
-        <span>${item.quantity.toFixed(2)}</span>
-      </div>
-      <div style="display: flex; justify-content: space-between; padding-left: 10px; margin-bottom: 6px; font-size: 0.9em;">
-        <span>@ ${item.unitPrice.toLocaleString()}</span>
-        <span>${item.subtotal.toLocaleString()}</span>
-      </div>
-    `).join('');
+    const itemsHtml = transaction.items.map(item => {
+      const bundleLines = (item.isBundle && item.bundleComponentsSnapshot?.length)
+        ? `<div style="padding-left: 8px; font-size: 0.8em; color: #444; margin-bottom: 2px;">
+            ${item.bundleComponentsSnapshot.map(c => `+ ${c.totalQty} ${c.unit} ${c.nameSnapshot}`).join('<br/>')}
+          </div>`
+        : '';
+
+      return `
+        <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+          <span style="text-transform: uppercase; font-weight: bold;">${item.nameSnapshot} ${item.isBundle ? '[PAKET]' : ''}</span>
+          <span>${item.quantity.toFixed(2)}</span>
+        </div>
+        ${bundleLines}
+        <div style="display: flex; justify-content: space-between; padding-left: 8px; margin-bottom: 6px; font-size: 0.9em;">
+          <span>@ ${item.unitPrice.toLocaleString()}</span>
+          <span>${item.subtotal.toLocaleString()}</span>
+        </div>
+      `;
+    }).join('');
 
     const html = `
       <html>

@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { db } from '../database';
 import type { StockMovement, FinanceEvent, AuditLog } from '../types';
 import { AuditEngine } from '../audit-engine';
+import { StockService } from './stock-service';
 
 export class SupplierReturnService {
   static async processReturn(params: {
@@ -20,36 +21,20 @@ export class SupplierReturnService {
       const refund = item.quantity * item.price;
       totalRefundAmount += refund;
 
-      // 1. Stock Movement OUT
-      const movement: StockMovement = {
-        stockMovementId: uuidv4(),
-        productId: item.productId,
-        quantity: -item.quantity,
-        type: 'OUT',
-        reason: 'RETURN',
-        referenceId: returnId,
-        referenceType: 'PURCHASE', // Or specific type if available
-        timestamp
-      };
-      await db.stockMovements.add(movement);
-
-      // 2. Update Product Stock
+      // 1. Stock Movement OUT via StockService
       const product = await db.products.get(item.productId);
-      if (product) {
-        await db.products.update(item.productId, {
-          stock: product.stock - item.quantity,
-          updatedAt: timestamp
-        });
-      }
-
-      await db.syncQueue.add({
-        entityType: 'stockMovements',
-        entityId: movement.stockMovementId,
-        action: 'CREATE',
-        payload: movement,
-        status: 'PENDING',
-        retryCount: 0,
-        createdAt: timestamp
+      await StockService.recordMovement({
+        productId: item.productId,
+        movementType: 'SUPPLIER_RETURN_OUT',
+        qty: item.quantity,
+        unit: item.unit || product?.baseUnit || 'PCS',
+        referenceId: returnId,
+        segmentId: params.moneyStorageId === 'IKAN' ? 'IKAN' : 'WARUNG',
+        reason: params.reason || 'Retur Barang ke Supplier (SUPPLIER_RETURN_OUT)',
+        costSnapshot: item.price,
+        userId: params.userId,
+        deviceId: params.deviceId,
+        timestamp
       });
     }
 

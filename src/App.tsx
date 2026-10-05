@@ -61,7 +61,6 @@ export default function App() {
   const OWNER_ONLY_MODULES = [
     'inventory',
     'fish',
-    'bundles',
     'suppliers',
     'purchases',
     'supplier-return',
@@ -119,9 +118,9 @@ export default function App() {
       case 'digital':
         return <DigitalServices />;
       case 'shift':
-        return <Shift />;
+        return <Shift onNavigate={setCurrentTab} />;
       case 'shift-history':
-        return <ShiftHistory />;
+        return <ShiftHistory onNavigate={setCurrentTab} />;
       case 'stock-opname':
         return <StockOpname />;
       case 'suppliers':

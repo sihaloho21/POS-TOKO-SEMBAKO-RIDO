@@ -40,6 +40,53 @@ export default function Login() {
 
           await db.products.bulkAdd(initialProducts);
 
+          // Seed initial OPENING_BALANCE stock movements so stock balance is derived
+          const nowStr = new Date().toISOString();
+          await db.stockMovements.bulkAdd([
+            {
+              stockMovementId: 'sm_init_p1',
+              productId: 'p1',
+              referenceId: 'init_p1',
+              transactionId: 'init_p1',
+              movementType: 'OPENING_BALANCE',
+              qty: 100,
+              unit: 'PCS',
+              baseQty: 100,
+              segmentId: 'WARUNG',
+              clientTimestamp: nowStr,
+              serverTimestamp: null,
+              deviceId: 'LOCAL',
+              userId: 'SYSTEM',
+              reason: 'Stok Awal Sistem (OPENING_BALANCE)',
+              costSnapshot: 78000,
+              createdAt: nowStr,
+              quantity: 100,
+              type: 'IN',
+              timestamp: nowStr
+            },
+            {
+              stockMovementId: 'sm_init_p2',
+              productId: 'p2',
+              referenceId: 'init_p2',
+              transactionId: 'init_p2',
+              movementType: 'OPENING_BALANCE',
+              qty: 50,
+              unit: 'KG',
+              baseQty: 50,
+              segmentId: 'IKAN',
+              clientTimestamp: nowStr,
+              serverTimestamp: null,
+              deviceId: 'LOCAL',
+              userId: 'SYSTEM',
+              reason: 'Stok Awal Sistem (OPENING_BALANCE)',
+              costSnapshot: 28000,
+              createdAt: nowStr,
+              quantity: 50,
+              type: 'IN',
+              timestamp: nowStr
+            }
+          ]);
+
           // Seed initial costs
           await db.productCosts.bulkAdd(initialProducts.map(p => ({
             productId: p.productId,

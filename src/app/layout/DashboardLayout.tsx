@@ -25,7 +25,9 @@ import {
   Fish,
   Smartphone,
   Lock,
-  Clock
+  Clock,
+  CalendarClock,
+  Receipt
 } from 'lucide-react';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { db } from '@/core/database';
@@ -117,13 +119,13 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
     { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={18} /> },
     { id: 'pos', label: 'POS', icon: <ShoppingCart size={18} /> },
     { id: 'shift', label: 'Cashier Shift', icon: <ClipboardList size={18} /> },
-    { id: 'shift-history', label: 'Shift History', icon: <History size={18} /> },
-    { id: 'transactions', label: 'Transactions', icon: <History size={18} /> },
+    { id: 'shift-history', label: 'Shift History', icon: <CalendarClock size={18} /> },
+    { id: 'transactions', label: 'Transactions', icon: <Receipt size={18} /> },
     { id: 'customers', label: 'Customers', icon: <Users size={18} /> },
     { id: 'digital', label: 'Digital Services', icon: <Smartphone size={18} /> },
     { id: 'inventory', label: 'Inventory', icon: <Package size={18} />, disabled: !isOwner },
     { id: 'fish', label: 'Fish Management', icon: <Fish size={18} />, disabled: !isOwner },
-    { id: 'bundles', label: 'Bundles & Packages', icon: <Layers size={18} />, disabled: !isOwner },
+    { id: 'bundles', label: 'Bundles & Packages', icon: <Layers size={18} /> },
     { id: 'stock-opname', label: 'Stock Opname / Count', icon: <ClipboardList size={18} /> },
     { id: 'suppliers', label: 'Suppliers', icon: <Truck size={18} />, disabled: !isOwner },
     { id: 'purchases', label: 'Purchases', icon: <ShoppingBag size={18} />, disabled: !isOwner },

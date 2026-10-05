@@ -12,11 +12,12 @@ import {
   History, 
   ArrowRight,
   CheckCircle,
-  AlertTriangle
+  AlertTriangle,
+  CalendarClock
 } from 'lucide-react';
 import { format } from 'date-fns';
 
-export default function Shift() {
+export default function Shift({ onNavigate }: { onNavigate?: (tab: string) => void } = {}) {
   const { currentUser } = useAuthStore();
   const { addToast } = useToastStore();
   const deviceId = 'device-1'; // Should ideally be from a device store
@@ -94,11 +95,21 @@ export default function Shift() {
 
   return (
     <div className="space-y-8 pb-20">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Manajemen Shift</h2>
           <p className="text-slate-500 text-sm font-medium">Buka dan tutup sesi kasir untuk rekonsiliasi uang.</p>
         </div>
+        {onNavigate && (
+          <button
+            onClick={() => onNavigate('shift-history')}
+            className="flex items-center gap-2 px-4 py-2.5 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 rounded-2xl font-black text-xs uppercase tracking-wider transition-all shadow-xs"
+          >
+            <CalendarClock size={16} />
+            <span>Menu Shift History</span>
+            <ArrowRight size={14} />
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -214,11 +225,25 @@ export default function Shift() {
 
         {/* Shift History */}
         <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm">
-          <div className="flex items-center gap-3 mb-8">
-            <div className="w-10 h-10 bg-slate-900 text-white rounded-xl flex items-center justify-center">
-              <History size={20} />
+          <div className="flex items-center justify-between mb-8">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-slate-900 text-white rounded-xl flex items-center justify-center">
+                <History size={20} />
+              </div>
+              <div>
+                <h3 className="font-black text-slate-900 uppercase tracking-tight">Riwayat Sesi</h3>
+                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">10 Sesi Terakhir</p>
+              </div>
             </div>
-            <h3 className="font-black text-slate-900 uppercase tracking-tight">Riwayat Sesi</h3>
+            {onNavigate && (
+              <button
+                onClick={() => onNavigate('shift-history')}
+                className="text-xs font-black text-indigo-600 hover:text-indigo-800 flex items-center gap-1 uppercase tracking-wider group"
+              >
+                <span>Lihat Semua</span>
+                <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
+              </button>
+            )}
           </div>
 
           <div className="space-y-4">

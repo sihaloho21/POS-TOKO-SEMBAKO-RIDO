@@ -13,6 +13,8 @@ import type {
 import { addDays } from 'date-fns';
 import { AuditEngine } from './audit-engine';
 import { LoyaltyEngine } from './loyalty-engine';
+import { StockService } from './services/stock-service';
+import { BundleService } from './services/bundle-service';
 
 export class TransactionEngine {
   static async createSale(params: {
@@ -25,9 +27,42 @@ export class TransactionEngine {
     paymentMethodId: string;
     moneyStorageId: 'WARUNG' | 'IKAN' | 'UANG_DIGITAL';
     type: 'SALE' | 'GAJIAN';
+    allowInsufficientStock?: boolean;
   }): Promise<string> {
     const transactionId = uuidv4();
     const timestamp = new Date().toISOString();
+    
+    // Validate items and resolve bundle HPP/component snapshots at finalization
+    for (const item of params.items) {
+      const product = await db.products.get(item.productId);
+      if (!product) continue;
+
+      if (product.productType === 'BUNDLE') {
+        const bundleValidation = await BundleService.validateBundleForSale(
+          item.productId,
+          item.quantity,
+          !!params.allowInsufficientStock
+        );
+        if (!bundleValidation.valid) {
+          throw new Error(bundleValidation.error || `Validasi paket ${product.name} gagal.`);
+        }
+        item.isBundle = true;
+        item.hppSnapshot = bundleValidation.totalHpp;
+        item.bundleComponentsSnapshot = await BundleService.createBundleSnapshot(
+          item.productId,
+          item.quantity
+        );
+      } else {
+        const stockValidation = await StockService.validateSaleItems(
+          [item],
+          !!params.allowInsufficientStock
+        );
+        if (!stockValidation.valid) {
+          throw new Error(stockValidation.error || 'Stok tidak mencukupi untuk item penjualan.');
+        }
+        item.hppSnapshot = product.hpp;
+      }
+    }
     
     const subtotal = params.items.reduce((acc, item) => acc + item.subtotal, 0);
     const total = subtotal - params.discount;
@@ -64,64 +99,83 @@ export class TransactionEngine {
       const product = await db.products.get(item.productId);
       if (!product) continue;
 
-      let baseQty = item.quantity;
-      // Multi-unit conversion snapshot (PRD 9)
-      if (item.unit !== product.baseUnit) {
-        const conversion = product.conversionRules.find(r => r.toUnit === item.unit);
-        if (conversion) {
-          baseQty = item.quantity * conversion.factor;
-        }
-      }
+      if (product.productType === 'BUNDLE' && item.bundleComponentsSnapshot) {
+        // Bundle does NOT have physical stock itself.
+        // Selling bundle reduces component stock!
+        for (const comp of item.bundleComponentsSnapshot) {
+          const compProduct = await db.products.get(comp.componentProductId);
+          await StockService.recordMovement({
+            productId: comp.componentProductId,
+            movementType: 'BUNDLE_COMPONENT_OUT',
+            qty: comp.totalQty,
+            unit: comp.unit,
+            baseQty: comp.totalQty,
+            referenceId: transactionId,
+            transactionId,
+            segmentId: compProduct?.productType === 'FISH' ? 'IKAN' : 'WARUNG',
+            reason: `Komponen Paket ${product.name} (${item.quantity}x)`,
+            costSnapshot: comp.wacSnapshot,
+            userId: params.cashierId,
+            deviceId: params.deviceId,
+            timestamp
+          });
 
-      // Record Stock Movement
-      const stockMovement: StockMovement = {
-        stockMovementId: uuidv4(),
-        productId: item.productId,
-        quantity: -baseQty,
-        type: 'OUT',
-        reason: 'SALE',
-        referenceId: transactionId,
-        referenceType: 'TRANSACTION',
-        timestamp
-      };
-      await db.stockMovements.add(stockMovement);
-
-      // Update Local Stock Cache (derived but kept for UI performance)
-      await db.products.update(item.productId, {
-        stock: product.stock - baseQty,
-        updatedAt: timestamp
-      });
-
-      // Handle Bundle Components (PRD 10)
-      if (product.productType === 'BUNDLE') {
-        const bundle = await db.bundles.get(item.productId);
-        if (bundle) {
-          for (const comp of bundle.components) {
-            const compProduct = await db.products.get(comp.productId);
-            if (compProduct) {
-              const compBaseQty = comp.qty * item.quantity; 
-              const compMovement: StockMovement = {
-                stockMovementId: uuidv4(),
-                productId: comp.productId,
-                quantity: -compBaseQty,
-                type: 'OUT',
-                reason: 'SALE',
-                referenceId: transactionId,
-                referenceType: 'TRANSACTION',
-                timestamp
-              };
-              await db.stockMovements.add(compMovement);
-              await db.products.update(comp.productId, {
-                stock: compProduct.stock - compBaseQty,
-                updatedAt: timestamp
-              });
-              await this.addToQueue('stockMovements', compMovement.stockMovementId, 'CREATE', compMovement);
-            }
+          // Check if shortage occurred with Owner override
+          const compStock = await StockService.getDerivedStock(comp.componentProductId);
+          if (compStock < 0) {
+            await StockService.flagStockShortageConflict({
+              productId: comp.componentProductId,
+              productName: comp.nameSnapshot,
+              currentStock: compStock,
+              userId: params.cashierId,
+              deviceId: params.deviceId,
+              referenceId: transactionId,
+              reason: `Penjualan paket ${product.name} dengan Owner Override menyebabkan shortage komponen ${comp.nameSnapshot} (${compStock} ${comp.unit}).`
+            });
           }
         }
-      }
+      } else {
+        // Physical product
+        let baseQty = item.quantity;
+        // Multi-unit conversion snapshot (PRD 9)
+        if (item.unit !== product.baseUnit) {
+          const conversion = product.conversionRules?.find(r => r.toUnit === item.unit);
+          if (conversion && conversion.factor > 0) {
+            baseQty = item.quantity * conversion.factor;
+          }
+        }
 
-      await this.addToQueue('stockMovements', stockMovement.stockMovementId, 'CREATE', stockMovement);
+        // Record Stock Movement via StockService (derives stock balance, never direct edit)
+        await StockService.recordMovement({
+          productId: item.productId,
+          movementType: 'SALE_OUT',
+          qty: item.quantity,
+          unit: item.unit,
+          baseQty,
+          referenceId: transactionId,
+          transactionId,
+          segmentId: params.moneyStorageId === 'IKAN' ? 'IKAN' : 'WARUNG',
+          reason: 'SALE_OUT',
+          costSnapshot: product.hpp,
+          userId: params.cashierId,
+          deviceId: params.deviceId,
+          timestamp
+        });
+
+        // Check if override resulted in negative stock shortage -> flag for review
+        const derivedStock = await StockService.getDerivedStock(item.productId);
+        if (derivedStock < 0) {
+          await StockService.flagStockShortageConflict({
+            productId: item.productId,
+            productName: product.name,
+            currentStock: derivedStock,
+            userId: params.cashierId,
+            deviceId: params.deviceId,
+            referenceId: transactionId,
+            reason: `Penjualan kasir (${transaction.receiptNumber}) menyebabkan stok negatif: ${derivedStock} ${product.baseUnit}`
+          });
+        }
+      }
     }
 
     // 5. Handle Finance & Receivables (PRD 14, 27)
@@ -204,36 +258,56 @@ export class TransactionEngine {
 
     // 2. Reverse Stock Movements
     for (const item of transaction.items) {
-      const product = await db.products.get(item.productId);
-      if (!product) continue;
-
-      let baseQty = item.quantity;
-      if (item.unit !== product.baseUnit) {
-        const conversion = product.conversionRules.find(r => r.toUnit === item.unit);
-        if (conversion) {
-          baseQty = item.quantity * conversion.factor;
+      if (item.isBundle && item.bundleComponentsSnapshot?.length) {
+        // Return/void whole bundle - reverses each component movement
+        const compReversalType = params.actionType === 'VOID' ? 'VOID_REVERSAL_IN' : 'BUNDLE_RETURN_COMPONENT_IN';
+        for (const comp of item.bundleComponentsSnapshot) {
+          const compProduct = await db.products.get(comp.componentProductId);
+          await StockService.recordMovement({
+            productId: comp.componentProductId,
+            movementType: compReversalType,
+            qty: comp.totalQty,
+            unit: comp.unit,
+            baseQty: comp.totalQty,
+            referenceId: params.transactionId,
+            transactionId: params.transactionId,
+            segmentId: compProduct?.productType === 'FISH' ? 'IKAN' : 'WARUNG',
+            reason: params.reason || (params.actionType === 'VOID' ? `Batal Transaksi (Void) Komponen Paket ${item.nameSnapshot}` : `Retur Komponen Paket: ${item.nameSnapshot}`),
+            costSnapshot: comp.wacSnapshot,
+            userId: params.userId,
+            deviceId: transaction.deviceId,
+            timestamp
+          });
         }
+      } else {
+        const product = await db.products.get(item.productId);
+        if (!product) continue;
+
+        let baseQty = item.quantity;
+        if (item.unit !== product.baseUnit) {
+          const conversion = product.conversionRules?.find(r => r.toUnit === item.unit);
+          if (conversion && conversion.factor > 0) {
+            baseQty = item.quantity * conversion.factor;
+          }
+        }
+
+        const reversalType = params.actionType === 'VOID' ? 'VOID_REVERSAL_IN' : 'SALE_RETURN_IN';
+        await StockService.recordMovement({
+          productId: item.productId,
+          movementType: reversalType,
+          qty: item.quantity,
+          unit: item.unit,
+          baseQty,
+          referenceId: params.transactionId,
+          transactionId: params.transactionId,
+          segmentId: transaction.moneyStorageId === 'IKAN' ? 'IKAN' : 'WARUNG',
+          reason: params.reason || (params.actionType === 'VOID' ? 'VOID_REVERSAL_IN' : 'SALE_RETURN_IN'),
+          costSnapshot: product.hpp,
+          userId: params.userId,
+          deviceId: transaction.deviceId,
+          timestamp
+        });
       }
-
-      const reverseMovement: StockMovement = {
-        stockMovementId: uuidv4(),
-        productId: item.productId,
-        quantity: baseQty, // Add back stock
-        type: 'IN',
-        reason: 'RETURN',
-        referenceId: params.transactionId,
-        referenceType: 'TRANSACTION',
-        timestamp
-      };
-      await db.stockMovements.add(reverseMovement);
-
-      // Restore Product Stock Cache
-      await db.products.update(item.productId, {
-        stock: product.stock + baseQty,
-        updatedAt: timestamp
-      });
-
-      await this.addToQueue('stockMovements', reverseMovement.stockMovementId, 'CREATE', reverseMovement);
     }
 
     // 3. Reverse Finance Event if was cash sale

@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { db } from '../database';
 import type { StockOpname, StockMovement, AuditLog } from '../types';
 import { AuditEngine } from '../audit-engine';
+import { StockService } from './stock-service';
 
 export class StockOpnameService {
   static async startOpname(userId: string, deviceId: string): Promise<string> {
@@ -48,36 +49,21 @@ export class StockOpnameService {
     for (const item of opname.items) {
       const diff = item.physicalQty - item.expectedQty;
       if (diff !== 0) {
-        // Create Adjustment Movement
-        const movement: StockMovement = {
-          stockMovementId: uuidv4(),
-          productId: item.productId,
-          quantity: diff,
-          type: diff > 0 ? 'IN' : 'OUT',
-          reason: 'OPNAME',
-          referenceId: opnameId,
-          referenceType: 'OPNAME',
-          timestamp
-        };
-        await db.stockMovements.add(movement);
-
-        // Update Product Stock
         const product = await db.products.get(item.productId);
-        if (product) {
-          await db.products.update(item.productId, {
-            stock: product.stock + diff,
-            updatedAt: timestamp
-          });
-        }
-
-        await db.syncQueue.add({
-          entityType: 'stockMovements',
-          entityId: movement.stockMovementId,
-          action: 'CREATE',
-          payload: movement,
-          status: 'PENDING',
-          retryCount: 0,
-          createdAt: timestamp
+        const movementType = diff > 0 ? 'STOCK_OPNAME_IN' : 'STOCK_OPNAME_OUT';
+        
+        await StockService.recordMovement({
+          productId: item.productId,
+          movementType,
+          qty: Math.abs(diff),
+          unit: product?.baseUnit || 'PCS',
+          baseQty: Math.abs(diff),
+          referenceId: opnameId,
+          segmentId: product?.productType === 'FISH' ? 'IKAN' : 'WARUNG',
+          reason: `Hasil Stock Opname (${diff > 0 ? 'Surplus' : 'Defisit'} ${Math.abs(diff)})`,
+          userId,
+          deviceId,
+          timestamp
         });
       }
     }

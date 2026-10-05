@@ -27,14 +27,16 @@ import {
   Printer,
   Share2,
   PlusCircle,
-  Layers
+  Layers,
+  Eye
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import type { Product, TransactionItem, Customer, Transaction } from '@/core/types';
+import type { Product, TransactionItem, Customer, Transaction, Bundle } from '@/core/types';
 import { v4 as uuidv4 } from 'uuid';
 import { ShiftService } from '@/core/services/shift-service';
 import { PrintService } from '@/core/utils/print-service';
 import { useToastStore } from '@/core/toast-store';
+import { BundleService, type FlattenedBundleComponent } from '@/core/services/bundle-service';
 import ShiftSummaryWidget from './ShiftSummaryWidget';
 
 export function WeightModal({ product, onConfirm, onClose }: { product: Product, onConfirm: (kg: number) => void, onClose: () => void }) {
@@ -108,6 +110,18 @@ export default function POS() {
   const [ownerPinInput, setOwnerPinInput] = useState('');
   const [approvalError, setApprovalError] = useState('');
 
+  // Owner Stock Override Modal
+  const [overrideStockPrompt, setOverrideStockPrompt] = useState<{ message: string; method: string } | null>(null);
+  const [overrideOwnerPin, setOverrideOwnerPin] = useState('');
+  const [overridePinError, setOverridePinError] = useState('');
+
+  // Bundle Availability & Preview
+  const [bundleStocks, setBundleStocks] = useState<Record<string, number>>({});
+  const [inspectBundle, setInspectBundle] = useState<{
+    bundle: Bundle;
+    breakdown: FlattenedBundleComponent[];
+  } | null>(null);
+
   const currentShift = useLiveQuery(() => ShiftService.getCurrentShift('device-1'), []);
 
   // Hotkeys handling (PRD 97)
@@ -149,6 +163,38 @@ export default function POS() {
   const customers = useLiveQuery(() => db.customers.toArray());
   const heldTransactions = useLiveQuery(() => db.transactions.where('status').equals('HOLD').toArray());
 
+  // Dynamically calculate assemblable bundle availability from component stock
+  useEffect(() => {
+    let isMounted = true;
+    const calculateStocks = async () => {
+      if (!products) return;
+      const bundleProds = products.filter(p => p.productType === 'BUNDLE');
+      const stocks: Record<string, number> = {};
+      for (const bp of bundleProds) {
+        try {
+          stocks[bp.productId] = await BundleService.getAvailableBundleStock(bp.productId);
+        } catch {
+          stocks[bp.productId] = 0;
+        }
+      }
+      if (isMounted) setBundleStocks(stocks);
+    };
+    calculateStocks();
+    return () => { isMounted = false; };
+  }, [products]);
+
+  const handleInspectBundle = async (bundleId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const bundle = await db.bundles.get(bundleId);
+    if (!bundle) return;
+    try {
+      const breakdown = await BundleService.flattenComponents(bundleId, 1);
+      setInspectBundle({ bundle, breakdown });
+    } catch {
+      setInspectBundle({ bundle, breakdown: [] });
+    }
+  };
+
   const subtotal = cart.reduce((acc, item) => acc + item.subtotal, 0);
 
   const addToCart = (product: Product, kg?: number) => {
@@ -185,7 +231,8 @@ export default function POS() {
         discount: 0,
         netPrice: pricing.price,
         subtotal: pricing.price * quantity,
-        hppSnapshot: product.hpp
+        hppSnapshot: product.hpp,
+        isBundle: product.productType === 'BUNDLE'
       }]);
     }
     
@@ -284,7 +331,7 @@ export default function POS() {
     executeFinalSale('GAJIAN');
   };
 
-  const executeFinalSale = async (finalMethod: string) => {
+  const executeFinalSale = async (finalMethod: string, allowInsufficientStock: boolean = false) => {
     if (!currentUser || !currentShift) return;
 
     setIsProcessing(true);
@@ -298,7 +345,8 @@ export default function POS() {
         discount: 0,
         paymentMethodId: finalMethod,
         moneyStorageId: moneyStorageId,
-        type: transactionType
+        type: transactionType,
+        allowInsufficientStock
       });
       
       const transaction = await db.transactions.get(transactionId);
@@ -311,15 +359,41 @@ export default function POS() {
       setSelectedCustomer(null);
       setTransactionType('SALE');
       setIsPaymentModalOpen(false);
+      setOverrideStockPrompt(null);
       addToast(`Transaksi ${transaction?.receiptNumber || ''} Berhasil!`, 'success');
       setShowSuccess(true);
       setTimeout(() => setShowSuccess(false), 3000);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Checkout failed:', error);
-      addToast('Gagal memproses transaksi. Cek riwayat atau coba lagi.', 'error');
+      const errMsg = error?.message || 'Gagal memproses transaksi.';
+      const isShortage = errMsg.toLowerCase().includes('stok') || 
+                         errMsg.toLowerCase().includes('mencukupi') || 
+                         errMsg.toLowerCase().includes('shortage');
+      if (isShortage) {
+        setOverrideStockPrompt({
+          message: errMsg,
+          method: finalMethod
+        });
+        setOverrideOwnerPin('');
+        setOverridePinError('');
+      } else {
+        addToast(errMsg, 'error');
+      }
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  const handleKasirStockOverride = async () => {
+    if (!overrideStockPrompt) return;
+    const ownerUser = await db.users.filter(u => u.role === 'OWNER' && u.pinHash === overrideOwnerPin).first();
+    if (!ownerUser) {
+      setOverridePinError('PIN Owner salah! Otorisasi ditolak.');
+      return;
+    }
+    const method = overrideStockPrompt.method;
+    setOverrideStockPrompt(null);
+    executeFinalSale(method, true);
   };
 
   const handleSearchChange = (val: string) => {
@@ -470,26 +544,65 @@ export default function POS() {
           <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
             {products && products.length > 0 ? (
               <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
-                {products.map((product) => (
-                  <button
-                    key={product.productId}
-                    onClick={() => addToCart(product)}
-                    className="group flex flex-col p-3 bg-white border border-slate-100 rounded-2xl hover:border-blue-500 hover:shadow-lg transition-all text-left relative overflow-hidden"
-                  >
-                    <div className="w-full aspect-square bg-slate-50 rounded-xl mb-2 flex items-center justify-center text-slate-300 group-hover:text-blue-500 transition-colors">
-                      {product.productType === 'FISH' ? <Weight size={32} /> : <Package size={32} />}
-                    </div>
-                    <h3 className="font-bold text-slate-900 text-xs line-clamp-2 leading-tight mb-1">{product.name}</h3>
-                    <div className="mt-auto flex justify-between items-center pt-1 border-t border-slate-50">
-                      <span className="font-black text-blue-600 text-xs tabular-nums">
-                        Rp {product.normalPrice.toLocaleString()}
-                      </span>
-                      <span className="text-[10px] text-slate-400 font-bold">
-                        Stok: {product.stock} {product.baseUnit}
-                      </span>
-                    </div>
-                  </button>
-                ))}
+                {products.map((product) => {
+                  const isBundle = product.productType === 'BUNDLE';
+                  const availableBundles = isBundle ? (bundleStocks[product.productId] ?? 0) : 0;
+
+                  return (
+                    <button
+                      key={product.productId}
+                      onClick={() => addToCart(product)}
+                      className="group flex flex-col p-3 bg-white border border-slate-100 rounded-2xl hover:border-blue-500 hover:shadow-lg transition-all text-left relative overflow-hidden"
+                    >
+                      {isBundle && (
+                        <span className="absolute top-2 right-2 text-[8px] font-black uppercase tracking-wider bg-indigo-600 text-white px-1.5 py-0.5 rounded-md shadow-sm z-10">
+                          PAKET
+                        </span>
+                      )}
+
+                      <div className="w-full aspect-square bg-slate-50 rounded-xl mb-2 flex items-center justify-center text-slate-300 group-hover:text-blue-500 transition-colors">
+                        {product.productType === 'FISH' ? (
+                          <Weight size={32} />
+                        ) : isBundle ? (
+                          <Layers size={32} className="text-indigo-500 group-hover:text-indigo-600" />
+                        ) : (
+                          <Package size={32} />
+                        )}
+                      </div>
+                      <h3 className="font-bold text-slate-900 text-xs line-clamp-2 leading-tight mb-1">{product.name}</h3>
+                      
+                      <div className="mt-auto pt-1 border-t border-slate-50 space-y-1">
+                        <div className="flex justify-between items-center">
+                          <span className="font-black text-blue-600 text-xs tabular-nums">
+                            Rp {product.normalPrice.toLocaleString()}
+                          </span>
+                          {isBundle && (
+                            <button
+                              type="button"
+                              onClick={(e) => handleInspectBundle(product.productId, e)}
+                              className="text-[10px] text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-0.5 px-1 py-0.5 rounded hover:bg-indigo-50"
+                              title="Lihat isi paket"
+                            >
+                              <Eye size={11} /> Isi
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="text-[10px] font-bold">
+                          {isBundle ? (
+                            <span className="text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded inline-block">
+                              Tersedia: {availableBundles} paket
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">
+                              Stok: {product.stock} {product.baseUnit}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center h-full text-center p-8 text-slate-400">
@@ -573,10 +686,28 @@ export default function POS() {
                     className="flex items-center gap-2.5 p-2.5 bg-slate-50 rounded-xl border border-slate-100 hover:border-blue-200 transition-colors"
                   >
                     <div className="flex-1 min-w-0">
-                      <h4 className="text-xs font-bold text-slate-900 truncate uppercase">{item.nameSnapshot}</h4>
-                      <p className="text-[10px] text-slate-500 font-bold">
-                        Rp {item.unitPrice.toLocaleString()} / {item.unit}
-                      </p>
+                      <div className="flex items-center gap-1.5">
+                        <h4 className="text-xs font-bold text-slate-900 truncate uppercase">{item.nameSnapshot}</h4>
+                        {item.isBundle && (
+                          <span className="text-[8px] bg-indigo-100 text-indigo-700 font-black px-1 py-0.5 rounded uppercase shrink-0">
+                            PAKET
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <p className="text-[10px] text-slate-500 font-bold">
+                          Rp {item.unitPrice.toLocaleString()} / {item.unit}
+                        </p>
+                        {item.isBundle && (
+                          <button
+                            type="button"
+                            onClick={() => handleInspectBundle(item.productId)}
+                            className="text-[9px] text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-0.5 hover:underline"
+                          >
+                            <Eye size={10} /> Isi
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     <div className="flex items-center gap-1.5 bg-white rounded-lg border border-slate-200 p-1 shadow-sm">
@@ -1009,6 +1140,167 @@ export default function POS() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Owner / Kasir Stock Shortage Override Modal */}
+      {overrideStockPrompt && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-in zoom-in-95">
+            <div className="flex justify-between items-center pb-3 border-b border-slate-100 mb-4">
+              <div className="flex items-center gap-2 text-amber-600 font-black text-sm uppercase">
+                <AlertTriangle size={18} />
+                <span>Otorisasi Stok Kurang (Stock Override)</span>
+              </div>
+              <button onClick={() => setOverrideStockPrompt(null)} className="p-1 text-slate-400 hover:text-slate-600">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-4 mb-6">
+              <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl text-xs text-amber-900 space-y-2">
+                <p className="font-bold">{overrideStockPrompt.message}</p>
+                <p className="text-[11px] text-amber-700">
+                  Sesuai aturan PRD 11 & 12, sistem normal mencegah stok negatif. Namun, penjualan dengan stok kurang dapat diizinkan melalui <strong>Owner Override</strong> dan akan otomatis dicatat sebagai <strong>STOCK_PENDING_REVIEW</strong>.
+                </p>
+              </div>
+
+              {currentUser?.role === 'KASIR' ? (
+                <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block">
+                    Masukkan PIN Owner untuk Otorisasi
+                  </label>
+                  <input
+                    type="password"
+                    maxLength={6}
+                    placeholder="PIN Owner"
+                    value={overrideOwnerPin}
+                    onChange={(e) => {
+                      setOverrideOwnerPin(e.target.value);
+                      setOverridePinError('');
+                    }}
+                    className="w-full text-center tracking-widest text-xl font-black py-2.5 bg-white border border-slate-200 rounded-xl outline-none focus:border-amber-500"
+                  />
+                  {overridePinError && (
+                    <p className="text-[11px] text-rose-600 font-bold text-center">{overridePinError}</p>
+                  )}
+                  <p className="text-[10px] text-slate-400 text-center">
+                    Minta Owner untuk memasukkan PIN otorisasi langsung di kasir.
+                  </p>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-600 italic">
+                  Sebagai Owner, Anda dapat langsung mengonfirmasi override ini.
+                </p>
+              )}
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => setOverrideStockPrompt(null)}
+                className="flex-1 py-3 font-bold text-xs uppercase tracking-wider text-slate-500 hover:bg-slate-100 rounded-xl"
+              >
+                Batal
+              </button>
+              {currentUser?.role === 'KASIR' ? (
+                <button
+                  disabled={isProcessing || !overrideOwnerPin}
+                  onClick={handleKasirStockOverride}
+                  className="flex-1 py-3 bg-amber-600 hover:bg-amber-500 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-amber-200 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  <ShieldCheck size={16} />
+                  <span>Verifikasi & Proses</span>
+                </button>
+              ) : (
+                <button
+                  disabled={isProcessing}
+                  onClick={() => executeFinalSale(overrideStockPrompt.method, true)}
+                  className="flex-1 py-3 bg-amber-600 hover:bg-amber-500 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-amber-200 transition-all flex items-center justify-center gap-2"
+                >
+                  <ShieldCheck size={16} />
+                  <span>Izinkan & Proses</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Inspect Bundle Contents Modal (Kasir vs Owner View) */}
+      {inspectBundle && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-in zoom-in-95">
+            <div className="flex justify-between items-center pb-3 border-b border-slate-100 mb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                  <Layers size={18} />
+                </div>
+                <div>
+                  <h3 className="font-black text-slate-900 text-sm uppercase tracking-tight">
+                    {currentUser?.role === 'OWNER' ? 'Breakdown Paket & HPP' : 'Rincian Isi Paket'}
+                  </h3>
+                  <span className="text-xs font-bold text-indigo-600">{inspectBundle.bundle.name}</span>
+                </div>
+              </div>
+              <button onClick={() => setInspectBundle(null)} className="p-1 text-slate-400 hover:text-slate-600">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-3 bg-slate-50 rounded-2xl mb-3 text-xs flex justify-between items-center border border-slate-100">
+              <span className="text-slate-500 font-medium">Harga Jual Paket:</span>
+              <span className="font-black text-blue-600 tabular-nums text-sm">
+                Rp {inspectBundle.bundle.price.toLocaleString()}
+              </span>
+            </div>
+
+            <div className="space-y-1.5 mb-4 max-h-56 overflow-y-auto pr-1 custom-scrollbar">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                Isi Komponen ({inspectBundle.breakdown.length}):
+              </p>
+              {inspectBundle.breakdown.map((comp, idx) => (
+                <div key={idx} className="p-2.5 bg-white border border-slate-200 rounded-xl text-xs space-y-1 shadow-sm">
+                  <div className="flex justify-between items-center">
+                    <span className="font-bold text-slate-800">{comp.name}</span>
+                    <span className="font-black text-blue-600 tabular-nums">
+                      {comp.totalQty} {comp.unit}
+                    </span>
+                  </div>
+                  {/* Kasir sees only contents, Owner sees breakdown and HPP */}
+                  {currentUser?.role === 'OWNER' && (
+                    <div className="flex justify-between text-[10px] text-slate-500 pt-1 border-t border-slate-100">
+                      <span>WAC: Rp {comp.wac.toLocaleString()}</span>
+                      <span className="font-bold text-slate-700">Subtotal HPP: Rp {comp.subtotalHpp.toLocaleString()}</span>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {currentUser?.role === 'OWNER' && (
+              <div className="p-3 bg-indigo-50 border border-indigo-100 rounded-2xl text-xs space-y-1 mb-4">
+                <div className="flex justify-between text-slate-700">
+                  <span>Total Derived HPP:</span>
+                  <span className="font-bold tabular-nums">
+                    Rp {inspectBundle.breakdown.reduce((s, c) => s + c.subtotalHpp, 0).toLocaleString()}
+                  </span>
+                </div>
+                <div className="flex justify-between text-emerald-700 font-bold">
+                  <span>Laba Kotor:</span>
+                  <span className="tabular-nums">
+                    Rp {(inspectBundle.bundle.price - inspectBundle.breakdown.reduce((s, c) => s + c.subtotalHpp, 0)).toLocaleString()}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            <button
+              onClick={() => setInspectBundle(null)}
+              className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold uppercase tracking-wider"
+            >
+              Tutup
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Weight Modal for Fish items */}
       {weightProduct && (

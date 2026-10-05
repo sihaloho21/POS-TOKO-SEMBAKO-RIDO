@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { db } from '../database';
 import type { Product } from '../types';
 import { AuditEngine } from '../audit-engine';
+import { StockService } from './stock-service';
 import Papa from 'papaparse';
 
 export class ProductService {
@@ -106,7 +107,7 @@ export class ProductService {
       normalPrice: Number(formData.normalPrice || 0),
       hpp: hpp ?? Number(formData.hpp || 0),
       priceAlertThreshold: formData.priceAlertThreshold ? Number(formData.priceAlertThreshold) : undefined,
-      stock: Number(formData.stock || 0),
+      stock: isNew ? 0 : (oldProduct?.stock ?? 0),
       minimumStock: Number(formData.minimumStock || 0),
       targetStock: Number(formData.targetStock || 0),
       saleUnits: formData.saleUnits || [formData.baseUnit || 'PCS'],
@@ -116,6 +117,24 @@ export class ProductService {
     };
 
     await db.products.put(finalProduct);
+
+    // If new product has initial stock, record OPENING_BALANCE movement
+    if (isNew && Number(formData.stock || 0) > 0) {
+      await StockService.recordMovement({
+        productId,
+        movementType: 'OPENING_BALANCE',
+        qty: Number(formData.stock),
+        unit: finalProduct.baseUnit,
+        baseQty: Number(formData.stock),
+        referenceId: `init_${productId.slice(0, 8)}`,
+        segmentId: finalProduct.productType === 'FISH' ? 'IKAN' : 'WARUNG',
+        reason: 'Stok Awal Produk Baru (OPENING_BALANCE)',
+        costSnapshot: hpp ?? finalProduct.hpp,
+        userId: 'SYSTEM',
+        deviceId: 'LOCAL',
+        timestamp
+      });
+    }
 
     // 3. Handle HPP (Separately)
     if (hpp !== undefined) {

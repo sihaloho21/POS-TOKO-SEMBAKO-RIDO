@@ -1,4 +1,5 @@
 import { db } from '../database';
+import { StockService } from './stock-service';
 
 export interface IntegrityReport {
   timestamp: string;
@@ -20,8 +21,7 @@ export class IntegrityService {
       const products = await db.products.toArray();
       let stockIssues = 0;
       for (const p of products) {
-        const movements = await db.stockMovements.where('productId').equals(p.productId).toArray();
-        const calculatedStock = movements.reduce((acc, m) => acc + m.quantity, 0);
+        const calculatedStock = await StockService.getDerivedStock(p.productId);
         
         // Allow for some minor deviation if initial stock wasn't from a movement (though in this system it should be)
         if (Math.abs(calculatedStock - p.stock) > 0.001) {

@@ -73,6 +73,10 @@ export class LocalDatabase extends Dexie {
       settings: 'id',
       syncQueue: '++queueId, entityType, entityId, status, createdAt'
     });
+
+    this.version(8).stores({
+      stockMovements: 'stockMovementId, productId, movementType, referenceId, clientTimestamp, timestamp, segmentId'
+    });
   }
 }
 

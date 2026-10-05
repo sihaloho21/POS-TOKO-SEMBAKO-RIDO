@@ -20,12 +20,14 @@ import {
   TrendingUp,
   Calendar,
   RefreshCw,
-  Flame
+  Flame,
+  Scale
 } from 'lucide-react';
 import type { Product, ProductCost } from '@/core/types';
 import { ProductService } from '@/core/services/product-service';
 import { ProductModal } from './ProductModal';
 import { StockHistory } from './StockHistory';
+import { StockAdjustmentModal } from './StockAdjustmentModal';
 import { InventoryHeatmap } from './InventoryHeatmap';
 import { ShelfTalkerModule } from './ShelfTalkerModule';
 import { useAuthStore } from '@/core/auth-store';
@@ -56,6 +58,8 @@ export default function Inventory() {
   const [bulkAdjustment, setBulkAdjustment] = useState({ percentage: 5, type: 'INCREASE' as 'INCREASE' | 'DECREASE' });
   const [viewingHistoryId, setViewingHistoryId] = useState<string | null>(null);
   const [viewingQRProduct, setViewingQRProduct] = useState<Product | null>(null);
+  const [isAdjustmentOpen, setIsAdjustmentOpen] = useState(false);
+  const [adjustmentProductId, setAdjustmentProductId] = useState<string | undefined>(undefined);
   
   const products = useLiveQuery(
     () => {
@@ -150,6 +154,17 @@ export default function Inventory() {
               Penyesuaian Harga ({selectedIds.length})
             </button>
           )}
+          <button 
+            onClick={() => {
+              setAdjustmentProductId(undefined);
+              setIsAdjustmentOpen(true);
+            }}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-indigo-100 transition-all shadow-xs"
+            title="Catat pergerakan stok manual (Rusak, Hilang, Kadaluarsa, dll)"
+          >
+            <Scale size={16} />
+            Penyesuaian Stok
+          </button>
           <button 
             onClick={handleExport}
             className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-slate-50 transition-all"
@@ -365,6 +380,16 @@ export default function Inventory() {
                       <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-all">
                           <button 
+                            onClick={() => {
+                              setAdjustmentProductId(product.productId);
+                              setIsAdjustmentOpen(true);
+                            }}
+                            className="p-2 text-slate-400 hover:text-indigo-600 transition-colors"
+                            title="Penyesuaian Stok (Stock Movement)"
+                          >
+                            <Scale size={18} />
+                          </button>
+                          <button 
                             onClick={() => setViewingHistoryId(viewingHistoryId === product.productId ? null : product.productId)}
                             className={`p-2 transition-colors ${viewingHistoryId === product.productId ? 'text-blue-600' : 'text-slate-400 hover:text-blue-600'}`}
                             title="Lihat Riwayat Stok"
@@ -552,6 +577,18 @@ export default function Inventory() {
           onClose={() => setIsImportModalOpen(false)} 
           onSuccess={() => {
             // No action needed, live query handles it
+          }}
+        />
+      )}
+      {isAdjustmentOpen && (
+        <StockAdjustmentModal 
+          initialProductId={adjustmentProductId}
+          onClose={() => {
+            setIsAdjustmentOpen(false);
+            setAdjustmentProductId(undefined);
+          }}
+          onSuccess={() => {
+            // Live queries handle updates
           }}
         />
       )}

@@ -51,9 +51,14 @@ export interface ProductCost {
 }
 
 export interface BundleComponent {
-  productId: string;
-  qty: number;
+  componentProductId: string;
+  productId?: string;
+  qtyPerBundle: number;
+  qty?: number;
   unit: string;
+  isNestedBundle?: boolean;
+  nestedBundleId?: string;
+  nameSnapshot?: string;
 }
 
 export interface Bundle {
@@ -64,6 +69,9 @@ export interface Bundle {
   cashPrice?: number;
   gajianPrice?: number;
   status: 'ACTIVE' | 'INACTIVE';
+  calculatedHpp?: number;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface Customer {
@@ -92,6 +100,17 @@ export interface Supplier {
   updatedAt: string;
 }
 
+export interface TransactionBundleComponentSnapshot {
+  componentProductId: string;
+  nameSnapshot: string;
+  qtyPerBundle: number;
+  totalQty: number;
+  unit: string;
+  wacSnapshot: number;
+  subtotalHpp: number;
+  isNestedBundle?: boolean;
+}
+
 export interface TransactionItem {
   productId: string;
   nameSnapshot: string;
@@ -104,6 +123,8 @@ export interface TransactionItem {
   netPrice: number;
   subtotal: number;
   hppSnapshot?: number; 
+  isBundle?: boolean;
+  bundleComponentsSnapshot?: TransactionBundleComponentSnapshot[];
 }
 
 export interface Transaction {
@@ -186,15 +207,58 @@ export interface FinanceEvent {
   timestamp: string;
 }
 
+export type StockMovementType =
+  | 'OPENING_BALANCE'
+  | 'PURCHASE_IN'
+  | 'SALE_OUT'
+  | 'SALE_RETURN_IN'
+  | 'BUNDLE_COMPONENT_OUT'
+  | 'BUNDLE_RETURN_COMPONENT_IN'
+  | 'STOCK_OPNAME_IN'
+  | 'STOCK_OPNAME_OUT'
+  | 'DAMAGED_OUT'
+  | 'LOST_OUT'
+  | 'EXPIRED_OUT'
+  | 'FISH_DEAD_OUT'
+  | 'ADJUSTMENT_IN'
+  | 'ADJUSTMENT_OUT'
+  | 'VOID_REVERSAL_IN'
+  | 'VOID_REVERSAL_OUT'
+  | 'SUPPLIER_RETURN_OUT'
+  | 'OTHER_VALIDATED_MOVEMENT';
+
+export type StockAdjustmentReason =
+  | 'Rusak'
+  | 'Hilang'
+  | 'Kadaluarsa'
+  | 'Ikan mati/tidak layak jual'
+  | 'Kesalahan stok opname'
+  | 'Salah Input'
+  | 'Lainnya';
+
 export interface StockMovement {
   stockMovementId: string;
   productId: string;
-  quantity: number; 
-  type: 'IN' | 'OUT' | 'ADJUST';
-  reason: 'SALE' | 'PURCHASE' | 'RETURN' | 'VOID' | 'OPNAME' | 'FISH_DEAD' | 'ADJUSTMENT' | 'BUNDLE_BREAKDOWN';
   referenceId: string;
-  referenceType: 'TRANSACTION' | 'PURCHASE' | 'OPNAME' | 'ADJUSTMENT' | 'STOCK_ADJUSTMENT';
-  timestamp: string;
+  transactionId?: string;
+  movementType: StockMovementType;
+  qty: number;
+  unit: string;
+  baseQty: number;
+  segmentId: 'WARUNG' | 'IKAN' | string;
+  clientTimestamp: string;
+  serverTimestamp?: string | null;
+  deviceId: string;
+  userId: string;
+  reason: string;
+  costSnapshot?: number;
+  createdAt: string;
+
+  // Backward compatibility fields
+  quantity?: number;
+  type?: 'IN' | 'OUT' | 'ADJUST';
+  referenceType?: string;
+  timestamp?: string;
 }
 
 export interface AuditLog {
@@ -213,7 +277,7 @@ export interface AuditLog {
 
 export interface BusinessConflict {
   conflictId: string;
-  type: 'STOCK_CONFLICT' | 'PRICE_CONFLICT' | 'STORE_STATUS_CONFLICT' | 'CONFIG_CONFLICT';
+  type: 'STOCK_CONFLICT' | 'STOCK_PENDING_REVIEW' | 'PRICE_CONFLICT' | 'STORE_STATUS_CONFLICT' | 'CONFIG_CONFLICT';
   entityType: string;
   entityId: string;
   deviceId: string;

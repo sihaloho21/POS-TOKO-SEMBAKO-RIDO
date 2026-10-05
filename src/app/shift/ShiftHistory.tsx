@@ -20,7 +20,7 @@ import {
 import { format, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
 import ShiftReport from './ShiftReport';
 
-export default function ShiftHistory() {
+export default function ShiftHistory({ onNavigate }: { onNavigate?: (tab: string) => void } = {}) {
   const [search, setSearch] = useState('');
   const [dateRange, setDateRange] = useState<{ start: string; end: string }>({
     start: '',
@@ -77,7 +77,16 @@ export default function ShiftHistory() {
           </p>
         </div>
 
-        <div className="flex gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          {onNavigate && (
+            <button
+              onClick={() => onNavigate('shift')}
+              className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-xs uppercase tracking-wider shadow-sm shadow-indigo-200 transition-all flex items-center gap-1.5"
+            >
+              <Clock size={14} />
+              <span>Kelola Sesi Kasir</span>
+            </button>
+          )}
           <div className="bg-white px-4 py-2 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-3">
             <div className="w-8 h-8 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center">
               <TrendingUp size={16} />

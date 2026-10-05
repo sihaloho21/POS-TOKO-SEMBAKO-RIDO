@@ -4,7 +4,8 @@ import { db } from '@/core/database';
 import { 
   RefreshCw,
   Package,
-  Users
+  Users,
+  CalendarClock
 } from 'lucide-react';
 import { SummaryCards } from './SummaryCards';
 import { LowStockBanner } from './LowStockBanner';
@@ -40,7 +41,13 @@ export default function Dashboard({ onTabChange }: { onTabChange: (tab: string) 
           <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Owner Dashboard</h2>
           <p className="text-slate-500 text-sm font-medium">Monitoring performa bisnis Harapan Jaya secara real-time.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <button 
+            onClick={() => onTabChange('shift-history')}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-indigo-100 transition-all shadow-xs"
+          >
+            <CalendarClock size={16} /> Shift History
+          </button>
           <button className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-slate-50 transition-all">
             <RefreshCw size={16} /> Rebuild Metrics
           </button>

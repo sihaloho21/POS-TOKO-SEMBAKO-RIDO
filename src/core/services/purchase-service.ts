@@ -3,6 +3,7 @@ import { db } from '../database';
 import type { Purchase, PurchaseItem, StockMovement, FinanceEvent, SyncQueueItem } from '../types';
 import { CostingEngine } from '../costing-engine';
 import { AuditEngine } from '../audit-engine';
+import { StockService } from './stock-service';
 
 export class PurchaseService {
   static async createPurchase(params: {
@@ -50,26 +51,21 @@ export class PurchaseService {
       const newWac = await CostingEngine.calculateNewWac(item.productId, baseQty, effectiveCost);
       await CostingEngine.updateHpp(item.productId, newWac);
 
-      // 2. Record Stock Movement
-      const stockMovement: StockMovement = {
-        stockMovementId: uuidv4(),
+      // 2. Record Stock Movement via StockService (derives stock)
+      await StockService.recordMovement({
         productId: item.productId,
-        quantity: baseQty,
-        type: 'IN',
-        reason: 'PURCHASE',
+        movementType: 'PURCHASE_IN',
+        qty: item.quantity,
+        unit: item.unit,
+        baseQty,
         referenceId: purchaseId,
-        referenceType: 'PURCHASE',
+        segmentId: product.productType === 'FISH' ? 'IKAN' : 'WARUNG',
+        reason: `Penerimaan Pembelian Faktur #${params.invoiceNumber || purchaseId}`,
+        costSnapshot: effectiveCost,
+        userId: 'SYSTEM',
+        deviceId: 'LOCAL',
         timestamp
-      };
-      await db.stockMovements.add(stockMovement);
-
-      // 3. Update Product Stock Cache
-      await db.products.update(item.productId, {
-        stock: product.stock + baseQty,
-        updatedAt: timestamp
       });
-
-      await this.addToQueue('stockMovements', stockMovement.stockMovementId, 'CREATE', stockMovement);
     }
 
     const purchase: Purchase = {

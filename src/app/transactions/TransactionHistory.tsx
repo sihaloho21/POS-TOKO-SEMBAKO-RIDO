@@ -23,7 +23,8 @@ import {
   Eye,
   Check,
   Hourglass,
-  FileQuestion
+  FileQuestion,
+  Layers
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
@@ -460,17 +461,59 @@ export default function TransactionHistory() {
             </div>
 
             <div className="space-y-3 mb-6 max-h-60 overflow-y-auto pr-1">
-              {selectedTx.items.map((it, idx) => (
-                <div key={idx} className="flex justify-between items-center text-xs p-2.5 bg-slate-50 rounded-xl">
-                  <div>
-                    <span className="font-bold text-slate-800 block">{it.nameSnapshot}</span>
-                    <span className="text-[10px] text-slate-500">{it.quantity} {it.unit} @ Rp {it.unitPrice.toLocaleString()}</span>
+              {selectedTx.items.map((it, idx) => {
+                const hasBundleSnapshot = it.isBundle && it.bundleComponentsSnapshot && it.bundleComponentsSnapshot.length > 0;
+                return (
+                  <div key={idx} className="p-2.5 bg-slate-50 rounded-xl space-y-1 text-xs border border-slate-100">
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-bold text-slate-800">{it.nameSnapshot}</span>
+                        {it.isBundle && (
+                          <span className="text-[9px] bg-indigo-100 text-indigo-700 px-1 py-0.5 rounded font-black uppercase">
+                            PAKET
+                          </span>
+                        )}
+                      </div>
+                      <span className="font-black text-slate-900 tabular-nums">
+                        Rp {it.subtotal.toLocaleString()}
+                      </span>
+                    </div>
+
+                    <div className="text-[10px] text-slate-500">
+                      {it.quantity} {it.unit} @ Rp {it.unitPrice.toLocaleString()}
+                    </div>
+
+                    {/* Bundle Breakdown: Kasir sees contents, Owner sees breakdown and HPP */}
+                    {hasBundleSnapshot && (
+                      <div className="mt-2 pt-1.5 border-t border-slate-200/80 space-y-1">
+                        <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block">
+                          {isOwner ? 'Breakdown Komponen & HPP (Owner View):' : 'Rincian Isi Paket:'}
+                        </span>
+                        <div className="space-y-1 pl-2">
+                          {it.bundleComponentsSnapshot!.map((comp, cIdx) => (
+                            <div key={cIdx} className="text-[11px] text-slate-700 flex justify-between items-center">
+                              <span>• {comp.totalQty} {comp.unit} {comp.nameSnapshot}</span>
+                              {isOwner && (
+                                <span className="text-slate-500 font-mono text-[10px]">
+                                  WAC: Rp {comp.wacSnapshot.toLocaleString()} = Rp {comp.subtotalHpp.toLocaleString()}
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                        {isOwner && it.hppSnapshot && (
+                          <div className="flex justify-between items-center pt-1 border-t border-dashed border-slate-200 text-[10px] text-slate-500 font-semibold">
+                            <span>Total HPP Paket: Rp {it.hppSnapshot.toLocaleString()}</span>
+                            <span className="text-emerald-700 font-bold">
+                              Laba: Rp {(it.subtotal - it.hppSnapshot).toLocaleString()}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
-                  <span className="font-black text-slate-900 tabular-nums">
-                    Rp {it.subtotal.toLocaleString()}
-                  </span>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             <div className="bg-slate-100/70 p-3.5 rounded-2xl space-y-1.5 text-xs mb-6">
@@ -546,6 +589,19 @@ export default function TransactionHistory() {
                 <span className="font-bold text-slate-700">{requestTx.paymentMethodId} ({requestTx.type})</span>
               </div>
             </div>
+
+            {/* Bundle Return/Void Notice */}
+            {requestTx.items.some(i => i.isBundle) && (
+              <div className="bg-indigo-50 border border-indigo-200 p-3 rounded-2xl mb-4 text-xs text-indigo-900 flex items-start gap-2">
+                <Layers size={16} className="text-indigo-600 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-black block uppercase text-[10px]">Aturan Retur / Void Paket Bundle</span>
+                  <p className="text-[11px] text-indigo-800 mt-0.5">
+                    Transaksi ini berisi paket bundle. Sesuai aturan PRD 12, retur komponen parsial <strong>TIDAK DIPERBOLEHKAN</strong>. Hanya pengembalian/pembatalan seluruh paket utuh yang diizinkan (semua movement komponen dibalik ke stok).
+                  </p>
+                </div>
+              </div>
+            )}
 
             <div className="space-y-3 mb-5">
               <div>
@@ -632,6 +688,19 @@ export default function TransactionHistory() {
                 <p className="font-bold text-slate-900 italic">"{reviewTx.voidReason || 'Tidak ada alasan'}"</p>
               </div>
             </div>
+
+            {/* Bundle Whole Reversal Notice */}
+            {reviewTx.items.some(i => i.isBundle) && (
+              <div className="bg-indigo-50 border border-indigo-200 p-3 rounded-2xl mb-4 text-xs text-indigo-900 flex items-start gap-2">
+                <Layers size={16} className="text-indigo-600 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-black block uppercase text-[10px]">Paket Bundle Utuh</span>
+                  <p className="text-[11px] text-indigo-800 mt-0.5">
+                    Transaksi ini berisi paket bundle. Persetujuan void/retur akan membalikkan stok <strong>seluruh komponen paket</strong> ke inventaris secara otomatis (tidak ada retur parsial).
+                  </p>
+                </div>
+              </div>
+            )}
 
             <p className="text-[11px] text-slate-500 mb-5 text-center">
               Persetujuan akan membatalkan struk secara permanen, memulihkan saldo stok ke gudang, dan mencatat pengeluaran pengembalian kas.

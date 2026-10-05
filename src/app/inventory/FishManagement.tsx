@@ -10,9 +10,12 @@ import {
   TrendingUp,
   History,
   Trash2,
-  Lock
+  Lock,
+  Scale
 } from 'lucide-react';
 import { ProductModal } from './ProductModal';
+import { StockAdjustmentModal } from './StockAdjustmentModal';
+import { StockHistory } from './StockHistory';
 import type { Product, ProductCost } from '@/core/types';
 import { useAuthStore } from '@/core/auth-store';
 
@@ -21,6 +24,9 @@ export default function FishManagement() {
   const isOwner = currentUser?.role === 'OWNER';
   const [search, setSearch] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isAdjustmentOpen, setIsAdjustmentOpen] = useState(false);
+  const [adjustmentProductId, setAdjustmentProductId] = useState<string | undefined>(undefined);
+  const [viewingHistoryId, setViewingHistoryId] = useState<string | null>(null);
   
   const fishProducts = useLiveQuery(
     () => db.products.filter(p => 
@@ -41,13 +47,26 @@ export default function FishManagement() {
           <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Fish Management</h2>
           <p className="text-slate-500 text-sm font-medium">Manajemen stok ikan hidup dan kalkulasi WAC per KG.</p>
         </div>
-        <button 
-          onClick={() => setIsModalOpen(true)}
-          className="flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-xl font-black text-xs uppercase tracking-widest hover:bg-blue-500 transition-all shadow-lg shadow-blue-200"
-        >
-          <Plus size={18} />
-          Tambah Jenis Ikan
-        </button>
+        <div className="flex items-center gap-2">
+          <button 
+            onClick={() => {
+              setAdjustmentProductId(undefined);
+              setIsAdjustmentOpen(true);
+            }}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-indigo-100 transition-all shadow-xs"
+            title="Catat mortalitas ikan mati atau penyesuaian timbangan"
+          >
+            <Scale size={16} />
+            Catat Ikan Mati / Penyesuaian
+          </button>
+          <button 
+            onClick={() => setIsModalOpen(true)}
+            className="flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-xl font-black text-xs uppercase tracking-widest hover:bg-blue-500 transition-all shadow-lg shadow-blue-200"
+          >
+            <Plus size={18} />
+            Tambah Jenis Ikan
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -119,7 +138,8 @@ export default function FishManagement() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {fishProducts?.map((p) => (
-                <tr key={p.productId} className="hover:bg-slate-50/50 transition-colors group">
+                <React.Fragment key={p.productId}>
+                  <tr className="hover:bg-slate-50/50 transition-colors group">
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center">
@@ -151,20 +171,54 @@ export default function FishManagement() {
                   )}
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-all">
-                      <button className="p-2 text-slate-400 hover:text-blue-600"><History size={18} /></button>
-                      <button className="p-2 text-slate-400 hover:text-rose-600"><Trash2 size={18} /></button>
+                      <button 
+                        onClick={() => {
+                          setAdjustmentProductId(p.productId);
+                          setIsAdjustmentOpen(true);
+                        }}
+                        className="p-2 text-slate-400 hover:text-indigo-600 transition-colors"
+                        title="Catat Ikan Mati / Penyesuaian"
+                      >
+                        <Scale size={18} />
+                      </button>
+                      <button 
+                        onClick={() => setViewingHistoryId(viewingHistoryId === p.productId ? null : p.productId)}
+                        className={`p-2 transition-colors ${viewingHistoryId === p.productId ? 'text-blue-600' : 'text-slate-400 hover:text-blue-600'}`}
+                        title="Riwayat Stock Movement"
+                      >
+                        <History size={18} />
+                      </button>
                     </div>
                   </td>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                {viewingHistoryId === p.productId && (
+                  <tr>
+                    <td colSpan={6} className="px-6 py-6 bg-slate-50/30">
+                      <div className="max-w-4xl mx-auto">
+                        <StockHistory productId={p.productId} />
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
+            ))}
+          </tbody>
+        </table>
       </div>
-
-      {isModalOpen && (
-        <ProductModal onClose={() => setIsModalOpen(false)} />
-      )}
     </div>
+
+    {isModalOpen && (
+      <ProductModal onClose={() => setIsModalOpen(false)} />
+    )}
+    {isAdjustmentOpen && (
+      <StockAdjustmentModal 
+        initialProductId={adjustmentProductId}
+        onClose={() => {
+          setIsAdjustmentOpen(false);
+          setAdjustmentProductId(undefined);
+        }}
+      />
+    )}
+  </div>
   );
 }
