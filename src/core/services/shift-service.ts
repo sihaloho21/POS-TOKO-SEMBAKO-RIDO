@@ -8,20 +8,34 @@ export class ShiftService {
     userId: string;
     deviceId: string;
     startingCash: number;
+    notes?: string;
+    startNotes?: string;
   }): Promise<string> {
-    // Check if there's already an open shift for this user/device
-    const existing = await db.shifts
+    // Check if there's already an open shift for this device
+    const existingOnDevice = await db.shifts
       .where('status')
       .equals('OPEN')
       .filter(s => s.deviceId === params.deviceId)
       .first();
 
-    if (existing) {
-      throw new Error('Shift sudah terbuka di perangkat ini.');
+    if (existingOnDevice) {
+      throw new Error(`OVERLAP: Shift masih aktif di perangkat ini (Terminal ${params.deviceId}). Harap tutup shift sebelumnya sebelum memulai yang baru.`);
+    }
+
+    // Check if this user has an open shift on ANY device
+    const existingForUser = await db.shifts
+      .where('status')
+      .equals('OPEN')
+      .filter(s => s.userId === params.userId)
+      .first();
+
+    if (existingForUser) {
+      throw new Error(`OVERLAP: Anda masih memiliki shift aktif di perangkat ${existingForUser.deviceId}. Harap tutup shift tersebut terlebih dahulu.`);
     }
 
     const shiftId = uuidv4();
     const timestamp = new Date().toISOString();
+    const startNotes = params.startNotes || params.notes || '';
 
     const shift: CashierShift = {
       shiftId,
@@ -29,6 +43,8 @@ export class ShiftService {
       deviceId: params.deviceId,
       startTime: timestamp,
       startingCash: params.startingCash,
+      startNotes,
+      notes: startNotes,
       status: 'OPEN'
     };
 
@@ -73,53 +89,92 @@ export class ShiftService {
     return shiftId;
   }
 
-  static async closeShift(shiftId: string, actualCash: number): Promise<void> {
-    const shift = await db.shifts.get(shiftId);
-    if (!shift || shift.status === 'CLOSED') return;
+  static async clockOut(params: {
+    shiftId: string;
+    actualCash?: number;
+    transactionCount?: number;
+    notes?: string;
+    endNotes?: string;
+  }): Promise<CashierShift> {
+    const shift = await db.shifts.get(params.shiftId);
+    if (!shift || shift.status === 'CLOSED') {
+      throw new Error('Shift tidak ditemukan atau sudah ditutup.');
+    }
 
-    const timestamp = new Date().toISOString();
+    const endTimestamp = new Date().toISOString();
+    const endNotes = params.endNotes || params.notes || '';
+    const combinedNotes = shift.notes 
+      ? (endNotes ? `${shift.notes} | Tutup: ${endNotes}` : shift.notes)
+      : endNotes;
 
-    // Calculate Expected Cash
-    // 1. Starting Cash
-    // 2. + All cash sales in this shift
-    // 3. + All gajian payments in this shift (if cash)
+    // Query all completed transactions during this shift
     const shiftTxs = await db.transactions
       .where('shiftId')
-      .equals(shiftId)
-      .filter(tx => tx.status === 'COMPLETED' && tx.paymentMethodId === 'CASH')
+      .equals(params.shiftId)
+      .filter(tx => tx.status === 'COMPLETED')
       .toArray();
 
-    const cashSales = shiftTxs.reduce((acc, tx) => acc + tx.total, 0);
+    const totalTransactionCount = params.transactionCount !== undefined 
+      ? params.transactionCount 
+      : shiftTxs.length;
+
+    const totalSales = shiftTxs.reduce((acc, tx) => acc + tx.total, 0);
+
+    const cashSales = shiftTxs
+      .filter(tx => tx.paymentMethodId === 'CASH')
+      .reduce((acc, tx) => acc + tx.total, 0);
+
     const expectedCash = shift.startingCash + cashSales;
+    const actualCash = params.actualCash !== undefined ? params.actualCash : expectedCash;
 
-    await db.shifts.update(shiftId, {
+    const updatedShift: CashierShift = {
+      ...shift,
       status: 'CLOSED',
-      endTime: timestamp,
+      endTime: endTimestamp,
+      totalTransactionCount,
+      totalSales,
       expectedCash,
-      actualCash
-    });
+      actualCash,
+      endNotes: endNotes || shift.endNotes,
+      notes: combinedNotes
+    };
 
-    const updatedShift = { ...shift, status: 'CLOSED', endTime: timestamp, expectedCash, actualCash };
+    await db.shifts.update(params.shiftId, {
+      status: 'CLOSED',
+      endTime: endTimestamp,
+      totalTransactionCount,
+      totalSales,
+      expectedCash,
+      actualCash,
+      endNotes: endNotes || shift.endNotes,
+      notes: combinedNotes
+    });
 
     await AuditEngine.log({
       userId: shift.userId,
       role: 'SYSTEM',
       deviceId: shift.deviceId,
-      action: 'CLOSE_SHIFT',
+      action: 'CLOCK_OUT',
       module: 'SHIFT',
-      referenceId: shiftId,
+      referenceId: params.shiftId,
       after: updatedShift
     });
 
     await db.syncQueue.add({
       entityType: 'shifts',
-      entityId: shiftId,
+      entityId: params.shiftId,
       action: 'UPDATE',
       payload: updatedShift,
       status: 'PENDING',
       retryCount: 0,
-      createdAt: timestamp
+      createdAt: endTimestamp
     });
+
+    return updatedShift;
+  }
+
+  static async closeShift(shiftId: string, actualCash: number, transactionCount?: number, notes?: string): Promise<void> {
+    await this.clockOut({ shiftId, actualCash, transactionCount, notes });
   }
 
   static async getCurrentShift(deviceId: string): Promise<CashierShift | undefined> {
@@ -128,5 +183,12 @@ export class ShiftService {
       .equals('OPEN')
       .filter(s => s.deviceId === deviceId)
       .first();
+  }
+
+  static async getActiveShifts(): Promise<CashierShift[]> {
+    return db.shifts
+      .where('status')
+      .equals('OPEN')
+      .toArray();
   }
 }

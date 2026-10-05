@@ -10,6 +10,8 @@ interface AuthState {
   login: (pin: string) => Promise<boolean>;
   logout: () => void;
   seedOwner: (name: string, pin: string) => Promise<void>;
+  seedKasir: (name: string, pin: string) => Promise<void>;
+  seedDefaultUsers: () => Promise<void>;
   initializeAuth: () => Promise<void>;
 }
 
@@ -18,39 +20,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   isAuthenticated: false,
 
   initializeAuth: async () => {
-    // Prevent multiple concurrent initialization attempts
-    if (get().isAuthenticated && auth.currentUser) return;
-
-    const maxRetries = 3;
-    let attempt = 0;
-
-    const trySignIn = async () => {
-      try {
-        if (!auth.currentUser) {
-          await signInAnonymously(auth);
-        }
-      } catch (error: any) {
-        if (error.code === 'auth/admin-restricted-operation') {
-          console.warn('Anonymous Auth is disabled in Firebase Console. Using public rules fallback.');
-          return;
-        }
-        
-        if (error.code === 'auth/network-request-failed' && attempt < maxRetries) {
-          attempt++;
-          console.warn(`Auth attempt ${attempt} failed (network). Retrying in ${attempt * 2}s...`);
-          await new Promise(resolve => setTimeout(resolve, attempt * 2000));
-          return trySignIn();
-        }
-        
-        throw error;
-      }
-    };
-
     try {
-      await trySignIn();
+      // Attempt anonymous sign-in to satisfy authenticated Firestore rules if enabled
+      if (!auth.currentUser) {
+        await signInAnonymously(auth).catch(err => {
+          console.warn('Anonymous Auth is disabled or restricted in Firebase Console:', err?.code || err?.message || err);
+        });
+      }
     } catch (error) {
-      console.error('Firebase Auth failed definitively:', error);
-      // We don't rethrow here to allow the app to work in local-only mode
+      console.warn('Firebase Auth initialize warning:', error);
     }
   },
 
@@ -96,5 +74,29 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       updatedAt: new Date().toISOString(),
     };
     await db.users.put(owner);
+  },
+
+  seedKasir: async (name: string, pin: string) => {
+    const kasir: User = {
+      userId: 'kasir-1',
+      name,
+      role: 'KASIR',
+      pinHash: pin,
+      status: 'ACTIVE',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await db.users.put(kasir);
+  },
+
+  seedDefaultUsers: async () => {
+    const hasOwner = await db.users.where('role').equals('OWNER').first();
+    if (!hasOwner) {
+      await get().seedOwner('Owner Rido', '123456');
+    }
+    const hasKasir = await db.users.where('role').equals('KASIR').first();
+    if (!hasKasir) {
+      await get().seedKasir('Kasir Harapan', '654321');
+    }
   }
 }));

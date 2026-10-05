@@ -104,6 +104,7 @@ export class ProductService {
       baseUnit: formData.baseUnit || 'PCS',
       status: formData.status || 'ACTIVE',
       normalPrice: Number(formData.normalPrice || 0),
+      hpp: hpp ?? Number(formData.hpp || 0),
       priceAlertThreshold: formData.priceAlertThreshold ? Number(formData.priceAlertThreshold) : undefined,
       stock: Number(formData.stock || 0),
       minimumStock: Number(formData.minimumStock || 0),

@@ -2,7 +2,6 @@ import Dexie, { type Table } from 'dexie';
 import type { 
   User, 
   Product, 
-  ProductCost,
   Bundle,
   Customer,
   Supplier,
@@ -17,16 +16,16 @@ import type {
   Notification,
   CashierShift,
   StockOpname,
+  ProductCost,
+  PaymentMethod,
   DigitalService,
   LoyaltyEvent,
-  PaymentMethod,
   SyncQueueItem 
 } from './types';
 
 export class LocalDatabase extends Dexie {
   users!: Table<User>;
   products!: Table<Product>;
-  productCosts!: Table<ProductCost>;
   bundles!: Table<Bundle>;
   customers!: Table<Customer>;
   suppliers!: Table<Supplier>;
@@ -41,18 +40,20 @@ export class LocalDatabase extends Dexie {
   notifications!: Table<Notification>;
   shifts!: Table<CashierShift>;
   stockOpnames!: Table<StockOpname>;
+  productCosts!: Table<ProductCost>;
+  paymentMethods!: Table<PaymentMethod>;
   digitalServices!: Table<DigitalService>;
   loyaltyEvents!: Table<LoyaltyEvent>;
-  paymentMethods!: Table<PaymentMethod>;
   settings!: Table<any>;
   syncQueue!: Table<SyncQueueItem>;
 
   constructor() {
     super('HarapanJayaDB');
-    this.version(6).stores({
+    this.version(7).stores({
       users: 'userId, role, status',
       products: 'productId, barcode, sku, categoryId, productType, status',
       productCosts: 'productId',
+      paymentMethods: 'id, type, status',
       bundles: 'bundleId, status',
       customers: 'customerId, name, phone, status',
       suppliers: 'supplierId, name, status',
@@ -65,11 +66,10 @@ export class LocalDatabase extends Dexie {
       auditLogs: 'auditId, userId, action, module, referenceId, timestamp',
       conflicts: 'conflictId, type, entityId, status, timestamp',
       notifications: 'notificationId, severity, isRead, createdAt',
-      shifts: 'shiftId, userId, deviceId, status',
+      shifts: 'shiftId, userId, deviceId, status, startTime',
       stockOpnames: 'opnameId, status, createdAt',
       digitalServices: 'serviceId, transactionId, serviceType, status',
       loyaltyEvents: 'loyaltyEventId, customerId, referenceId, timestamp',
-      paymentMethods: 'id, type, status',
       settings: 'id',
       syncQueue: '++queueId, entityType, entityId, status, createdAt'
     });

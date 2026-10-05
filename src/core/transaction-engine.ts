@@ -157,25 +157,6 @@ export class TransactionEngine {
       };
       await db.financeEvents.add(financeEvent);
       await this.addToQueue('financeEvents', financeEvent.financeEventId, 'CREATE', financeEvent);
-
-      // 5b. Handle MDR Cost (Merchant Discount Rate)
-      const paymentMethod = await db.paymentMethods.get(params.paymentMethodId);
-      if (paymentMethod && paymentMethod.mdrPercent > 0) {
-        const mdrAmount = Math.round(total * (paymentMethod.mdrPercent / 100));
-        const mdrEvent: FinanceEvent = {
-          financeEventId: uuidv4(),
-          amount: mdrAmount,
-          storageId: params.moneyStorageId,
-          direction: 'OUT',
-          referenceId: transactionId,
-          referenceType: 'MDR_COST',
-          userId: params.cashierId,
-          deviceId: params.deviceId,
-          timestamp
-        };
-        await db.financeEvents.add(mdrEvent);
-        await this.addToQueue('financeEvents', mdrEvent.financeEventId, 'CREATE', mdrEvent);
-      }
     }
 
     // 6. Update Customer Loyalty & Audit
@@ -199,14 +180,29 @@ export class TransactionEngine {
     return transactionId;
   }
 
-  static async voidTransaction(transactionId: string, userId: string, deviceId: string, reason: string): Promise<void> {
-    const transaction = await db.transactions.get(transactionId);
-    if (!transaction) throw new Error('Transaction not found');
-    if (transaction.status === 'VOIDED') throw new Error('Transaction already voided');
+  static async processReturnOrVoid(params: {
+    transactionId: string;
+    userId: string;
+    role: string;
+    actionType: 'VOID' | 'RETURN' | 'REFUND';
+    reason: string;
+  }): Promise<void> {
+    const transaction = await db.transactions.get(params.transactionId);
+    if (!transaction) throw new Error('Transaksi tidak ditemukan.');
+    if (transaction.status === 'VOIDED' || transaction.status === 'CANCELLED') {
+      throw new Error('Transaksi sudah dibatalkan sebelumnya.');
+    }
 
     const timestamp = new Date().toISOString();
 
-    // 1. Reverse Stock Movements
+    // 1. Update Transaction Status
+    const newStatus = params.actionType === 'VOID' ? 'VOIDED' : 'CANCELLED';
+    await db.transactions.update(params.transactionId, {
+      status: newStatus,
+      serverTimestamp: timestamp
+    });
+
+    // 2. Reverse Stock Movements
     for (const item of transaction.items) {
       const product = await db.products.get(item.productId);
       if (!product) continue;
@@ -214,148 +210,84 @@ export class TransactionEngine {
       let baseQty = item.quantity;
       if (item.unit !== product.baseUnit) {
         const conversion = product.conversionRules.find(r => r.toUnit === item.unit);
-        if (conversion) baseQty = item.quantity * conversion.factor;
+        if (conversion) {
+          baseQty = item.quantity * conversion.factor;
+        }
       }
 
-      const reversal: StockMovement = {
+      const reverseMovement: StockMovement = {
         stockMovementId: uuidv4(),
         productId: item.productId,
-        quantity: baseQty,
+        quantity: baseQty, // Add back stock
         type: 'IN',
-        reason: 'VOID',
-        referenceId: transactionId,
+        reason: 'RETURN',
+        referenceId: params.transactionId,
         referenceType: 'TRANSACTION',
         timestamp
       };
-      await db.stockMovements.add(reversal);
+      await db.stockMovements.add(reverseMovement);
+
+      // Restore Product Stock Cache
       await db.products.update(item.productId, {
         stock: product.stock + baseQty,
         updatedAt: timestamp
       });
 
-      // Reverse Bundles
-      if (product.productType === 'BUNDLE') {
-        const bundle = await db.bundles.get(item.productId);
-        if (bundle) {
-          for (const comp of bundle.components) {
-            const compProduct = await db.products.get(comp.productId);
-            if (compProduct) {
-              const compBaseQty = comp.qty * item.quantity;
-              await db.products.update(comp.productId, {
-                stock: compProduct.stock + compBaseQty,
-                updatedAt: timestamp
-              });
-            }
-          }
-        }
-      }
+      await this.addToQueue('stockMovements', reverseMovement.stockMovementId, 'CREATE', reverseMovement);
     }
 
-    // 2. Reverse Finance
-    if (transaction.type === 'GAJIAN') {
-      const receivable = await db.receivables.where('transactionId').equals(transactionId).first();
-      if (receivable) {
-        await db.receivables.update(receivable.receivableId, { status: 'VOIDED', remainingAmount: 0 });
-      }
-    } else {
-      const financeReversal: FinanceEvent = {
+    // 3. Reverse Finance Event if was cash sale
+    if (transaction.paymentMethodId === 'CASH') {
+      const reverseFinance: FinanceEvent = {
         financeEventId: uuidv4(),
         amount: transaction.total,
         storageId: transaction.moneyStorageId,
         direction: 'OUT',
-        referenceId: transactionId,
-        referenceType: 'VOID',
-        userId,
-        deviceId,
+        referenceId: params.transactionId,
+        referenceType: 'EXPENSE',
+        userId: params.userId,
+        deviceId: transaction.deviceId,
         timestamp
       };
-      await db.financeEvents.add(financeReversal);
+      await db.financeEvents.add(reverseFinance);
+      await this.addToQueue('financeEvents', reverseFinance.financeEventId, 'CREATE', reverseFinance);
     }
 
-    // 3. Reverse Loyalty
-    if (transaction.loyaltyPointsEarned > 0 && transaction.customerId) {
-      await LoyaltyEngine.recordReversalEvent(transaction.customerId, transaction.loyaltyPointsEarned, transactionId);
+    // 4. If was GAJIAN, cancel or reduce receivable
+    if (transaction.type === 'GAJIAN') {
+      const receivable = await db.receivables.where('transactionId').equals(params.transactionId).first();
+      if (receivable) {
+        await db.receivables.update(receivable.receivableId, {
+          status: 'PAID', // or voided
+          remainingAmount: 0
+        });
+      }
     }
 
-    // 4. Update Transaction Status
-    await db.transactions.update(transactionId, { status: 'VOIDED' });
-
-    // 5. Audit
+    // 5. Audit Logging
     await AuditEngine.log({
-      userId,
-      role: 'SUPERVISOR',
-      deviceId,
-      action: 'VOID_TRANSACTION',
+      userId: params.userId,
+      role: params.role,
+      deviceId: transaction.deviceId,
+      action: `${params.actionType}_TRANSACTION`,
       module: 'POS',
-      referenceId: transactionId,
-      before: transaction,
-      reason
+      referenceId: params.transactionId,
+      reason: params.reason,
+      after: { ...transaction, status: newStatus }
+    });
+
+    await this.addToQueue('transactions', params.transactionId, 'UPDATE', {
+      ...transaction,
+      status: newStatus
     });
   }
 
-  static async returnItems(transactionId: string, returnItems: { productId: string, quantity: number }[], userId: string, deviceId: string, reason: string): Promise<void> {
-    const transaction = await db.transactions.get(transactionId);
-    if (!transaction) throw new Error('Transaction not found');
-    
-    const timestamp = new Date().toISOString();
-    let totalRefund = 0;
-
-    for (const ret of returnItems) {
-      const originalItem = transaction.items.find(i => i.productId === ret.productId);
-      if (!originalItem) continue;
-      if (ret.quantity > originalItem.quantity) throw new Error('Return quantity exceeds original');
-
-      const product = await db.products.get(ret.productId);
-      if (!product) continue;
-
-      // 1. Stock Return
-      let baseQty = ret.quantity;
-      if (originalItem.unit !== product.baseUnit) {
-        const conversion = product.conversionRules.find(r => r.toUnit === originalItem.unit);
-        if (conversion) baseQty = ret.quantity * conversion.factor;
-      }
-
-      await db.stockMovements.add({
-        stockMovementId: uuidv4(),
-        productId: ret.productId,
-        quantity: baseQty,
-        type: 'IN',
-        reason: 'RETURN',
-        referenceId: transactionId,
-        referenceType: 'TRANSACTION',
-        timestamp
-      });
-      await db.products.update(ret.productId, {
-        stock: product.stock + baseQty,
-        updatedAt: timestamp
-      });
-
-      totalRefund += (ret.quantity * originalItem.unitPrice);
-    }
-
-    // 2. Finance Refund
-    const refundEvent: FinanceEvent = {
-      financeEventId: uuidv4(),
-      amount: totalRefund,
-      storageId: transaction.moneyStorageId,
-      direction: 'OUT',
-      referenceId: transactionId,
-      referenceType: 'RETURN',
+  static async voidTransaction(transactionId: string, userId: string, deviceId: string, reason: string): Promise<void> {
+    await this.processReturnOrVoid({
+      transactionId,
       userId,
-      deviceId,
-      timestamp
-    };
-    await db.financeEvents.add(refundEvent);
-
-    // 3. Log Return Transaction (as a child or related event)
-    await AuditEngine.log({
-      userId,
-      role: 'SUPERVISOR',
-      deviceId,
-      action: 'SALES_RETURN',
-      module: 'POS',
-      referenceId: transactionId,
-      after: { returnItems, totalRefund },
+      role: 'KASIR', // Default as it's from POS
+      actionType: 'VOID',
       reason
     });
   }
@@ -370,41 +302,19 @@ export class TransactionEngine {
     paymentMethodId: string;
     moneyStorageId: 'WARUNG' | 'IKAN' | 'UANG_DIGITAL';
   }): Promise<void> {
-    const timestamp = new Date().toISOString();
     const receivable = await db.receivables.get(params.receivableId);
     if (!receivable) throw new Error('Receivable not found');
 
-    const newPaidAmount = receivable.paidAmount + params.amount;
-    const newRemainingAmount = receivable.totalAmount - newPaidAmount;
-    const newStatus = newRemainingAmount <= 0 ? 'PAID' : 'PARTIAL';
-
-    // 1. Update Receivable
-    await db.receivables.update(params.receivableId, {
-      paidAmount: newPaidAmount,
-      remainingAmount: newRemainingAmount,
-      status: newStatus
-    });
-
-    // 2. Record Receivable Payment
+    const timestamp = new Date().toISOString();
     const paymentId = uuidv4();
-    const payment = {
-      paymentId,
-      receivableId: params.receivableId,
-      amount: params.amount,
-      paymentMethodId: params.paymentMethodId,
-      moneyStorageId: params.moneyStorageId,
-      userId: params.cashierId,
-      timestamp
-    };
-    await db.receivablePayments.add(payment);
 
-    // 3. Finance Event
+    // 1. Record Finance Event
     const financeEvent: FinanceEvent = {
       financeEventId: uuidv4(),
       amount: params.amount,
       storageId: params.moneyStorageId,
       direction: 'IN',
-      referenceId: paymentId,
+      referenceId: params.receivableId,
       referenceType: 'RECEIVABLE_PAYMENT',
       userId: params.cashierId,
       deviceId: params.deviceId,
@@ -412,12 +322,29 @@ export class TransactionEngine {
     };
     await db.financeEvents.add(financeEvent);
 
-    // 4. Sync Queue
-    await this.addToQueue('receivables', params.receivableId, 'UPDATE', { ...receivable, paidAmount: newPaidAmount, remainingAmount: newRemainingAmount, status: newStatus });
-    await this.addToQueue('receivablePayments', paymentId, 'CREATE', payment);
-    await this.addToQueue('financeEvents', financeEvent.financeEventId, 'CREATE', financeEvent);
+    // 2. Update Receivable
+    const newPaidAmount = receivable.paidAmount + params.amount;
+    const newRemainingAmount = Math.max(0, receivable.totalAmount - newPaidAmount);
+    const newStatus = newRemainingAmount <= 0 ? 'PAID' : 'PARTIAL';
 
-    // 5. Audit
+    await db.receivables.update(params.receivableId, {
+      paidAmount: newPaidAmount,
+      remainingAmount: newRemainingAmount,
+      status: newStatus
+    });
+
+    // 3. Record Receivable Payment
+    await (db as any).receivablePayments.add({
+      paymentId,
+      receivableId: params.receivableId,
+      amount: params.amount,
+      paymentMethodId: params.paymentMethodId,
+      moneyStorageId: params.moneyStorageId,
+      userId: params.cashierId,
+      timestamp
+    });
+
+    // 4. Audit Log
     await AuditEngine.log({
       userId: params.cashierId,
       role: 'KASIR',
@@ -425,31 +352,12 @@ export class TransactionEngine {
       action: 'SETTLE_RECEIVABLE',
       module: 'FINANCE',
       referenceId: params.receivableId,
-      after: { payment }
+      after: { paymentId, amount: params.amount, newRemainingAmount }
     });
-  }
 
-  static async checkCreditLimit(customerId: string, amount: number): Promise<{ allowed: boolean; message?: string }> {
-    const customer = await db.customers.get(customerId);
-    if (!customer) return { allowed: false, message: 'Customer not found' };
-
-    const activeReceivables = await db.receivables
-      .where('customerId')
-      .equals(customerId)
-      .filter(r => r.status === 'OPEN' || r.status === 'PARTIAL' || r.status === 'OVERDUE')
-      .toArray();
-
-    const currentDebt = activeReceivables.reduce((acc, r) => acc + r.remainingAmount, 0);
-    const projectedDebt = currentDebt + amount;
-
-    if (projectedDebt > customer.creditLimit) {
-      return { 
-        allowed: false, 
-        message: `Limit Kredit Terlampaui! Hutang saat ini: Rp ${currentDebt.toLocaleString()}, Limit: Rp ${customer.creditLimit.toLocaleString()}. Sisa Limit: Rp ${(customer.creditLimit - currentDebt).toLocaleString()}.` 
-      };
-    }
-
-    return { allowed: true };
+    // 5. Sync Queue
+    await this.addToQueue('financeEvents', financeEvent.financeEventId, 'CREATE', financeEvent);
+    await this.addToQueue('receivables', params.receivableId, 'UPDATE', { ...receivable, paidAmount: newPaidAmount, remainingAmount: newRemainingAmount, status: newStatus });
   }
 
   private static async addToQueue(entityType: string, entityId: string, action: 'CREATE' | 'UPDATE' | 'DELETE', payload: any) {

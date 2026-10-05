@@ -10,6 +10,7 @@ import { SummaryCards } from './SummaryCards';
 import { LowStockBanner } from './LowStockBanner';
 import { SalesTrendChart } from './SalesTrendChart';
 import { InventoryProjectionsWidget } from './InventoryProjectionsWidget';
+import { VisualAnalyticsSection } from './VisualAnalyticsSection';
 
 export default function Dashboard({ onTabChange }: { onTabChange: (tab: string) => void }) {
   const transactions = useLiveQuery(() => db.transactions.toArray());
@@ -52,6 +53,8 @@ export default function Dashboard({ onTabChange }: { onTabChange: (tab: string) 
       />
 
       <SummaryCards />
+
+      <VisualAnalyticsSection transactions={transactions || []} />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2">
@@ -98,23 +101,6 @@ export default function Dashboard({ onTabChange }: { onTabChange: (tab: string) 
             <p className="text-2xl font-black tabular-nums">
               Rp {( (balances?.WARUNG || 0) + (balances?.IKAN || 0) + (balances?.UANG_DIGITAL || 0) ).toLocaleString()}
             </p>
-          </div>
-        </div>
-
-        <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm">
-          <h3 className="font-black text-slate-900 uppercase tracking-tight mb-6 flex items-center gap-2">
-            <Package size={20} className="text-blue-600" /> Top Performing Products
-          </h3>
-          <div className="space-y-4">
-            {products?.slice(0, 5).map((p, idx) => (
-              <div key={idx} className="flex items-center justify-between p-3 bg-slate-50 rounded-2xl">
-                <div className="flex items-center gap-3">
-                  <span className="text-xs font-black text-slate-400 w-4">{idx + 1}</span>
-                  <span className="text-xs font-bold text-slate-900 uppercase">{p.name}</span>
-                </div>
-                <span className="text-xs font-black text-blue-600">421 Sold</span>
-              </div>
-            ))}
           </div>
         </div>
 

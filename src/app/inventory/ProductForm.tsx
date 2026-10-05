@@ -87,8 +87,7 @@ export function ProductForm({ product, onSave, onCancel }: ProductFormProps) {
               placeholder="Auto-generate jika kosong"
             />
           </div>
-
-          {/* Barcode Field */}
+[truncated]
           <div className="space-y-2">
             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Barcode (Scanner)</label>
             <div className="relative">
@@ -136,7 +135,7 @@ export function ProductForm({ product, onSave, onCancel }: ProductFormProps) {
                   type="number"
                   required
                   className="w-full pl-10 pr-4 py-3 bg-blue-50 border border-blue-100 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-bold text-blue-900 tabular-nums shadow-sm"
-                  value={hpp}
+                  value={hpp ?? 0}
                   onChange={(e) => setHpp(Number(e.target.value))}
                 />
               </div>

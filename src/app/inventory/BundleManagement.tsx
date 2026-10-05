@@ -81,6 +81,7 @@ export default function BundleManagement() {
       saleUnits: ['PAKET'],
       conversionRules: [],
       normalPrice: bundle.price,
+      hpp: bundle.price * 0.9, // Default estimated HPP for bundles
       minimumStock: 0,
       targetStock: 0,
       stock: 0, // No physical stock for bundles

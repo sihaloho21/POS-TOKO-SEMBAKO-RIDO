@@ -28,19 +28,23 @@ service cloud.firestore {
     }
 
     function isOwner() {
-      return isSignedIn() && getUserData(request.auth.uid).role == 'OWNER';
+      let user = getUserData(request.auth.uid);
+      return isSignedIn() && user != null && user.role == 'OWNER';
     }
 
     function isManager() {
-      return isSignedIn() && (getUserData(request.auth.uid).role == 'MANAGER' || getUserData(request.auth.uid).role == 'OWNER');
+      let user = getUserData(request.auth.uid);
+      return isSignedIn() && user != null && (user.role == 'MANAGER' || user.role == 'OWNER');
     }
 
     function isKasir() {
-      return isSignedIn() && (getUserData(request.auth.uid).role == 'KASIR' || isManager());
+      let user = getUserData(request.auth.uid);
+      return isSignedIn() && user != null && (user.role == 'KASIR' || user.role == 'MANAGER' || user.role == 'OWNER');
     }
 
     function isWarehouse() {
-      return isSignedIn() && (getUserData(request.auth.uid).role == 'WAREHOUSE' || isManager());
+      let user = getUserData(request.auth.uid);
+      return isSignedIn() && user != null && (user.role == 'WAREHOUSE' || user.role == 'MANAGER' || user.role == 'OWNER');
     }
 
     // --- Validation Blueprints ---

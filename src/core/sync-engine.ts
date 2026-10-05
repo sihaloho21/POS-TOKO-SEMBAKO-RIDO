@@ -1,6 +1,6 @@
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db as localDb } from './database';
-import { db as firestoreDb, handleFirestoreError, OperationType } from '../firebase/config';
+import { db as firestoreDb, auth, handleFirestoreError, OperationType } from '../firebase/config';
 import type { SyncQueueItem } from './types';
 import { addMinutes } from 'date-fns';
 
@@ -22,7 +22,7 @@ export class SyncEngine {
   }
 
   private static async processQueue() {
-    if (this.isSyncing || !navigator.onLine) return;
+    if (this.isSyncing || !navigator.onLine || !auth.currentUser) return;
     this.isSyncing = true;
 
     try {

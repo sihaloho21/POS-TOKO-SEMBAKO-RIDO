@@ -45,9 +45,23 @@ export default function StockOpname() {
 
   const handleFinalize = async () => {
     if (!activeOpname || !currentUser) return;
-    if (!confirm('Finalisasi Stock Opname akan mengubah saldo stok fisik secara permanen. Lanjutkan?')) return;
+
+    if (currentUser.role === 'KASIR') {
+      const pin = prompt('Finalisasi Stock Opname akan mengubah saldo stok fisik secara permanen. Masukkan PIN Owner untuk otorisasi:');
+      if (pin !== '123456') {
+        alert('PIN Owner salah atau otorisasi ditolak. Hitungan fisik Anda tetap tersimpan sebagai Draft.');
+        return;
+      }
+    } else {
+      if (!confirm('Finalisasi Stock Opname akan mengubah saldo stok fisik secara permanen. Lanjutkan?')) return;
+    }
     
     await StockOpnameService.finalizeOpname(activeOpname.opnameId, currentUser.userId, 'device-1');
+    setIsCreating(false);
+    setActiveOpnameId(null);
+  };
+
+  const handleSaveDraft = () => {
     setIsCreating(false);
     setActiveOpnameId(null);
   };
@@ -94,10 +108,17 @@ export default function StockOpname() {
                 />
               </div>
               <button 
-                onClick={handleFinalize}
-                className="flex items-center gap-2 px-6 py-2 bg-emerald-600 text-white rounded-xl font-black text-xs uppercase tracking-widest hover:bg-emerald-500 transition-all shadow-lg shadow-emerald-200"
+                onClick={handleSaveDraft}
+                className="flex items-center gap-1.5 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs uppercase tracking-wider transition-all"
               >
-                <CheckCircle size={18} />
+                <Save size={15} />
+                Simpan Hitungan
+              </button>
+              <button 
+                onClick={handleFinalize}
+                className="flex items-center gap-2 px-5 py-2 bg-emerald-600 text-white rounded-xl font-black text-xs uppercase tracking-widest hover:bg-emerald-500 transition-all shadow-lg shadow-emerald-200"
+              >
+                <CheckCircle size={17} />
                 Finalisasi
               </button>
             </div>

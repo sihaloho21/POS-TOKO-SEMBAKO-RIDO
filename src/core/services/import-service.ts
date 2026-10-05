@@ -45,6 +45,7 @@ export class ImportService {
                 saleUnits: [row.baseUnit || 'PCS'],
                 conversionRules: [],
                 normalPrice: parseFloat(row.normalPrice),
+                hpp: parseFloat(row.hpp || '0'),
                 stock: parseFloat(row.stock || '0'),
                 minimumStock: parseFloat(row.minimumStock || '5'),
                 targetStock: parseFloat(row.targetStock || '20'),

@@ -23,27 +23,55 @@ import {
   Layers,
   ShoppingBag,
   Fish,
-  Smartphone
+  Smartphone,
+  Lock,
+  Clock
 } from 'lucide-react';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { db } from '@/core/database';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { motion, AnimatePresence } from 'motion/react';
 import { ShiftService } from '@/core/services/shift-service';
-import { NotificationCenter } from './NotificationCenter';
+import ClockInModal from '@/app/shift/ClockInModal';
 
 interface NavItemProps {
   icon: React.ReactNode;
   label: string;
   active: boolean;
   onClick: () => void;
-  hidden?: boolean;
+  disabled?: boolean;
+  disabledReason?: string;
+  badge?: number;
 }
 
-function NavItem({ icon, label, active, onClick, hidden }: NavItemProps) {
-  if (hidden) return null;
+function NavItem({ icon, label, active, onClick, disabled, disabledReason, badge }: NavItemProps) {
+  if (disabled) {
+    return (
+      <div 
+        className="w-full cursor-not-allowed select-none" 
+        title={disabledReason || `${label} dikunci (Hanya untuk Owner - Read Only)`}
+      >
+        <button
+          type="button"
+          disabled
+          tabIndex={-1}
+          aria-disabled="true"
+          className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all pointer-events-none opacity-40 grayscale text-slate-400 bg-slate-100/50 border border-slate-200/40"
+        >
+          <span className="shrink-0 text-slate-400">{icon}</span>
+          <span className="font-medium text-sm truncate text-slate-400">{label}</span>
+          <span className="ml-auto flex items-center gap-1 text-[8px] font-black uppercase tracking-wider text-slate-400 bg-slate-200/80 px-1.5 py-0.5 rounded shrink-0">
+            <Lock size={10} />
+            Lock
+          </span>
+        </button>
+      </div>
+    );
+  }
+
   return (
     <button
+      type="button"
       onClick={onClick}
       className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all ${
         active 
@@ -53,6 +81,11 @@ function NavItem({ icon, label, active, onClick, hidden }: NavItemProps) {
     >
       <span className="shrink-0">{icon}</span>
       <span className="font-medium text-sm truncate">{label}</span>
+      {badge ? (
+        <span className="ml-auto w-5 h-5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center shrink-0">
+          {badge}
+        </span>
+      ) : null}
     </button>
   );
 }
@@ -65,7 +98,7 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
   const { currentUser, logout } = useAuthStore();
   const isOnline = useOnlineStatus();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [isClockInOpen, setIsClockInOpen] = useState(false);
   
   const pendingSyncCount = useLiveQuery(
     () => db.syncQueue.where('status').anyOf(['PENDING', 'FAILED', 'SYNCING']).count()
@@ -75,38 +108,32 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
     () => db.conflicts.where('status').equals('PENDING').count()
   );
 
-  const unreadNotifications = useLiveQuery(
-    () => db.notifications.where('isRead').equals(0).count()
-  );
-
   const currentShift = useLiveQuery(() => ShiftService.getCurrentShift('device-1'), []);
 
-  const userRole = currentUser?.role || 'KASIR';
-  const isOwner = userRole === 'OWNER';
-  const isManager = userRole === 'MANAGER' || isOwner;
-  const isWarehouse = userRole === 'WAREHOUSE' || isManager;
-  const isKasir = userRole === 'KASIR' || isManager;
+  const isOwner = currentUser?.role === 'OWNER';
 
+  // All navbar menus are displayed for Kasir, with Owner-only menus disabled/read-only
   const navItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={18} />, hidden: !isWarehouse && !isKasir },
-    { id: 'pos', label: 'POS', icon: <ShoppingCart size={18} />, hidden: !isKasir },
-    { id: 'transactions', label: 'Transactions', icon: <History size={18} />, hidden: !isKasir && !isManager },
-    { id: 'inventory', label: 'Inventory', icon: <Package size={18} />, hidden: !isWarehouse },
-    { id: 'fish', label: 'Fish Management', icon: <Fish size={18} />, hidden: !isWarehouse },
-    { id: 'bundles', label: 'Bundles & Packages', icon: <Layers size={18} />, hidden: !isWarehouse },
-    { id: 'customers', label: 'Customers', icon: <Users size={18} />, hidden: !isKasir },
-    { id: 'digital', label: 'Digital Services', icon: <Smartphone size={18} />, hidden: !isKasir },
-    { id: 'shift', label: 'Cashier Shift', icon: <ClipboardList size={18} />, hidden: !isKasir },
-    { id: 'stock-opname', label: 'Stock Opname', icon: <ClipboardList size={18} />, hidden: !isWarehouse },
-    { id: 'suppliers', label: 'Suppliers', icon: <Truck size={18} />, hidden: !isWarehouse },
-    { id: 'purchases', label: 'Purchases', icon: <ShoppingBag size={18} />, hidden: !isWarehouse },
-    { id: 'supplier-return', label: 'Supplier Return', icon: <Archive size={18} />, hidden: !isWarehouse },
-    { id: 'receivables', label: 'Receivables', icon: <CreditCard size={18} />, hidden: !isKasir },
-    { id: 'finance', label: 'Finance', icon: <TrendingUp size={18} />, hidden: !isManager },
-    { id: 'audit', label: 'Audit Log', icon: <ShieldCheck size={18} />, hidden: !isOwner },
-    { id: 'conflicts', label: 'Conflicts', icon: <AlertTriangle size={18} />, badge: conflictCount, hidden: !isManager },
-    { id: 'system-health', label: 'System Health', icon: <Activity size={18} />, hidden: !isOwner },
-    { id: 'settings', label: 'Settings', icon: <Settings size={18} /> },
+    { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={18} /> },
+    { id: 'pos', label: 'POS', icon: <ShoppingCart size={18} /> },
+    { id: 'shift', label: 'Cashier Shift', icon: <ClipboardList size={18} /> },
+    { id: 'shift-history', label: 'Shift History', icon: <History size={18} /> },
+    { id: 'transactions', label: 'Transactions', icon: <History size={18} /> },
+    { id: 'customers', label: 'Customers', icon: <Users size={18} /> },
+    { id: 'digital', label: 'Digital Services', icon: <Smartphone size={18} /> },
+    { id: 'inventory', label: 'Inventory', icon: <Package size={18} />, disabled: !isOwner },
+    { id: 'fish', label: 'Fish Management', icon: <Fish size={18} />, disabled: !isOwner },
+    { id: 'bundles', label: 'Bundles & Packages', icon: <Layers size={18} />, disabled: !isOwner },
+    { id: 'stock-opname', label: 'Stock Opname / Count', icon: <ClipboardList size={18} /> },
+    { id: 'suppliers', label: 'Suppliers', icon: <Truck size={18} />, disabled: !isOwner },
+    { id: 'purchases', label: 'Purchases', icon: <ShoppingBag size={18} />, disabled: !isOwner },
+    { id: 'supplier-return', label: 'Supplier Return', icon: <Archive size={18} />, disabled: !isOwner },
+    { id: 'receivables', label: 'Receivables', icon: <CreditCard size={18} />, disabled: !isOwner },
+    { id: 'finance', label: 'Finance', icon: <TrendingUp size={18} />, disabled: !isOwner },
+    { id: 'audit', label: 'Audit Log', icon: <ShieldCheck size={18} />, disabled: !isOwner },
+    { id: 'conflicts', label: 'Conflicts', icon: <AlertTriangle size={18} />, badge: conflictCount, disabled: !isOwner },
+    { id: 'system-health', label: 'System Health', icon: <Activity size={18} />, disabled: !isOwner },
+    { id: 'settings', label: 'Settings', icon: <Settings size={18} />, disabled: !isOwner },
   ];
 
   return (
@@ -130,7 +157,11 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
                 <NavItem 
                   {...item}
                   active={currentTab === item.id}
-                  onClick={() => onTabChange(item.id)}
+                  onClick={() => {
+                    if (!item.disabled) {
+                      onTabChange(item.id);
+                    }
+                  }}
                 />
                 {item.badge ? (
                   <span className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
@@ -144,12 +175,20 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
 
         <div className="mt-auto p-6 border-t border-slate-100 bg-slate-50/50">
           <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 bg-white rounded-full border border-slate-200 flex items-center justify-center text-blue-600 font-bold shadow-sm">
+            <div className={`w-10 h-10 rounded-xl border flex items-center justify-center font-black shadow-sm text-sm ${
+              isOwner ? 'bg-blue-600 text-white border-blue-600 shadow-blue-200' : 'bg-emerald-600 text-white border-emerald-600 shadow-emerald-200'
+            }`}>
               {currentUser?.name[0]}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="font-bold text-slate-900 truncate text-sm">{currentUser?.name}</p>
-              <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">{currentUser?.role}</p>
+              <p className="font-bold text-slate-900 truncate text-sm leading-tight">{currentUser?.name}</p>
+              <div className="flex items-center gap-1 mt-1">
+                <span className={`text-[9px] font-black px-2 py-0.5 rounded-md uppercase tracking-wider ${
+                  isOwner ? 'bg-blue-100 text-blue-700 border border-blue-200' : 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                }`}>
+                  {currentUser?.role === 'OWNER' ? '👑 OWNER' : '💼 KASIR'}
+                </span>
+              </div>
             </div>
           </div>
           <button 
@@ -201,29 +240,23 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
               )}
             </div>
 
-            <div className="relative">
-              <button 
-                onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
-                className={`p-2 rounded-lg transition-all ${isNotificationsOpen ? 'bg-blue-50 text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}
+            {/* Clock In Button for Kasir role if no shift active */}
+            {!isOwner && !currentShift && (
+              <button
+                type="button"
+                onClick={() => setIsClockInOpen(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-full text-xs font-black uppercase tracking-wider shadow-sm shadow-emerald-200 transition-all animate-pulse"
+                title="Mulai Shift Kerja Kasir (Clock In)"
               >
-                <Bell size={20} />
-                {unreadNotifications !== undefined && unreadNotifications > 0 && (
-                  <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border-2 border-white" />
-                )}
+                <Clock size={13} />
+                <span>Clock In</span>
               </button>
+            )}
 
-              <AnimatePresence>
-                {isNotificationsOpen && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                  >
-                    <NotificationCenter onClose={() => setIsNotificationsOpen(false)} />
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
+            <button className="p-2 text-slate-400 hover:text-slate-600 relative">
+              <Bell size={20} />
+              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border-2 border-white" />
+            </button>
           </div>
         </header>
 
@@ -264,8 +297,10 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
                     {...item}
                     active={currentTab === item.id}
                     onClick={() => {
-                      onTabChange(item.id);
-                      setIsSidebarOpen(false);
+                      if (!item.disabled) {
+                        onTabChange(item.id);
+                        setIsSidebarOpen(false);
+                      }
                     }}
                   />
                 ))}
@@ -274,6 +309,12 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
           </div>
         )}
       </AnimatePresence>
+
+      {/* Clock In Modal for Kasir role */}
+      <ClockInModal 
+        isOpen={isClockInOpen} 
+        onClose={() => setIsClockInOpen(false)} 
+      />
     </div>
   );
 }

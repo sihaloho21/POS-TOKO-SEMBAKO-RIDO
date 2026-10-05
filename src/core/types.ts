@@ -30,6 +30,7 @@ export interface Product {
   saleUnits: string[]; 
   conversionRules: UnitConversion[];
   normalPrice: number;
+  hpp: number;
   resellerCashRule?: { discountPercent: number };
   resellerGajianRule?: { markupPercent: number };
   minimumStock: number;
@@ -109,7 +110,7 @@ export interface Transaction {
   transactionId: string;
   receiptNumber: string;
   type: 'SALE' | 'GAJIAN' | 'RETURN' | 'VOID' | 'DIGITAL_SERVICE';
-  status: 'COMPLETED' | 'PENDING' | 'VOIDED' | 'CANCELLED' | 'HOLD';
+  status: 'COMPLETED' | 'PENDING' | 'VOIDED' | 'CANCELLED' | 'HOLD' | 'approval_pending';
   customerId?: string;
   cashierId: string;
   deviceId: string;
@@ -123,6 +124,11 @@ export interface Transaction {
   loyaltyPointsEarned: number;
   clientTimestamp: string;
   serverTimestamp?: string;
+  approvalStatus?: 'approval_pending' | 'APPROVED' | 'REJECTED';
+  voidReason?: string;
+  voidRequestedBy?: string;
+  voidRequestedAt?: string;
+  voidActionType?: 'VOID' | 'RETURN' | 'REFUND';
 }
 
 export interface Receivable {
@@ -256,6 +262,11 @@ export interface CashierShift {
   startingCash: number;
   expectedCash?: number;
   actualCash?: number;
+  totalTransactionCount?: number;
+  totalSales?: number;
+  startNotes?: string;
+  endNotes?: string;
+  notes?: string;
   status: 'OPEN' | 'CLOSED';
 }
 
