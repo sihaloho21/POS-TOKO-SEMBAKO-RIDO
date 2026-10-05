@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { db } from '@/core/database';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { 
@@ -11,7 +11,10 @@ import {
   Search,
   Filter,
   ArrowRight,
-  ArrowDownRight
+  ArrowDownRight,
+  AlertTriangle,
+  Receipt,
+  Scale
 } from 'lucide-react';
 import { format } from 'date-fns';
 import FinanceCharts from './FinanceCharts';
@@ -38,6 +41,57 @@ export default function Finance() {
       else storage[e.storageId] -= amount;
     });
     return storage;
+  });
+
+  // Calculate Net Profit & Stock Loss (including Fish Death Loss)
+  const pnlSummary = useLiveQuery(async () => {
+    const txs = await db.transactions.where('status').equals('COMPLETED').toArray();
+    const movements = await db.stockMovements.toArray();
+
+    let totalRevenue = 0;
+    let totalHpp = 0;
+
+    for (const tx of txs) {
+      totalRevenue += Number(tx.total || 0);
+      if (tx.items) {
+        for (const item of tx.items) {
+          const itemHpp = item.hppSnapshot || 0;
+          totalHpp += (item.quantity * itemHpp);
+        }
+      }
+    }
+
+    const grossProfit = totalRevenue - totalHpp;
+
+    let fishDeathLossRp = 0;
+    let fishDeathLossKg = 0;
+    let otherLossRp = 0;
+
+    for (const m of movements) {
+      const qty = m.baseQty || m.qty || 0;
+      const cost = m.costSnapshot || 0;
+
+      if (m.movementType === 'FISH_DEAD_OUT' || (m.segmentId === 'IKAN' && m.reason?.toLowerCase().includes('ikan mati'))) {
+        fishDeathLossKg += qty;
+        fishDeathLossRp += (qty * cost);
+      } else if (['DAMAGED_OUT', 'LOST_OUT', 'EXPIRED_OUT'].includes(m.movementType)) {
+        otherLossRp += (qty * cost);
+      }
+    }
+
+    const totalStockLossRp = fishDeathLossRp + otherLossRp;
+    const netProfit = grossProfit - totalStockLossRp;
+
+    return {
+      totalRevenue,
+      totalHpp,
+      grossProfit,
+      fishDeathLossKg,
+      fishDeathLossRp,
+      otherLossRp,
+      totalStockLossRp,
+      netProfit
+    };
   });
 
   return (
@@ -73,6 +127,72 @@ export default function Finance() {
           </div>
         ))}
       </div>
+
+      {/* Profit & Loss (Laba Rugi) Summary */}
+      {pnlSummary && (
+        <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-4">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-slate-100 pb-3">
+            <div>
+              <h3 className="font-black text-slate-900 text-sm uppercase tracking-tight flex items-center gap-2">
+                <Receipt className="text-blue-600" size={18} />
+                Ringkasan Laba Rugi & Dampak Kerugian Stok
+              </h3>
+              <p className="text-[11px] text-slate-500 font-medium">
+                Kalkulasi Laba Bersih riil: Laba Kotor dikurangi Kerugian Stok (Mortalitas Ikan Mati & Barang Rusak).
+              </p>
+            </div>
+            <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-1 bg-slate-100 text-slate-700 rounded-lg">
+              Prinsip Akuntansi POS
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-0.5">
+                Omzet Penjualan
+              </span>
+              <p className="text-xl font-black text-slate-900 tabular-nums">
+                Rp {pnlSummary.totalRevenue.toLocaleString()}
+              </p>
+              <p className="text-[10px] text-slate-400 mt-1">Total pendapatan transaksi</p>
+            </div>
+
+            <div className="p-4 bg-blue-50/60 rounded-2xl border border-blue-100">
+              <span className="text-[10px] font-black uppercase tracking-wider text-blue-500 block mb-0.5">
+                Laba Kotor (Gross Profit)
+              </span>
+              <p className="text-xl font-black text-blue-700 tabular-nums">
+                Rp {pnlSummary.grossProfit.toLocaleString()}
+              </p>
+              <p className="text-[10px] text-blue-500 mt-1">Omzet - Total HPP Snapshot</p>
+            </div>
+
+            <div className="p-4 bg-rose-50/60 rounded-2xl border border-rose-100">
+              <span className="text-[10px] font-black uppercase tracking-wider text-rose-500 block mb-0.5">
+                Ikan Mati (Death Loss)
+              </span>
+              <p className="text-xl font-black text-rose-600 tabular-nums">
+                - Rp {pnlSummary.fishDeathLossRp.toLocaleString()}
+              </p>
+              <p className="text-[10px] font-bold text-rose-600 mt-1">
+                {pnlSummary.fishDeathLossKg.toFixed(2)} KG @ current WAC
+              </p>
+            </div>
+
+            <div className={`p-4 rounded-2xl border ${pnlSummary.netProfit >= 0 ? 'bg-emerald-50/80 border-emerald-200' : 'bg-rose-50/80 border-rose-200'}`}>
+              <span className={`text-[10px] font-black uppercase tracking-wider block mb-0.5 ${pnlSummary.netProfit >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                Laba Bersih (Net Profit)
+              </span>
+              <p className={`text-xl font-black tabular-nums ${pnlSummary.netProfit >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                Rp {pnlSummary.netProfit.toLocaleString()}
+              </p>
+              <p className="text-[10px] text-slate-500 mt-1">
+                Laba Kotor - Total Stock Loss
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Financial Analytics & Visualizations */}
       <FinanceCharts />

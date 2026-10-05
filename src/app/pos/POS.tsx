@@ -213,10 +213,13 @@ export default function POS() {
     const quantity = kg || 1;
     const existing = cart.find(item => item.productId === product.productId);
     
-    if (existing && product.productType !== 'FISH') {
+    if (existing) {
+      const newTotalQty = product.productType === 'FISH'
+        ? Number((existing.quantity + quantity).toFixed(2))
+        : existing.quantity + quantity;
       setCart(cart.map(item => 
         item.productId === product.productId 
-          ? { ...item, quantity: item.quantity + quantity, subtotal: (item.quantity + quantity) * item.unitPrice } 
+          ? { ...item, quantity: newTotalQty, subtotal: Math.round(newTotalQty * item.unitPrice) } 
           : item
       ));
     } else {
@@ -230,10 +233,14 @@ export default function POS() {
         priceSource: pricing.priceSource,
         discount: 0,
         netPrice: pricing.price,
-        subtotal: pricing.price * quantity,
+        subtotal: Math.round(pricing.price * quantity),
         hppSnapshot: product.hpp,
         isBundle: product.productType === 'BUNDLE'
       }]);
+    }
+
+    if (product.productType === 'FISH' && cart.length === 0) {
+      setMoneyStorageId('IKAN');
     }
     
     setWeightProduct(null);
@@ -242,9 +249,10 @@ export default function POS() {
   const updateQuantity = (productId: string, delta: number) => {
     setCart(cart.map(item => {
       if (item.productId === productId) {
-        const newQty = Math.max(0, item.quantity + delta);
-        if (newQty === 0) return null;
-        return { ...item, quantity: newQty, subtotal: newQty * item.unitPrice };
+        const step = item.unit === 'KG' ? (delta > 0 ? 0.5 : -0.5) : delta;
+        const newQty = Math.max(0, Number((item.quantity + step).toFixed(2)));
+        if (newQty <= 0) return null;
+        return { ...item, quantity: newQty, subtotal: Math.round(newQty * item.unitPrice) };
       }
       return item;
     }).filter(Boolean) as TransactionItem[]);
@@ -714,7 +722,9 @@ export default function POS() {
                       <button onClick={() => updateQuantity(item.productId, -1)} className="p-0.5 text-slate-500 hover:text-blue-600 transition-colors">
                         <Minus size={13} />
                       </button>
-                      <span className="text-xs font-black w-6 text-center tabular-nums">{item.quantity}</span>
+                      <span className="text-xs font-black min-w-8 text-center tabular-nums px-0.5">
+                        {item.unit === 'KG' ? item.quantity.toFixed(2) : item.quantity}
+                      </span>
                       <button onClick={() => updateQuantity(item.productId, 1)} className="p-0.5 text-slate-500 hover:text-blue-600 transition-colors">
                         <Plus size={13} />
                       </button>

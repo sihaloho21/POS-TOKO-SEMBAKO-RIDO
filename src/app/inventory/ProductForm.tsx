@@ -1,36 +1,51 @@
 import React, { useState, useEffect } from 'react';
 import type { Product, ProductType } from '@/core/types';
 import { ProductService } from '@/core/services/product-service';
-import { Save, Package, Barcode, Trash2, CheckCircle, XCircle, Lock } from 'lucide-react';
+import { CostingEngine, type WacSourceEvent } from '@/core/costing-engine';
+import { Save, Package, Barcode, Trash2, CheckCircle, XCircle, Lock, History, AlertTriangle, ShieldCheck, X } from 'lucide-react';
 import { useAuthStore } from '@/core/auth-store';
 import { db } from '@/core/database';
 
 interface ProductFormProps {
   product?: Product;
+  initialProductType?: ProductType;
+  initialBaseUnit?: string;
   onSave: (productId: string) => void;
   onCancel: () => void;
 }
 
-export function ProductForm({ product, onSave, onCancel }: ProductFormProps) {
+export function ProductForm({ product, initialProductType, initialBaseUnit, onSave, onCancel }: ProductFormProps) {
   const { currentUser } = useAuthStore();
   const isOwner = currentUser?.role === 'OWNER';
 
   const [formData, setFormData] = useState<Partial<Product>>(
     product || {
-      productType: 'SEMBAKO',
-      baseUnit: 'PCS',
+      productType: initialProductType || 'SEMBAKO',
+      baseUnit: initialBaseUnit || (initialProductType === 'FISH' ? 'KG' : 'PCS'),
       status: 'ACTIVE',
       normalPrice: 0,
       stock: 0,
       minimumStock: 5,
       targetStock: 20,
-      saleUnits: ['PCS'],
+      saleUnits: [initialBaseUnit || (initialProductType === 'FISH' ? 'KG' : 'PCS')],
       conversionRules: []
     }
   );
 
   const [hpp, setHpp] = useState<number>(0);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Cost Adjustment Modal State
+  const [isCostModalOpen, setIsCostModalOpen] = useState(false);
+  const [newAdjustmentHpp, setNewAdjustmentHpp] = useState<string>('');
+  const [adjustmentReason, setAdjustmentReason] = useState<string>('Koreksi Faktur Supplier');
+  const [adjustmentNotes, setAdjustmentNotes] = useState<string>('');
+  const [isSubmittingAdjustment, setIsSubmittingAdjustment] = useState(false);
+
+  // WAC Source Traceability Modal State
+  const [isTraceModalOpen, setIsTraceModalOpen] = useState(false);
+  const [traceEvents, setTraceEvents] = useState<WacSourceEvent[]>([]);
+  const [isLoadingTrace, setIsLoadingTrace] = useState(false);
 
   useEffect(() => {
     async function loadHpp() {
@@ -42,15 +57,58 @@ export function ProductForm({ product, onSave, onCancel }: ProductFormProps) {
     loadHpp();
   }, [product, isOwner]);
 
+  const handleOpenTraceability = async () => {
+    if (!product) return;
+    setIsLoadingTrace(true);
+    setIsTraceModalOpen(true);
+    try {
+      const trace = await CostingEngine.getWacTraceability(product.productId);
+      setTraceEvents(trace.events);
+    } catch (e: any) {
+      alert('Gagal memuat histori WAC: ' + e.message);
+    } finally {
+      setIsLoadingTrace(false);
+    }
+  };
+
+  const handleSaveCostAdjustment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!product || !currentUser || !newAdjustmentHpp) return;
+
+    setIsSubmittingAdjustment(true);
+    try {
+      const res = await CostingEngine.recordCostAdjustment({
+        productId: product.productId,
+        newHpp: Number(newAdjustmentHpp),
+        reason: adjustmentReason,
+        notes: adjustmentNotes,
+        userId: currentUser.userId,
+        role: currentUser.role,
+        deviceId: 'device-1'
+      });
+
+      setHpp(res.newHpp);
+      setIsCostModalOpen(false);
+      setNewAdjustmentHpp('');
+      setAdjustmentNotes('');
+      alert(`HPP berhasil disesuaikan menjadi Rp ${res.newHpp.toLocaleString()} dan dicatat pada audit trail.`);
+    } catch (err: any) {
+      alert('Gagal menyesuaikan HPP: ' + err.message);
+    } finally {
+      setIsSubmittingAdjustment(false);
+    }
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
     try {
+      // For existing product, keep current hpp so it does not perform free edit
       const productId = await ProductService.saveProduct(formData, isOwner ? hpp : undefined);
       onSave(productId);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to save product:', error);
-      alert('Gagal menyimpan produk.');
+      alert('Gagal menyimpan produk: ' + (error?.message || 'Terjadi kesalahan'));
     } finally {
       setIsSaving(false);
     }

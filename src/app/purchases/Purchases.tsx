@@ -27,6 +27,9 @@ export default function Purchases() {
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [productSearch, setProductSearch] = useState('');
   const [items, setItems] = useState<{ productId: string; name: string; quantity: number; unit: string; purchasePrice: number; discount: number }[]>([]);
+  const [additionalCost, setAdditionalCost] = useState<number>(0);
+  const [additionalCostAllocation, setAdditionalCostAllocation] = useState<'CAPITALIZE_INTO_WAC' | 'OPERATIONAL_EXPENSE'>('CAPITALIZE_INTO_WAC');
+  const [additionalCostNotes, setAdditionalCostNotes] = useState<string>('');
   const [paymentStatus, setPaymentStatus] = useState<'PAID' | 'PAYABLE'>('PAID');
   const [moneyStorageId, setMoneyStorageId] = useState<'WARUNG' | 'IKAN' | 'UANG_DIGITAL'>('WARUNG');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -66,15 +69,20 @@ export default function Purchases() {
         supplierId: selectedSupplierId,
         invoiceNumber,
         items,
+        additionalCost: Number(additionalCost) || 0,
+        additionalCostAllocation,
+        additionalCostNotes,
         paymentStatus,
         moneyStorageId: paymentStatus === 'PAID' ? moneyStorageId : undefined,
         userId: currentUser.userId,
         deviceId: 'device-1'
       });
-      alert('Pembelian berhasil dicatat & stok telah diperbarui.');
+      alert('Pembelian berhasil dicatat & HPP/WAC telah diperbarui sesuai aturan costing.');
       setItems([]);
       setInvoiceNumber('');
       setSelectedSupplierId('');
+      setAdditionalCost(0);
+      setAdditionalCostNotes('');
     } catch (err: any) {
       alert('Gagal: ' + err.message);
     } finally {
@@ -170,6 +178,71 @@ export default function Purchases() {
                   </select>
                 </div>
               )}
+
+              {/* Additional Purchase Cost (Owner choice: WAC vs Opex) */}
+              <div className="pt-2 border-t border-slate-100 space-y-3">
+                <div className="flex justify-between items-center">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                    Biaya Tambahan / Ongkir (Rp)
+                  </label>
+                  <span className="text-[9px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
+                    Costing Rule
+                  </span>
+                </div>
+                <input 
+                  type="number"
+                  min="0"
+                  step="1000"
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900 tabular-nums outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="0 (Contoh: 50.000)"
+                  value={additionalCost || ''}
+                  onChange={e => setAdditionalCost(Number(e.target.value) || 0)}
+                />
+
+                {additionalCost > 0 && (
+                  <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs">
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">
+                      Perlakuan Biaya Tambahan (Owner Choice):
+                    </label>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setAdditionalCostAllocation('CAPITALIZE_INTO_WAC')}
+                        className={`p-2 rounded-lg text-[10px] font-black uppercase tracking-wider border transition-all text-center ${
+                          additionalCostAllocation === 'CAPITALIZE_INTO_WAC'
+                            ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                            : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        Masuk WAC / HPP
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAdditionalCostAllocation('OPERATIONAL_EXPENSE')}
+                        className={`p-2 rounded-lg text-[10px] font-black uppercase tracking-wider border transition-all text-center ${
+                          additionalCostAllocation === 'OPERATIONAL_EXPENSE'
+                            ? 'bg-amber-600 text-white border-amber-600 shadow-xs'
+                            : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        Beban Opex Toko
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-slate-400 font-medium">
+                      {additionalCostAllocation === 'CAPITALIZE_INTO_WAC' 
+                        ? 'Biaya dikapitalisasi menambah HPP rata-rata barang secara proporsional & diaudit.' 
+                        : 'Biaya dicatat sebagai beban operasional (tidak menaikkan HPP produk) & diaudit.'}
+                    </p>
+                    <input
+                      type="text"
+                      placeholder="Catatan biaya (e.g. Ongkir truk / bongkar muat)..."
+                      className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-[11px] font-medium text-slate-800 outline-none"
+                      value={additionalCostNotes}
+                      onChange={e => setAdditionalCostNotes(e.target.value)}
+                    />
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
@@ -208,9 +281,15 @@ export default function Purchases() {
                   <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center"><Package size={20} /></div>
                   <h3 className="font-black text-slate-900 uppercase tracking-tight">Daftar Barang Masuk</h3>
                 </div>
-                <p className="text-sm font-black text-blue-600 tabular-nums">
-                  Total Purchase: Rp {items.reduce((acc, i) => acc + (i.quantity * i.purchasePrice - i.discount), 0).toLocaleString()}
-                </p>
+                <div className="text-right">
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                    Barang: Rp {items.reduce((acc, i) => acc + (i.quantity * i.purchasePrice - i.discount), 0).toLocaleString()}
+                    {additionalCost > 0 && ` + Biaya: Rp ${additionalCost.toLocaleString()} (${additionalCostAllocation === 'CAPITALIZE_INTO_WAC' ? 'Masuk WAC' : 'Beban Opex'})`}
+                  </p>
+                  <p className="text-sm font-black text-blue-600 tabular-nums">
+                    Total Faktur: Rp {(items.reduce((acc, i) => acc + (i.quantity * i.purchasePrice - i.discount), 0) + (additionalCost || 0)).toLocaleString()}
+                  </p>
+                </div>
               </div>
 
               <div className="flex-1 overflow-y-auto">
@@ -232,6 +311,7 @@ export default function Purchases() {
                           <div className="flex items-center justify-center gap-2">
                             <input 
                               type="number" 
+                              step="any"
                               className="w-16 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-black text-center" 
                               value={item.quantity ?? 1} 
                               onChange={e => updateItem(item.productId, 'quantity', Number(e.target.value))} 

@@ -219,6 +219,20 @@ export class SupplierService {
         status: 'ACTIVE' as const,
       },
       {
+        name: 'Supplier Ikan Cikande',
+        phone: '081288991122',
+        address: 'Kawasan Sentra Budidaya Cikande, Kab. Serang, Banten',
+        notes: 'Pemasok utama ikan konsumsi hidup: Nila, Ikan Mas, Lele, Patin per KG.',
+        status: 'ACTIVE' as const,
+      },
+      {
+        name: 'Supplier Ikan Pasar Rau',
+        phone: '085711223344',
+        address: 'Pasar Induk Rau Blok Ikan No. 15, Kota Serang, Banten',
+        notes: 'Pemasok harian ikan segar & hidup: Gurame, Nila, Lele konsumsi.',
+        status: 'ACTIVE' as const,
+      },
+      {
         name: 'TPI Muara Angke (Ikan Basah & Segar)',
         phone: '082188776655',
         address: 'Dermaga TPI Muara Angke, Pluit, Penjaringan, Jakarta Utara',

@@ -5,10 +5,25 @@ import { ProductForm } from './ProductForm';
 
 interface ProductModalProps {
   product?: Product;
+  productId?: string;
+  initialProductType?: any;
+  initialBaseUnit?: string;
   onClose: () => void;
 }
 
-export function ProductModal({ product, onClose }: ProductModalProps) {
+export function ProductModal({ product, productId, initialProductType, initialBaseUnit, onClose }: ProductModalProps) {
+  const [loadedProduct, setLoadedProduct] = React.useState<Product | undefined>(product);
+
+  React.useEffect(() => {
+    if (!product && productId) {
+      import('@/core/database').then(({ db }) => {
+        db.products.get(productId).then(p => setLoadedProduct(p));
+      });
+    } else {
+      setLoadedProduct(product);
+    }
+  }, [product, productId]);
+
   return (
     <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
       <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
@@ -19,7 +34,7 @@ export function ProductModal({ product, onClose }: ProductModalProps) {
             </div>
             <div>
               <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">
-                {product ? 'Edit Product' : 'Tambah Product'}
+                {loadedProduct ? 'Edit Product' : 'Tambah Product'}
               </h3>
               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Master Data Management</p>
             </div>
@@ -31,7 +46,9 @@ export function ProductModal({ product, onClose }: ProductModalProps) {
 
         <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
           <ProductForm 
-            product={product} 
+            product={loadedProduct} 
+            initialProductType={initialProductType}
+            initialBaseUnit={initialBaseUnit}
             onSave={() => onClose()} 
             onCancel={onClose} 
           />

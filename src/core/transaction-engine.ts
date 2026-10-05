@@ -60,7 +60,8 @@ export class TransactionEngine {
         if (!stockValidation.valid) {
           throw new Error(stockValidation.error || 'Stok tidak mencukupi untuk item penjualan.');
         }
-        item.hppSnapshot = product.hpp;
+        const costDoc = await db.productCosts.get(item.productId);
+        item.hppSnapshot = costDoc?.hpp ?? product.hpp;
       }
     }
     
@@ -302,7 +303,7 @@ export class TransactionEngine {
           transactionId: params.transactionId,
           segmentId: transaction.moneyStorageId === 'IKAN' ? 'IKAN' : 'WARUNG',
           reason: params.reason || (params.actionType === 'VOID' ? 'VOID_REVERSAL_IN' : 'SALE_RETURN_IN'),
-          costSnapshot: product.hpp,
+          costSnapshot: item.hppSnapshot ?? product.hpp,
           userId: params.userId,
           deviceId: transaction.deviceId,
           timestamp

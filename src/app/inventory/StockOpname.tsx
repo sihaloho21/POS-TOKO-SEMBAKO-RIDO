@@ -21,8 +21,12 @@ export default function StockOpname() {
   const [isCreating, setIsCreating] = useState(false);
   const [activeOpnameId, setActiveOpnameId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [filterType, setFilterType] = useState<'ALL' | 'FISH' | 'SEMBAKO'>('ALL');
   
   const opnames = useLiveQuery(() => db.stockOpnames.orderBy('createdAt').reverse().toArray());
+  const products = useLiveQuery(() => db.products.toArray());
+  const productMap = React.useMemo(() => new Map(products?.map(p => [p.productId, p])), [products]);
+
   const activeOpname = useLiveQuery(
     () => activeOpnameId ? db.stockOpnames.get(activeOpnameId) : undefined,
     [activeOpnameId]
@@ -124,21 +128,64 @@ export default function StockOpname() {
             </div>
           </div>
 
+          <div className="p-3 bg-slate-50/80 border-b border-slate-100 flex items-center justify-between text-xs px-6">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 mr-1">Filter Kategori:</span>
+              <button
+                type="button"
+                onClick={() => setFilterType('ALL')}
+                className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all ${
+                  filterType === 'ALL' ? 'bg-slate-900 text-white shadow-xs' : 'bg-white text-slate-600 border border-slate-200'
+                }`}
+              >
+                Semua
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilterType('FISH')}
+                className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all ${
+                  filterType === 'FISH' ? 'bg-emerald-600 text-white shadow-xs' : 'bg-white text-slate-600 border border-slate-200'
+                }`}
+              >
+                Ikan Hidup (KG)
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilterType('SEMBAKO')}
+                className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all ${
+                  filterType === 'SEMBAKO' ? 'bg-blue-600 text-white shadow-xs' : 'bg-white text-slate-600 border border-slate-200'
+                }`}
+              >
+                Sembako
+              </button>
+            </div>
+            <span className="text-[10px] text-slate-400 font-bold uppercase">
+              Event-Based Physical Count Ledger
+            </span>
+          </div>
+
           <div className="flex-1 overflow-y-auto custom-scrollbar">
             <table className="w-full text-left border-collapse">
               <thead className="sticky top-0 bg-white z-10">
                 <tr className="bg-slate-50/50 text-slate-400 text-[10px] uppercase tracking-widest font-black border-b border-slate-100">
                   <th className="px-6 py-4">Produk</th>
-                  <th className="px-6 py-4 text-center">Ekspektasi</th>
+                  <th className="px-6 py-4 text-center">Ekspektasi Sistem</th>
                   <th className="px-6 py-4 text-center">Fisik (Input)</th>
                   <th className="px-6 py-4 text-right">Selisih</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {activeOpname.items
-                  .filter((item: any) => item.nameSnapshot.toLowerCase().includes(search.toLowerCase()))
+                  .filter((item: any) => {
+                    const matchSearch = item.nameSnapshot.toLowerCase().includes(search.toLowerCase());
+                    const prod = productMap.get(item.productId);
+                    const matchCategory = filterType === 'ALL' || prod?.productType === filterType;
+                    return matchSearch && matchCategory;
+                  })
                   .map((item: any) => {
-                    const diff = item.physicalQty - item.expectedQty;
+                    const prod = productMap.get(item.productId);
+                    const unit = prod?.baseUnit || 'PCS';
+                    const diff = Number((item.physicalQty - item.expectedQty).toFixed(2));
                     return (
                       <tr key={item.productId} className="hover:bg-slate-50/50 transition-colors">
                         <td className="px-6 py-4">
@@ -146,27 +193,36 @@ export default function StockOpname() {
                             <div className="w-8 h-8 bg-slate-50 rounded-lg flex items-center justify-center text-slate-400 border border-slate-100">
                               <Package size={16} />
                             </div>
-                            <span className="text-xs font-bold text-slate-900 uppercase truncate max-w-[200px]">{item.nameSnapshot}</span>
+                            <div>
+                              <span className="text-xs font-bold text-slate-900 uppercase truncate max-w-[200px] block">{item.nameSnapshot}</span>
+                              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">{unit}</span>
+                            </div>
                           </div>
                         </td>
                         <td className="px-6 py-4 text-center">
-                          <span className="text-xs font-black text-slate-400 tabular-nums">{item.expectedQty}</span>
+                          <span className="text-xs font-black text-slate-400 tabular-nums">
+                            {Number(item.expectedQty).toFixed(unit === 'KG' ? 2 : 0)} {unit}
+                          </span>
                         </td>
                         <td className="px-6 py-4 text-center">
-                          <input 
-                            type="number"
-                            className={`w-24 px-3 py-2 border rounded-xl text-center text-xs font-black tabular-nums transition-all ${
-                              diff === 0 ? 'bg-slate-50 border-slate-200' : diff > 0 ? 'bg-emerald-50 border-emerald-200 text-emerald-600' : 'bg-rose-50 border-rose-200 text-rose-600'
-                            }`}
-                            value={item.physicalQty ?? 0}
-                            onChange={(e) => handleUpdateQty(item.productId, Number(e.target.value))}
-                          />
+                          <div className="flex items-center justify-center gap-1.5">
+                            <input 
+                              type="number"
+                              step="0.01"
+                              className={`w-28 px-3 py-2 border rounded-xl text-center text-xs font-black tabular-nums transition-all ${
+                                diff === 0 ? 'bg-slate-50 border-slate-200' : diff > 0 ? 'bg-emerald-50 border-emerald-200 text-emerald-600' : 'bg-rose-50 border-rose-200 text-rose-600'
+                              }`}
+                              value={item.physicalQty ?? 0}
+                              onChange={(e) => handleUpdateQty(item.productId, Number(e.target.value))}
+                            />
+                            <span className="text-[10px] font-bold text-slate-400">{unit}</span>
+                          </div>
                         </td>
                         <td className="px-6 py-4 text-right">
                           <span className={`text-xs font-black tabular-nums ${
                             diff === 0 ? 'text-slate-400' : diff > 0 ? 'text-emerald-600' : 'text-rose-600'
                           }`}>
-                            {diff > 0 ? `+${diff}` : diff}
+                            {diff > 0 ? `+${diff}` : diff} {unit}
                           </span>
                         </td>
                       </tr>

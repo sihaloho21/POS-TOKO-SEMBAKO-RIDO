@@ -483,6 +483,15 @@ export default function TransactionHistory() {
                       {it.quantity} {it.unit} @ Rp {it.unitPrice.toLocaleString()}
                     </div>
 
+                    {!it.isBundle && isOwner && it.hppSnapshot !== undefined && (
+                      <div className="flex justify-between items-center text-[10px] text-slate-500 font-medium mt-1">
+                        <span>HPP Snapshot: Rp {it.hppSnapshot.toLocaleString()}/{it.unit}</span>
+                        <span className="text-emerald-700 font-bold">
+                          Laba: Rp {(it.subtotal - (it.quantity * it.hppSnapshot)).toLocaleString()}
+                        </span>
+                      </div>
+                    )}
+
                     {/* Bundle Breakdown: Kasir sees contents, Owner sees breakdown and HPP */}
                     {hasBundleSnapshot && (
                       <div className="mt-2 pt-1.5 border-t border-slate-200/80 space-y-1">

@@ -38,5 +38,6 @@ export class AuditEngine {
     });
 
     console.log(`[AUDIT] ${params.module} - ${params.action} by ${params.userId}`);
+    return entry;
   }
 }

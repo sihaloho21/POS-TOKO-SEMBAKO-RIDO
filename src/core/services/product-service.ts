@@ -116,10 +116,25 @@ export class ProductService {
       updatedAt: timestamp
     };
 
+    // Enforce opening cost rule: Opening stock wajib memiliki valid opening cost (> 0)
+    if (isNew && Number(formData.stock || 0) > 0) {
+      const openingCost = hpp !== undefined ? hpp : finalProduct.hpp;
+      if (!openingCost || openingCost <= 0) {
+        throw new Error('Opening stock wajib memiliki valid opening cost (HPP/WAC > 0).');
+      }
+    }
+
+    // NO DIRECT FREE WAC EDIT:
+    // Existing product costs cannot be edited arbitrarily without cost adjustment audit
+    if (!isNew && oldCost && hpp !== undefined && hpp !== oldCost.hpp) {
+      throw new Error('HPP/WAC tidak dapat diubah bebas secara langsung (No Direct Free Edit). Gunakan menu Koreksi HPP Resmi dengan audit trail.');
+    }
+
     await db.products.put(finalProduct);
 
     // If new product has initial stock, record OPENING_BALANCE movement
     if (isNew && Number(formData.stock || 0) > 0) {
+      const validOpeningCost = (hpp !== undefined && hpp > 0) ? hpp : finalProduct.hpp;
       await StockService.recordMovement({
         productId,
         movementType: 'OPENING_BALANCE',
@@ -128,8 +143,8 @@ export class ProductService {
         baseQty: Number(formData.stock),
         referenceId: `init_${productId.slice(0, 8)}`,
         segmentId: finalProduct.productType === 'FISH' ? 'IKAN' : 'WARUNG',
-        reason: 'Stok Awal Produk Baru (OPENING_BALANCE)',
-        costSnapshot: hpp ?? finalProduct.hpp,
+        reason: 'Stok Awal Produk Baru dengan Valid Opening Cost',
+        costSnapshot: validOpeningCost,
         userId: 'SYSTEM',
         deviceId: 'LOCAL',
         timestamp

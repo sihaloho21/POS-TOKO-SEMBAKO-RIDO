@@ -5,6 +5,7 @@ import { db } from '@/core/database';
 import { Keypad } from '@/components/Keypad';
 import { LogIn, Lock, ShieldCheck, UserCheck } from 'lucide-react';
 import type { Product } from '@/core/types';
+import { FishService } from '@/core/services/fish-service';
 
 export default function Login() {
   const [pin, setPin] = useState('');
@@ -18,90 +19,19 @@ export default function Login() {
         // Ensure both OWNER and KASIR users are seeded
         await seedDefaultUsers();
 
-        const productCount = await db.products.count();
-        if (productCount === 0) {
-          // Seed initial products
-          const initialProducts: Product[] = [
-            { 
-              productId: 'p1', sku: 'B-PANDAN-5K', barcode: '888001', name: 'Beras Pandan Wangi 5kg', 
-              categoryId: 'SEMBAKO', productType: 'SEMBAKO', baseUnit: 'PCS', saleUnits: ['PCS', 'DUS'],
-              conversionRules: [{ fromUnit: 'PCS', toUnit: 'DUS', factor: 4 }],
-              normalPrice: 85000, hpp: 78000, stock: 100, minimumStock: 10, targetStock: 50,
-              status: 'ACTIVE', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() 
-            },
-            { 
-              productId: 'p2', sku: 'IKAN-MAS', barcode: '888002', name: 'Ikan Mas Hidup', 
-              categoryId: 'FISH', productType: 'FISH', baseUnit: 'KG', saleUnits: ['KG'],
-              conversionRules: [],
-              normalPrice: 35000, hpp: 28000, stock: 50, minimumStock: 5, targetStock: 20,
-              status: 'ACTIVE', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() 
-            }
-          ];
-
-          await db.products.bulkAdd(initialProducts);
-
-          // Seed initial OPENING_BALANCE stock movements so stock balance is derived
-          const nowStr = new Date().toISOString();
-          await db.stockMovements.bulkAdd([
-            {
-              stockMovementId: 'sm_init_p1',
-              productId: 'p1',
-              referenceId: 'init_p1',
-              transactionId: 'init_p1',
-              movementType: 'OPENING_BALANCE',
-              qty: 100,
-              unit: 'PCS',
-              baseQty: 100,
-              segmentId: 'WARUNG',
-              clientTimestamp: nowStr,
-              serverTimestamp: null,
-              deviceId: 'LOCAL',
-              userId: 'SYSTEM',
-              reason: 'Stok Awal Sistem (OPENING_BALANCE)',
-              costSnapshot: 78000,
-              createdAt: nowStr,
-              quantity: 100,
-              type: 'IN',
-              timestamp: nowStr
-            },
-            {
-              stockMovementId: 'sm_init_p2',
-              productId: 'p2',
-              referenceId: 'init_p2',
-              transactionId: 'init_p2',
-              movementType: 'OPENING_BALANCE',
-              qty: 50,
-              unit: 'KG',
-              baseQty: 50,
-              segmentId: 'IKAN',
-              clientTimestamp: nowStr,
-              serverTimestamp: null,
-              deviceId: 'LOCAL',
-              userId: 'SYSTEM',
-              reason: 'Stok Awal Sistem (OPENING_BALANCE)',
-              costSnapshot: 28000,
-              createdAt: nowStr,
-              quantity: 50,
-              type: 'IN',
-              timestamp: nowStr
-            }
-          ]);
-
-          // Seed initial costs
-          await db.productCosts.bulkAdd(initialProducts.map(p => ({
-            productId: p.productId,
-            hpp: p.hpp,
-            updatedAt: p.createdAt
-          })));
-
-          // Seed default payment methods
+        // Ensure default payment methods exist
+        const paymentMethodCount = await db.paymentMethods.count();
+        if (paymentMethodCount === 0) {
           await db.paymentMethods.bulkAdd([
             { id: 'CASH', name: 'Tunai (Cash)', type: 'CASH', mdrPercent: 0, status: 'ACTIVE' },
             { id: 'QRIS', name: 'BCA QRIS', type: 'QRIS', mdrPercent: 0.7, status: 'ACTIVE' },
             { id: 'DEBIT', name: 'Debit Card', type: 'CARD', mdrPercent: 0.15, status: 'ACTIVE' }
           ]);
+        }
 
-          // Seed initial customers
+        // Ensure initial customers exist
+        const customerCount = await db.customers.count();
+        if (customerCount === 0) {
           await db.customers.bulkAdd([
             { 
               customerId: 'c1', name: 'Bpk. Ahmad', isReseller: true, creditLimit: 5000000, 
@@ -115,6 +45,46 @@ export default function Login() {
             }
           ]);
         }
+
+        // Ensure sembako baseline exists
+        const hasP1 = await db.products.get('p1');
+        if (!hasP1) {
+          const nowStr = new Date().toISOString();
+          const p1: Product = { 
+            productId: 'p1', sku: 'B-PANDAN-5K', barcode: '888001', name: 'Beras Pandan Wangi 5kg', 
+            categoryId: 'SEMBAKO', productType: 'SEMBAKO', baseUnit: 'PCS', saleUnits: ['PCS', 'DUS'],
+            conversionRules: [{ fromUnit: 'PCS', toUnit: 'DUS', factor: 4 }],
+            normalPrice: 85000, hpp: 78000, stock: 100, minimumStock: 10, targetStock: 50,
+            status: 'ACTIVE', createdAt: nowStr, updatedAt: nowStr 
+          };
+          await db.products.put(p1);
+          await db.productCosts.put({ productId: 'p1', hpp: 78000, updatedAt: nowStr });
+          await db.stockMovements.add({
+            stockMovementId: 'sm_init_p1',
+            productId: 'p1',
+            referenceId: 'init_p1',
+            transactionId: 'init_p1',
+            movementType: 'OPENING_BALANCE',
+            qty: 100,
+            unit: 'PCS',
+            baseQty: 100,
+            segmentId: 'WARUNG',
+            clientTimestamp: nowStr,
+            serverTimestamp: null,
+            deviceId: 'LOCAL',
+            userId: 'SYSTEM',
+            reason: 'Stok Awal Sistem (OPENING_BALANCE)',
+            costSnapshot: 78000,
+            createdAt: nowStr,
+            quantity: 100,
+            type: 'IN',
+            timestamp: nowStr
+          });
+        }
+
+        // Ensure mandatory fish products and suppliers (Nila, Mas, Gurame, Lele, Patin & Cikande, Rau)
+        await FishService.ensureMinimalFishProducts().catch(e => console.warn('Fish products init error:', e));
+        await FishService.ensureFishSuppliers().catch(e => console.warn('Fish suppliers init error:', e));
       } catch (err) {
         console.warn('Login init warning:', err);
       } finally {

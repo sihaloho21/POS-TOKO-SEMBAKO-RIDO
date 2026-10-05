@@ -25,6 +25,7 @@ import KasirDashboard from './app/dashboard/KasirDashboard';
 import ToastContainer from './app/components/ToastContainer';
 import { SyncEngine } from './core/sync-engine';
 import { ProductService } from './core/services/product-service';
+import { FishService } from './core/services/fish-service';
 
 export default function App() {
   const { currentUser, isAuthenticated, initializeAuth } = useAuthStore();
@@ -40,6 +41,10 @@ export default function App() {
 
     // Start background sync
     SyncEngine.start();
+
+    // Ensure minimal fish products and suppliers
+    FishService.ensureMinimalFishProducts(currentUser?.userId).catch(err => console.warn('Fish products init error:', err));
+    FishService.ensureFishSuppliers(currentUser?.userId).catch(err => console.warn('Fish suppliers init error:', err));
 
     // Check low stock
     ProductService.checkLowStock().catch(err => console.warn('checkLowStock failed:', err));
