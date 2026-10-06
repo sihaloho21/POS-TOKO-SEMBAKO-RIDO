@@ -143,7 +143,7 @@ export default function ShiftSummaryWidget({ onOpenShiftTab }: { onOpenShiftTab?
               <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[10px] text-slate-400 font-bold">Rp</span>
               <input
                 type="number"
-                value={startingCashInput}
+                value={startingCashInput ?? ''}
                 onChange={(e) => setStartingCashInput(e.target.value)}
                 placeholder="Modal Awal"
                 className="pl-7 pr-3 py-1.5 bg-slate-800 border border-slate-700 rounded-xl text-white font-bold text-xs w-28 focus:border-blue-500 outline-none"

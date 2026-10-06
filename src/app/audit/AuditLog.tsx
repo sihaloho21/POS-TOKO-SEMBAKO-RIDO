@@ -41,7 +41,7 @@ export default function AuditLog() {
               type="text" 
               placeholder="Cari user, modul, atau aksi..."
               className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm font-bold shadow-sm"
-              value={search}
+              value={search ?? ''}
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>

@@ -239,7 +239,7 @@ export default function TransactionHistory() {
           <input
             type="text"
             placeholder="Cari No. Struk, Barang, atau Kasir..."
-            value={search}
+            value={search ?? ''}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:bg-white focus:border-blue-500 outline-none transition-all"
           />
@@ -618,7 +618,7 @@ export default function TransactionHistory() {
                   Jenis Pengajuan
                 </label>
                 <select
-                  value={actionType}
+                  value={actionType ?? 'VOID'}
                   onChange={(e) => setActionType(e.target.value as any)}
                   className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-blue-500"
                 >
@@ -634,7 +634,7 @@ export default function TransactionHistory() {
                 </label>
                 <textarea
                   rows={3}
-                  value={reason}
+                  value={reason ?? ''}
                   onChange={(e) => setReason(e.target.value)}
                   placeholder="Jelaskan alasan mengapa transaksi ini perlu di-void/refund..."
                   className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium outline-none focus:border-blue-500 resize-none"

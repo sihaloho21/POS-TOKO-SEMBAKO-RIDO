@@ -950,7 +950,7 @@ export default function POS() {
                     Kategori
                   </label>
                   <select
-                    value={newProductCategory}
+                    value={newProductCategory ?? 'SEMBAKO'}
                     onChange={(e) => setNewProductCategory(e.target.value as any)}
                     className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold outline-none focus:border-blue-500"
                   >
@@ -966,7 +966,7 @@ export default function POS() {
                     Satuan
                   </label>
                   <select
-                    value={newProductUnit}
+                    value={newProductUnit ?? 'PCS'}
                     onChange={(e) => setNewProductUnit(e.target.value)}
                     className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold outline-none focus:border-blue-500"
                   >
@@ -1182,7 +1182,7 @@ export default function POS() {
                     type="password"
                     maxLength={6}
                     placeholder="PIN Owner"
-                    value={overrideOwnerPin}
+                    value={overrideOwnerPin ?? ''}
                     onChange={(e) => {
                       setOverrideOwnerPin(e.target.value);
                       setOverridePinError('');

@@ -107,7 +107,7 @@ export default function StockOpname() {
                   type="text" 
                   placeholder="Cari produk..." 
                   className="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold focus:ring-2 focus:ring-blue-500 outline-none"
-                  value={search}
+                  value={search ?? ''}
                   onChange={(e) => setSearch(e.target.value)}
                 />
               </div>

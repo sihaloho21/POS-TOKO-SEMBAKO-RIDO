@@ -70,7 +70,7 @@ export function SalesHistory() {
             type="text" 
             placeholder="Cari No. Struk..."
             className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none shadow-sm text-sm font-bold"
-            value={search}
+            value={search ?? ''}
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
@@ -195,7 +195,7 @@ export function SalesHistory() {
                                 <textarea 
                                   className="w-full px-4 py-3 bg-white border border-rose-200 rounded-xl focus:ring-2 focus:ring-rose-500 outline-none font-bold text-xs"
                                   placeholder="Alasan pembatalan (Wajib)..."
-                                  value={voidReason}
+                                  value={voidReason ?? ''}
                                   onChange={(e) => setVoidReason(e.target.value)}
                                 />
                                 <div className="flex gap-2">

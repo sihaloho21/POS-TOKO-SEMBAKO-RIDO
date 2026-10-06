@@ -115,7 +115,7 @@ export default function ShiftHistory({ onNavigate }: { onNavigate?: (tab: string
           <input 
             type="text"
             placeholder="Cari Kasir atau ID Shift..."
-            value={search}
+            value={search ?? ''}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
           />
@@ -127,14 +127,14 @@ export default function ShiftHistory({ onNavigate }: { onNavigate?: (tab: string
             <input 
               type="date" 
               className="bg-transparent text-xs font-bold outline-none text-slate-700"
-              value={dateRange.start}
+              value={dateRange.start ?? ''}
               onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
             />
             <span className="text-slate-300 mx-1">-</span>
             <input 
               type="date" 
               className="bg-transparent text-xs font-bold outline-none text-slate-700"
-              value={dateRange.end}
+              value={dateRange.end ?? ''}
               onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
             />
           </div>

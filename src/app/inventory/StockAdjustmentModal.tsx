@@ -171,14 +171,14 @@ export function StockAdjustmentModal({ initialProductId, onClose, onSuccess }: S
                 Pilih Produk *
               </label>
               <select
-                value={selectedProductId}
+                value={selectedProductId ?? ''}
                 onChange={(e) => setSelectedProductId(e.target.value)}
                 required
                 className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
               >
                 <option value="">-- Pilih Produk --</option>
                 {products?.map((p) => (
-                  <option key={p.productId} value={p.productId}>
+                  <option key={p.productId} value={p.productId ?? ''}>
                     {p.name} ({p.sku}) - Stok Saat Ini: {p.stock} {p.baseUnit}
                   </option>
                 ))}
@@ -193,7 +193,7 @@ export function StockAdjustmentModal({ initialProductId, onClose, onSuccess }: S
                     Stok Derived Saat Ini
                   </span>
                   <span className="font-black text-slate-900 text-base tabular-nums">
-                    {derivedStock} {selectedProduct.baseUnit}
+                    {derivedStock ?? 0} {selectedProduct.baseUnit}
                   </span>
                 </div>
                 <div className="text-right">
@@ -201,7 +201,7 @@ export function StockAdjustmentModal({ initialProductId, onClose, onSuccess }: S
                     Proyeksi Setelah Penyesuaian
                   </span>
                   <span className={`font-black text-base tabular-nums ${projectedStock < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
-                    {projectedStock} {selectedProduct.baseUnit}
+                    {projectedStock ?? 0} {selectedProduct.baseUnit}
                   </span>
                 </div>
               </div>
@@ -246,12 +246,12 @@ export function StockAdjustmentModal({ initialProductId, onClose, onSuccess }: S
                 Alasan Penyesuaian (Adjustment Reason) *
               </label>
               <select
-                value={reason}
+                value={reason ?? 'Rusak'}
                 onChange={(e) => setReason(e.target.value as StockAdjustmentReason)}
                 className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
               >
                 {ADJUSTMENT_REASONS.map((r) => (
-                  <option key={r} value={r}>
+                  <option key={r} value={r ?? ''}>
                     {r}
                   </option>
                 ))}
@@ -275,7 +275,7 @@ export function StockAdjustmentModal({ initialProductId, onClose, onSuccess }: S
                 min="0.01"
                 required
                 placeholder="0"
-                value={qty}
+                value={qty ?? ''}
                 onChange={(e) => setQty(e.target.value)}
                 className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-lg font-black text-slate-900 tabular-nums outline-none focus:ring-2 focus:ring-indigo-500"
               />
@@ -288,7 +288,7 @@ export function StockAdjustmentModal({ initialProductId, onClose, onSuccess }: S
               </label>
               <textarea
                 rows={2}
-                value={notes}
+                value={notes ?? ''}
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder="Detail penyebab (misal: pecah saat bongkar muat, kadaluarsa rak 2, ikan lele mati 3 ekor...)"
                 className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500 resize-none"

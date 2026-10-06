@@ -199,7 +199,7 @@ export default function ClockInModal({ isOpen, onClose, onSuccess }: ClockInModa
               </span>
               <input
                 type="number"
-                value={startingCash}
+                value={startingCash ?? ''}
                 onChange={(e) => setStartingCash(e.target.value)}
                 placeholder="0"
                 className="w-full pl-12 pr-4 py-3 bg-slate-50 border-2 border-slate-200 rounded-2xl text-xl font-black text-slate-900 focus:bg-white focus:border-emerald-500 outline-none tabular-nums transition-all"
@@ -232,7 +232,7 @@ export default function ClockInModal({ isOpen, onClose, onSuccess }: ClockInModa
             </label>
             <textarea
               rows={2}
-              value={notes}
+              value={notes ?? ''}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Contoh: Ada selisih modal awal Rp 5.000, pecahan kecil terbatas, dll."
               className="w-full p-3 bg-slate-50 border-2 border-slate-200 rounded-2xl text-xs font-medium text-slate-800 placeholder:text-slate-400 focus:bg-white focus:border-emerald-500 outline-none resize-none transition-all"

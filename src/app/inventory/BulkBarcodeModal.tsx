@@ -208,7 +208,7 @@ export function BulkBarcodeModal({ onClose }: BulkBarcodeModalProps) {
                 <input 
                   className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-bold text-sm shadow-inner"
                   placeholder="Cari produk..."
-                  value={search}
+                  value={search ?? ''}
                   onChange={(e) => setSearch(e.target.value)}
                   autoFocus
                 />

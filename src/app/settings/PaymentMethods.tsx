@@ -135,7 +135,7 @@ export default function PaymentMethods() {
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Tipe</label>
                 <select 
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
-                  value={formData.type}
+                  value={formData.type ?? 'QRIS'}
                   onChange={e => setFormData({ ...formData, type: e.target.value as any })}
                 >
                   <option value="QRIS">QRIS</option>

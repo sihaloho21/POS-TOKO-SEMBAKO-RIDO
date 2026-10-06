@@ -237,7 +237,7 @@ export default function Purchases() {
                       type="text"
                       placeholder="Catatan biaya (e.g. Ongkir truk / bongkar muat)..."
                       className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-[11px] font-medium text-slate-800 outline-none"
-                      value={additionalCostNotes}
+                      value={additionalCostNotes ?? ''}
                       onChange={e => setAdditionalCostNotes(e.target.value)}
                     />
                   </div>

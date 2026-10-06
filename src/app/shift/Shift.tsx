@@ -145,7 +145,7 @@ export default function Shift({ onNavigate }: { onNavigate?: (tab: string) => vo
                   <input 
                     type="number"
                     className="w-full pl-12 pr-4 py-4 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-black text-xl tabular-nums"
-                    value={startingCash}
+                    value={startingCash ?? ''}
                     onChange={(e) => setStartingCash(e.target.value)}
                   />
                 </div>
@@ -156,7 +156,7 @@ export default function Shift({ onNavigate }: { onNavigate?: (tab: string) => vo
                     rows={2}
                     className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none font-medium text-xs resize-none"
                     placeholder="Contoh: Ada selisih modal awal, kembalian receh kurang..."
-                    value={openShiftNotes}
+                    value={openShiftNotes ?? ''}
                     onChange={(e) => setOpenShiftNotes(e.target.value)}
                   />
                 </div>
@@ -192,7 +192,7 @@ export default function Shift({ onNavigate }: { onNavigate?: (tab: string) => vo
                     type="number"
                     className="w-full pl-12 pr-4 py-4 bg-white border border-amber-200 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none font-black text-xl tabular-nums"
                     placeholder="Hitung uang di laci..."
-                    value={actualCash}
+                    value={actualCash ?? ''}
                     onChange={(e) => setActualCash(e.target.value)}
                   />
                 </div>
@@ -205,7 +205,7 @@ export default function Shift({ onNavigate }: { onNavigate?: (tab: string) => vo
                     rows={2}
                     className="w-full p-3 bg-white border border-amber-200 rounded-xl outline-none font-medium text-xs resize-none"
                     placeholder="Contoh: Selisih uang karena salah kembalian struk #102..."
-                    value={closeShiftNotes}
+                    value={closeShiftNotes ?? ''}
                     onChange={(e) => setCloseShiftNotes(e.target.value)}
                   />
                 </div>

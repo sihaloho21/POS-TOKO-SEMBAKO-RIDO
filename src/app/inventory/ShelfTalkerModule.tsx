@@ -203,7 +203,7 @@ export function ShelfTalkerModule() {
               type="text" 
               placeholder="Cari produk atau paket..."
               className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm font-bold shadow-sm"
-              value={search}
+              value={search ?? ''}
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>

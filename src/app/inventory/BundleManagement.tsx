@@ -324,7 +324,7 @@ export default function BundleManagement() {
         <input 
           type="text"
           placeholder="Cari nama paket sembako..."
-          value={search}
+          value={search ?? ''}
           onChange={(e) => setSearch(e.target.value)}
           className="w-full text-xs font-bold text-slate-800 outline-none placeholder:text-slate-400"
         />
@@ -536,7 +536,7 @@ export default function BundleManagement() {
                   <input
                     type="text"
                     placeholder="Contoh: Paket Sembako Berkah Ramadhan"
-                    value={bundleName}
+                    value={bundleName ?? ''}
                     onChange={(e) => setBundleName(e.target.value)}
                     className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 outline-none focus:border-blue-500"
                   />
@@ -547,7 +547,7 @@ export default function BundleManagement() {
                     Status Paket
                   </label>
                   <select
-                    value={bundleStatus}
+                    value={bundleStatus ?? 'ACTIVE'}
                     onChange={(e) => setBundleStatus(e.target.value as any)}
                     className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 outline-none focus:border-blue-500"
                   >
@@ -565,7 +565,7 @@ export default function BundleManagement() {
                   </label>
                   <input
                     type="number"
-                    value={bundlePrice}
+                    value={bundlePrice ?? 0}
                     onChange={(e) => setBundlePrice(Number(e.target.value))}
                     className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm font-black text-blue-600 outline-none focus:border-blue-500 tabular-nums"
                   />
@@ -646,7 +646,7 @@ export default function BundleManagement() {
                                 type="number"
                                 min="0.01"
                                 step="any"
-                                value={item.qty}
+                                value={item.qty ?? 0}
                                 onChange={(e) => handleUpdateQty(item.compId, Number(e.target.value))}
                                 className="w-16 px-1.5 py-1 text-center font-bold bg-slate-50 border border-slate-200 rounded-lg text-xs"
                               />
@@ -689,7 +689,7 @@ export default function BundleManagement() {
 
                   <div className="flex flex-col sm:flex-row gap-2">
                     <select
-                      value={selectedCandidateId}
+                      value={selectedCandidateId ?? ''}
                       onChange={(e) => {
                         setSelectedCandidateId(e.target.value);
                         const prod = allProducts.find(p => p.productId === e.target.value);
@@ -724,14 +724,14 @@ export default function BundleManagement() {
                         min="0.1"
                         step="any"
                         placeholder="Qty"
-                        value={candidateQty}
+                        value={candidateQty ?? 1}
                         onChange={(e) => setCandidateQty(Number(e.target.value))}
                         className="w-20 p-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-center outline-none focus:border-blue-500"
                       />
                       <input
                         type="text"
                         placeholder="Satuan"
-                        value={candidateUnit}
+                        value={candidateUnit ?? 'PCS'}
                         onChange={(e) => setCandidateUnit(e.target.value)}
                         className="w-20 p-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-center outline-none focus:border-blue-500"
                       />

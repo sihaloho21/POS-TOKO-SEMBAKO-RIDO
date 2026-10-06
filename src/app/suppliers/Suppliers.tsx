@@ -276,7 +276,7 @@ export default function Suppliers({ onNavigate }: SuppliersProps) {
           <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             type="text"
-            value={search}
+            value={search ?? ''}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Cari nama supplier, telepon, atau alamat..."
             className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-semibold text-slate-800 placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
@@ -324,7 +324,7 @@ export default function Suppliers({ onNavigate }: SuppliersProps) {
             <ArrowUpDown size={14} className="text-slate-400" />
             <span className="text-slate-400 font-bold uppercase text-[9px]">Urutkan:</span>
             <select
-              value={sortBy}
+              value={sortBy ?? 'recent'}
               onChange={(e: any) => setSortBy(e.target.value)}
               className="bg-transparent font-bold text-slate-800 outline-none cursor-pointer"
             >

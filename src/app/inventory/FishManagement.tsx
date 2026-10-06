@@ -727,7 +727,7 @@ export default function FishManagement() {
                 type="text" 
                 placeholder="Cari jenis ikan (Nila, Mas, Gurame, Lele, Patin)..."
                 className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-xs font-bold shadow-sm"
-                value={search}
+                value={search ?? ''}
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
@@ -923,7 +923,7 @@ export default function FishManagement() {
                     Jenis Ikan (Fish Type) *
                   </label>
                   <select
-                    value={deathProductId}
+                    value={deathProductId ?? ''}
                     onChange={(e) => setDeathProductId(e.target.value)}
                     required
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 outline-none focus:ring-2 focus:ring-rose-500"
@@ -948,7 +948,7 @@ export default function FishManagement() {
                     min="0.01"
                     required
                     placeholder="Contoh: 1.50"
-                    value={deathKg}
+                    value={deathKg ?? ''}
                     onChange={(e) => setDeathKg(e.target.value)}
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-900 tabular-nums outline-none focus:ring-2 focus:ring-rose-500"
                   />
@@ -962,7 +962,7 @@ export default function FishManagement() {
                   <input
                     type="date"
                     required
-                    value={deathDate}
+                    value={deathDate ?? ''}
                     onChange={(e) => setDeathDate(e.target.value)}
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 outline-none focus:ring-2 focus:ring-rose-500"
                   />
@@ -976,7 +976,7 @@ export default function FishManagement() {
                   <input
                     type="text"
                     placeholder="Contoh: Mati di bak aerasi / lemas..."
-                    value={deathNotes}
+                    value={deathNotes ?? ''}
                     onChange={(e) => setDeathNotes(e.target.value)}
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-900 outline-none focus:ring-2 focus:ring-rose-500"
                   />
@@ -1152,7 +1152,7 @@ export default function FishManagement() {
 
               <div className="flex items-center gap-2 w-full sm:w-auto">
                 <select
-                  value={deathSpeciesFilter}
+                  value={deathSpeciesFilter ?? 'ALL'}
                   onChange={(e) => setDeathSpeciesFilter(e.target.value)}
                   className="px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-rose-500"
                 >
@@ -1294,7 +1294,7 @@ export default function FishManagement() {
               </div>
 
               <select
-                value={selectedChartSpecies}
+                value={selectedChartSpecies ?? 'ALL'}
                 onChange={(e) => setSelectedChartSpecies(e.target.value)}
                 className="px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black uppercase text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500"
               >
@@ -1688,7 +1688,7 @@ export default function FishManagement() {
                     Jenis Ikan *
                   </label>
                   <select
-                    value={deathProductId}
+                    value={deathProductId ?? ''}
                     onChange={(e) => setDeathProductId(e.target.value)}
                     required
                     className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 outline-none focus:ring-2 focus:ring-rose-500"
@@ -1737,7 +1737,7 @@ export default function FishManagement() {
                     min="0.01"
                     required
                     placeholder="Contoh: 1.50"
-                    value={deathKg}
+                    value={deathKg ?? ''}
                     onChange={(e) => setDeathKg(e.target.value)}
                     className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xl font-black text-slate-900 tabular-nums outline-none focus:ring-2 focus:ring-rose-500"
                   />
@@ -1750,7 +1750,7 @@ export default function FishManagement() {
                   <input
                     type="date"
                     required
-                    value={deathDate}
+                    value={deathDate ?? ''}
                     onChange={(e) => setDeathDate(e.target.value)}
                     className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 outline-none focus:ring-2 focus:ring-rose-500"
                   />
@@ -1762,7 +1762,7 @@ export default function FishManagement() {
                   </label>
                   <textarea
                     rows={2}
-                    value={deathNotes}
+                    value={deathNotes ?? ''}
                     onChange={(e) => setDeathNotes(e.target.value)}
                     placeholder="Contoh: 2 ekor mati di bak aerasi saat pengiriman pagi dari Cikande..."
                     className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 outline-none focus:ring-2 focus:ring-rose-500 resize-none"
@@ -1830,7 +1830,7 @@ export default function FishManagement() {
                     Jenis Ikan *
                   </label>
                   <select
-                    value={restockProductId}
+                    value={restockProductId ?? ''}
                     onChange={(e) => setRestockProductId(e.target.value)}
                     required
                     className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 outline-none focus:ring-2 focus:ring-emerald-500"
@@ -1858,7 +1858,7 @@ export default function FishManagement() {
                     </button>
                   </div>
                   <select
-                    value={restockSupplierId}
+                    value={restockSupplierId ?? ''}
                     onChange={(e) => setRestockSupplierId(e.target.value)}
                     required
                     className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 outline-none focus:ring-2 focus:ring-emerald-500"
@@ -1883,7 +1883,7 @@ export default function FishManagement() {
                       min="0.1"
                       required
                       placeholder="Contoh: 30"
-                      value={restockKg}
+                      value={restockKg ?? ''}
                       onChange={(e) => setRestockKg(e.target.value)}
                       className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-black text-slate-900 tabular-nums outline-none focus:ring-2 focus:ring-emerald-500"
                     />
@@ -1898,7 +1898,7 @@ export default function FishManagement() {
                       min="1000"
                       required
                       placeholder="Contoh: 32000"
-                      value={restockPriceKg}
+                      value={restockPriceKg ?? ''}
                       onChange={(e) => setRestockPriceKg(e.target.value)}
                       className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-black text-slate-900 tabular-nums outline-none focus:ring-2 focus:ring-emerald-500"
                     />
@@ -2015,7 +2015,7 @@ export default function FishManagement() {
                     <input 
                       type="number"
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-black text-xs tabular-nums"
-                      value={simOldStock}
+                      value={simOldStock ?? 0}
                       onChange={e => setSimOldStock(Number(e.target.value))}
                     />
                   </div>
@@ -2024,7 +2024,7 @@ export default function FishManagement() {
                     <input 
                       type="number"
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-black text-xs tabular-nums"
-                      value={simOldWac}
+                      value={simOldWac ?? 0}
                       onChange={e => setSimOldWac(Number(e.target.value))}
                     />
                   </div>
@@ -2033,7 +2033,7 @@ export default function FishManagement() {
                     <input 
                       type="number"
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-black text-xs tabular-nums"
-                      value={simNewStock}
+                      value={simNewStock ?? 0}
                       onChange={e => setSimNewStock(Number(e.target.value))}
                     />
                   </div>
@@ -2042,7 +2042,7 @@ export default function FishManagement() {
                     <input 
                       type="number"
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-black text-xs tabular-nums"
-                      value={simNewPrice}
+                      value={simNewPrice ?? 0}
                       onChange={e => setSimNewPrice(Number(e.target.value))}
                     />
                   </div>
@@ -2112,7 +2112,7 @@ export default function FishManagement() {
                   </label>
                   <input
                     type="text"
-                    value={opnameNotes}
+                    value={opnameNotes ?? ''}
                     onChange={e => setOpnameNotes(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900"
                   />
@@ -2146,7 +2146,7 @@ export default function FishManagement() {
                                 type="number"
                                 step="0.01"
                                 className="w-24 px-2 py-1.5 bg-white border border-slate-300 rounded-lg text-center font-black tabular-nums text-xs focus:ring-2 focus:ring-indigo-500 outline-none"
-                                value={inputVal}
+                                value={inputVal ?? ''}
                                 onChange={e => {
                                   const val = Number(e.target.value);
                                   setOpnameInputs(prev => ({ ...prev, [p.productId]: val }));
