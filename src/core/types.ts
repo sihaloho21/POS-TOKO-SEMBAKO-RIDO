@@ -317,17 +317,39 @@ export interface StockOpname {
   updatedAt: string;
 }
 
+export type StoreStatus = 'BUKA' | 'TUTUP';
+
+export interface StoreStatusConfig {
+  id: 'store_status';
+  status: StoreStatus;
+  updatedAt: string;
+  updatedBy: string;
+  openedAt?: string;
+  closedAt?: string;
+  closedReason?: string;
+  discrepancyApprovalThreshold: number; // e.g. Rp 25.000
+}
+
 export interface CashierShift {
   shiftId: string;
   userId: string;
   deviceId: string;
+  deviceIds?: string[]; // Multiple devices used in this shift
   startTime: string;
   endTime?: string;
   startingCash: number;
   expectedCash?: number;
   actualCash?: number;
+  discrepancy?: number;
+  discrepancyReason?: string;
+  discrepancyApprovedBy?: string;
+  discrepancyApprovedAt?: string;
+  reconciliationEventId?: string;
   totalTransactionCount?: number;
   totalSales?: number;
+  cashIn?: number;
+  cashOut?: number;
+  paymentBreakdown?: Record<string, number>;
   startNotes?: string;
   endNotes?: string;
   notes?: string;

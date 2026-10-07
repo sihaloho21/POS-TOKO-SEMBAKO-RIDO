@@ -15,6 +15,7 @@ import { AuditEngine } from './audit-engine';
 import { LoyaltyEngine } from './loyalty-engine';
 import { StockService } from './services/stock-service';
 import { BundleService } from './services/bundle-service';
+import { StoreStatusService } from './services/store-status-service';
 
 export class TransactionEngine {
   static async createSale(params: {
@@ -28,7 +29,18 @@ export class TransactionEngine {
     moneyStorageId: 'WARUNG' | 'IKAN' | 'UANG_DIGITAL';
     type: 'SALE' | 'GAJIAN';
     allowInsufficientStock?: boolean;
+    allowStoreClosedOverride?: boolean;
   }): Promise<string> {
+    // Check Store Status (Requirement 8)
+    // "Ketika TUTUP: Kasir tidak dapat membuat transaksi normal baru. Owner dapat melakukan tindakan tertentu sesuai permission."
+    const isStoreOpen = await StoreStatusService.isStoreOpen();
+    if (!isStoreOpen && !params.allowStoreClosedOverride) {
+      const cashierUser = await db.users.get(params.cashierId);
+      const isOwner = cashierUser?.role === 'OWNER';
+      if (!isOwner) {
+        throw new Error('STORE_CLOSED: Toko sedang TUTUP. Kasir tidak dapat membuat transaksi baru. Hubungi Owner untuk membuka toko.');
+      }
+    }
     const transactionId = uuidv4();
     const timestamp = new Date().toISOString();
     

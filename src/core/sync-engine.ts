@@ -3,6 +3,7 @@ import { db as localDb } from './database';
 import { db as firestoreDb, auth, handleFirestoreError, OperationType } from '../firebase/config';
 import type { SyncQueueItem } from './types';
 import { addMinutes } from 'date-fns';
+import { StoreStatusService } from './services/store-status-service';
 
 export class SyncEngine {
   private static isSyncing = false;
@@ -50,6 +51,12 @@ export class SyncEngine {
       await localDb.syncQueue.update(item.queueId!, { status: 'SYNCING' });
 
       const collectionName = item.entityType;
+
+      // Evaluate offline transaction for STORE_STATUS_CONFLICT
+      if (item.entityType === 'transactions' && item.payload) {
+        await StoreStatusService.evaluateTransactionForConflict(item.payload);
+      }
+
       const docRef = doc(firestoreDb, collectionName, item.entityId);
       
       // Sanitize payload: remove undefined values which Firestore doesn't accept

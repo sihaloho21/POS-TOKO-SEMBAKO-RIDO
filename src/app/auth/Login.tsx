@@ -6,6 +6,7 @@ import { Keypad } from '@/components/Keypad';
 import { LogIn, Lock, ShieldCheck, UserCheck } from 'lucide-react';
 import type { Product } from '@/core/types';
 import { FishService } from '@/core/services/fish-service';
+import { StoreStatusService } from '@/core/services/store-status-service';
 
 export default function Login() {
   const [pin, setPin] = useState('');
@@ -85,6 +86,9 @@ export default function Login() {
         // Ensure mandatory fish products and suppliers (Nila, Mas, Gurame, Lele, Patin & Cikande, Rau)
         await FishService.ensureMinimalFishProducts().catch(e => console.warn('Fish products init error:', e));
         await FishService.ensureFishSuppliers().catch(e => console.warn('Fish suppliers init error:', e));
+
+        // Ensure store status is initialized
+        await StoreStatusService.ensureInitialized().catch(e => console.warn('Store status init error:', e));
       } catch (err) {
         console.warn('Login init warning:', err);
       } finally {

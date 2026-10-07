@@ -34,6 +34,7 @@ export function ProductForm({ product, initialProductType, initialBaseUnit, onSa
 
   const [hpp, setHpp] = useState<number>(0);
   const [isSaving, setIsSaving] = useState(false);
+  const [tagInput, setTagInput] = useState('');
 
   // Cost Adjustment Modal State
   const [isCostModalOpen, setIsCostModalOpen] = useState(false);
@@ -254,13 +255,15 @@ export function ProductForm({ product, initialProductType, initialBaseUnit, onSa
               <input
                 className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-bold text-slate-900 shadow-sm"
                 placeholder="Ketik tag dan tekan Enter (misal: PROMO, LEBARAN)"
+                value={tagInput}
+                onChange={(e) => setTagInput(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault();
-                    const val = e.currentTarget.value.trim().toUpperCase();
+                    const val = tagInput.trim().toUpperCase();
                     if (val && !formData.tags?.includes(val)) {
                       setFormData({ ...formData, tags: [...(formData.tags || []), val] });
-                      e.currentTarget.value = '';
+                      setTagInput('');
                     }
                   }
                 }}

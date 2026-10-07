@@ -15,23 +15,27 @@ import {
   CreditCard,
   PlusCircle,
   TrendingUp,
-  UserCheck
+  UserCheck,
+  Lock
 } from 'lucide-react';
 import { format } from 'date-fns';
+import { useDeviceId } from '@/core/device-store';
+import ClockOutModal from '@/app/shift/ClockOutModal';
 
 export default function ShiftSummaryWidget({ onOpenShiftTab }: { onOpenShiftTab?: () => void }) {
   const { currentUser } = useAuthStore();
   const [isExpanded, setIsExpanded] = useState(false);
   const [isOpeningShift, setIsOpeningShift] = useState(false);
+  const [isClockOutModalOpen, setIsClockOutModalOpen] = useState(false);
   const [startingCashInput, setStartingCashInput] = useState('50000');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const deviceId = 'device-1';
+  const deviceId = useDeviceId();
   
-  // Current active shift for this device
+  // Current active shift for this device or user
   const currentShift = useLiveQuery(
-    () => ShiftService.getCurrentShift(deviceId),
-    [deviceId]
+    () => ShiftService.getCurrentShift(deviceId, currentUser?.userId),
+    [deviceId, currentUser?.userId]
   );
 
   const activeShifts = useLiveQuery(() => ShiftService.getActiveShifts(), []);
@@ -248,6 +252,18 @@ export default function ShiftSummaryWidget({ onOpenShiftTab }: { onOpenShiftTab?
             </span>
           </div>
 
+          {/* Clock Out Button */}
+          {currentShift && (
+            <button
+              onClick={() => setIsClockOutModalOpen(true)}
+              className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-rose-300 hover:text-white bg-rose-950/60 hover:bg-rose-900 border border-rose-800/60 px-2.5 py-1 rounded-xl transition-all"
+              title="Tutup sesi kasir & rekonsiliasi kas"
+            >
+              <Lock size={12} />
+              <span>Tutup Shift</span>
+            </button>
+          )}
+
           {/* Expand/Collapse Toggle */}
           <button
             onClick={() => setIsExpanded(!isExpanded)}
@@ -303,6 +319,12 @@ export default function ShiftSummaryWidget({ onOpenShiftTab }: { onOpenShiftTab?
           </div>
         </div>
       )}
+
+      {/* Clock Out Modal */}
+      <ClockOutModal
+        isOpen={isClockOutModalOpen}
+        onClose={() => setIsClockOutModalOpen(false)}
+      />
     </div>
   );
 }

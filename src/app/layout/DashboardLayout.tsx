@@ -27,14 +27,21 @@ import {
   Lock,
   Clock,
   CalendarClock,
-  Receipt
+  Receipt,
+  Store,
+  CheckCircle2,
+  AlertOctagon
 } from 'lucide-react';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { db } from '@/core/database';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { motion, AnimatePresence } from 'motion/react';
 import { ShiftService } from '@/core/services/shift-service';
+import { StoreStatusService } from '@/core/services/store-status-service';
+import { useDeviceId } from '@/core/device-store';
 import ClockInModal from '@/app/shift/ClockInModal';
+import ClockOutModal from '@/app/shift/ClockOutModal';
+import StoreStatusModal from '@/app/settings/StoreStatusModal';
 
 interface NavItemProps {
   icon: React.ReactNode;
@@ -99,8 +106,11 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
 }) {
   const { currentUser, logout } = useAuthStore();
   const isOnline = useOnlineStatus();
+  const deviceId = useDeviceId();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isClockInOpen, setIsClockInOpen] = useState(false);
+  const [isClockOutOpen, setIsClockOutOpen] = useState(false);
+  const [isStoreStatusOpen, setIsStoreStatusOpen] = useState(false);
   
   const pendingSyncCount = useLiveQuery(
     () => db.syncQueue.where('status').anyOf(['PENDING', 'FAILED', 'SYNCING']).count()
@@ -110,7 +120,8 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
     () => db.conflicts.where('status').equals('PENDING').count()
   );
 
-  const currentShift = useLiveQuery(() => ShiftService.getCurrentShift('device-1'), []);
+  const storeConfig = useLiveQuery(() => StoreStatusService.getStoreStatus(), []);
+  const currentShift = useLiveQuery(() => ShiftService.getCurrentShift(deviceId, currentUser?.userId), [deviceId, currentUser?.userId]);
 
   const isOwner = currentUser?.role === 'OWNER';
 
@@ -210,10 +221,31 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
           <div className="flex items-center gap-4">
             <button className="lg:hidden p-2 text-slate-600" onClick={() => setIsSidebarOpen(true)}><Menu /></button>
             <h1 className="text-sm font-bold text-slate-900 uppercase tracking-wider">{currentTab.replace('-', ' ')}</h1>
+
+            {/* STORE STATUS BADGE & OWNER TOGGLE (PRD Req 8) */}
+            <button
+              type="button"
+              onClick={() => isOwner && setIsStoreStatusOpen(true)}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider transition-all border shadow-xs ${
+                storeConfig?.status === 'BUKA'
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100'
+                  : 'bg-rose-50 text-rose-700 border-rose-300 hover:bg-rose-100 animate-pulse'
+              } ${isOwner ? 'cursor-pointer hover:shadow-sm' : 'cursor-default'}`}
+              title={isOwner ? 'Klik untuk mengubah status toko (Buka / Tutup)' : `Status Toko: ${storeConfig?.status}`}
+            >
+              <span className={`w-2 h-2 rounded-full ${storeConfig?.status === 'BUKA' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+              <Store size={13} />
+              <span>TOKO {storeConfig?.status || 'BUKA'}</span>
+              {isOwner && (
+                <span className="text-[9px] bg-white/80 px-1 rounded font-bold lowercase text-slate-500 border border-slate-200">
+                  edit
+                </span>
+              )}
+            </button>
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Detailed Status Bar (PRD 98) */}
+            {/* Detailed Status Bar (PRD 98 & Req 8) */}
             <div className="hidden md:flex items-center gap-3 px-3 py-1 bg-slate-50 rounded-full border border-slate-200">
               <div className="flex items-center gap-1.5 border-r border-slate-200 pr-3">
                 <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-red-500'}`} />
@@ -221,10 +253,16 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
                   {isOnline ? 'Online' : 'Offline'}
                 </span>
               </div>
+
+              {/* Device ID (Terminal) */}
+              <div className="flex items-center gap-1 border-r border-slate-200 pr-3 text-[10px] font-bold text-slate-600" title={`Perangkat POS: ${deviceId}`}>
+                <Smartphone size={12} className="text-slate-400" />
+                <span className="uppercase">{deviceId}</span>
+              </div>
               
               <div className="flex items-center gap-1.5 border-r border-slate-200 pr-3 text-[10px] font-bold text-slate-500">
                 <ClipboardList size={12} />
-                {currentShift ? currentShift.shiftId.slice(-6).toUpperCase() : 'NO SHIFT'}
+                {currentShift ? `SHIFT: ${currentShift.shiftId.slice(-6).toUpperCase()}` : 'NO SHIFT'}
               </div>
 
               {pendingSyncCount !== undefined && pendingSyncCount > 0 && (
@@ -242,8 +280,8 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
               )}
             </div>
 
-            {/* Clock In Button for Kasir role if no shift active */}
-            {!isOwner && !currentShift && (
+            {/* Shift Actions: Clock In or Clock Out */}
+            {!currentShift ? (
               <button
                 type="button"
                 onClick={() => setIsClockInOpen(true)}
@@ -252,6 +290,16 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
               >
                 <Clock size={13} />
                 <span>Clock In</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setIsClockOutOpen(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-full text-xs font-black uppercase tracking-wider transition-all"
+                title="Tutup Shift Kerja Kasir (Clock Out)"
+              >
+                <Lock size={13} />
+                <span>Clock Out</span>
               </button>
             )}
 
@@ -312,10 +360,22 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
         )}
       </AnimatePresence>
 
-      {/* Clock In Modal for Kasir role */}
+      {/* Clock In Modal */}
       <ClockInModal 
         isOpen={isClockInOpen} 
         onClose={() => setIsClockInOpen(false)} 
+      />
+
+      {/* Clock Out Modal */}
+      <ClockOutModal
+        isOpen={isClockOutOpen}
+        onClose={() => setIsClockOutOpen(false)}
+      />
+
+      {/* Store Status Modal for Owner */}
+      <StoreStatusModal
+        isOpen={isStoreStatusOpen}
+        onClose={() => setIsStoreStatusOpen(false)}
       />
     </div>
   );

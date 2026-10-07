@@ -23,6 +23,7 @@ import ReceiptSettings from './app/settings/ReceiptSettings';
 import TransactionHistory from './app/transactions/TransactionHistory';
 import KasirDashboard from './app/dashboard/KasirDashboard';
 import ToastContainer from './app/components/ToastContainer';
+import { ErrorBoundary } from './app/components/ErrorBoundary';
 import { SyncEngine } from './core/sync-engine';
 import { ProductService } from './core/services/product-service';
 import { FishService } from './core/services/fish-service';
@@ -155,7 +156,9 @@ export default function App() {
   return (
     <>
       <DashboardLayout currentTab={currentTab} onTabChange={setCurrentTab}>
-        {renderContent()}
+        <ErrorBoundary>
+          {renderContent()}
+        </ErrorBoundary>
       </DashboardLayout>
       <ToastContainer />
     </>

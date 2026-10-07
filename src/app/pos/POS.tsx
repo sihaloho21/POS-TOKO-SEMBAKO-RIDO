@@ -28,16 +28,22 @@ import {
   Share2,
   PlusCircle,
   Layers,
-  Eye
+  Eye,
+  AlertOctagon,
+  Store,
+  Clock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import type { Product, TransactionItem, Customer, Transaction, Bundle } from '@/core/types';
 import { v4 as uuidv4 } from 'uuid';
 import { ShiftService } from '@/core/services/shift-service';
+import { StoreStatusService } from '@/core/services/store-status-service';
+import { useDeviceId } from '@/core/device-store';
 import { PrintService } from '@/core/utils/print-service';
 import { useToastStore } from '@/core/toast-store';
 import { BundleService, type FlattenedBundleComponent } from '@/core/services/bundle-service';
 import ShiftSummaryWidget from './ShiftSummaryWidget';
+import ClockInModal from '@/app/shift/ClockInModal';
 
 export function WeightModal({ product, onConfirm, onClose }: { product: Product, onConfirm: (kg: number) => void, onClose: () => void }) {
   const [weight, setWeight] = useState('');
@@ -122,7 +128,14 @@ export default function POS() {
     breakdown: FlattenedBundleComponent[];
   } | null>(null);
 
-  const currentShift = useLiveQuery(() => ShiftService.getCurrentShift('device-1'), []);
+  const [isClockInModalOpen, setIsClockInOpen] = useState(false);
+  const deviceId = useDeviceId();
+  const storeConfig = useLiveQuery(() => StoreStatusService.getStoreStatus(), []);
+  const currentShift = useLiveQuery(
+    () => ShiftService.getCurrentShift(deviceId, currentUser?.userId),
+    [deviceId, currentUser?.userId]
+  );
+  const isStoreClosedForCashier = storeConfig?.status === 'TUTUP' && currentUser?.role !== 'OWNER';
 
   // Hotkeys handling (PRD 97)
   useEffect(() => {
@@ -266,7 +279,7 @@ export default function POS() {
       type: transactionType,
       status: 'HOLD',
       cashierId: currentUser.userId,
-      deviceId: 'device-1',
+      deviceId: deviceId,
       shiftId: currentShift.shiftId,
       customerId: selectedCustomer?.customerId,
       items: cart,
@@ -300,7 +313,22 @@ export default function POS() {
 
   // Open Checkout or Gajian Approval
   const triggerCheckout = () => {
-    if (cart.length === 0 || !currentUser || isProcessing || !currentShift) return;
+    if (cart.length === 0 || !currentUser || isProcessing) return;
+
+    // Store Status Check (Requirement 8)
+    if (storeConfig?.status === 'TUTUP') {
+      const isOwner = currentUser.role === 'OWNER';
+      if (!isOwner) {
+        addToast('Toko sedang TUTUP. Kasir tidak dapat membuat transaksi normal baru.', 'error');
+        return;
+      }
+    }
+
+    if (!currentShift) {
+      addToast('Harap buka sesi shift kasir (Clock In) terlebih dahulu.', 'warning');
+      setIsClockInOpen(true);
+      return;
+    }
 
     if (transactionType === 'GAJIAN') {
       if (!selectedCustomer) {
@@ -346,7 +374,7 @@ export default function POS() {
     try {
       const transactionId = await TransactionEngine.createSale({
         cashierId: currentUser.userId,
-        deviceId: 'device-1',
+        deviceId: deviceId,
         shiftId: currentShift.shiftId,
         customerId: selectedCustomer?.customerId,
         items: cart,
@@ -354,7 +382,8 @@ export default function POS() {
         paymentMethodId: finalMethod,
         moneyStorageId: moneyStorageId,
         type: transactionType,
-        allowInsufficientStock
+        allowInsufficientStock,
+        allowStoreClosedOverride: currentUser.role === 'OWNER'
       });
       
       const transaction = await db.transactions.get(transactionId);
@@ -476,6 +505,33 @@ export default function POS() {
             <AlertTriangle size={18} className="animate-pulse shrink-0" />
             <span className="font-bold text-xs">SHIFT BELUM DIBUKA. Buka shift kasir terlebih dahulu untuk mulai melayani transaksi.</span>
           </div>
+        </div>
+      )}
+
+      {/* STORE STATUS CLOSED ALERT BANNER (PRD Req 8) */}
+      {storeConfig?.status === 'TUTUP' && (
+        <div className="shrink-0 p-3.5 bg-rose-50 border-2 border-rose-300 rounded-2xl flex items-center justify-between gap-3 text-rose-950 shadow-sm animate-pulse">
+          <div className="flex items-center gap-2.5">
+            <AlertOctagon size={22} className="text-rose-600 shrink-0" />
+            <div>
+              <p className="font-black text-xs uppercase tracking-wider text-rose-900">
+                Status Operasional Toko: TUTUP
+              </p>
+              <p className="text-[11px] font-medium text-rose-700">
+                Kasir tidak dapat memproses transaksi normal baru saat toko tutup.{' '}
+                {storeConfig.closedReason ? `(Alasan: ${storeConfig.closedReason})` : ''}
+              </p>
+            </div>
+          </div>
+          {currentUser?.role === 'OWNER' ? (
+            <span className="px-3 py-1 bg-rose-600 text-white rounded-xl text-[10px] font-black uppercase tracking-wider shrink-0 shadow-sm">
+              👑 Owner Override Aktif
+            </span>
+          ) : (
+            <span className="px-3 py-1 bg-rose-200 text-rose-900 rounded-xl text-[10px] font-black uppercase tracking-wider shrink-0">
+              Transaksi Dinonaktifkan
+            </span>
+          )}
         </div>
       )}
 
@@ -766,15 +822,25 @@ export default function POS() {
             
             <button
               onClick={triggerCheckout}
-              disabled={cart.length === 0 || isProcessing || !currentShift}
+              disabled={cart.length === 0 || isProcessing || !currentShift || isStoreClosedForCashier}
               className={`w-full py-3.5 rounded-xl font-black text-xs uppercase tracking-[0.15em] flex items-center justify-center gap-2 transition-all shadow-xl ${
-                cart.length === 0 || isProcessing || !currentShift
-                  ? 'bg-slate-800 text-slate-600 cursor-not-allowed'
+                cart.length === 0 || isProcessing || !currentShift || isStoreClosedForCashier
+                  ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
                   : 'bg-blue-600 hover:bg-blue-500 shadow-blue-900/50 active:scale-[0.98]'
               }`}
             >
               {isProcessing ? (
                 <span>MEMPROSES...</span>
+              ) : isStoreClosedForCashier ? (
+                <>
+                  <AlertOctagon size={18} className="text-rose-400" />
+                  <span>TOKO TUTUP (KASIR TERKUNCI)</span>
+                </>
+              ) : !currentShift ? (
+                <>
+                  <Clock size={18} />
+                  <span>BUKA SHIFT DAHULU (F8)</span>
+                </>
               ) : (
                 <>
                   <CheckCircle size={18} />
@@ -1320,6 +1386,12 @@ export default function POS() {
           onClose={() => setWeightProduct(null)}
         />
       )}
+
+      {/* Clock In Modal for Cashier */}
+      <ClockInModal
+        isOpen={isClockInModalOpen}
+        onClose={() => setIsClockInOpen(false)}
+      />
     </div>
   );
 }

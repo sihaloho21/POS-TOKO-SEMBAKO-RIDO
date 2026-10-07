@@ -33,6 +33,8 @@ import {
 } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
+import { useDeviceId } from '@/core/device-store';
+import ClockOutModal from '@/app/shift/ClockOutModal';
 
 interface KasirDashboardProps {
   onNavigate?: (tab: string) => void;
@@ -41,10 +43,13 @@ interface KasirDashboardProps {
 export default function KasirDashboard({ onNavigate }: KasirDashboardProps) {
   const { currentUser } = useAuthStore();
   const { addToast } = useToastStore();
-  const deviceId = 'device-1';
+  const deviceId = useDeviceId();
 
-  // Live query active shift
-  const currentShift = useLiveQuery(() => ShiftService.getCurrentShift(deviceId), [deviceId]);
+  // Live query active shift for this user and device
+  const currentShift = useLiveQuery(
+    () => ShiftService.getCurrentShift(deviceId, currentUser?.userId),
+    [deviceId, currentUser?.userId]
+  );
 
   // Monitor shift expiration
   useEffect(() => {
@@ -734,121 +739,12 @@ export default function KasirDashboard({ onNavigate }: KasirDashboardProps) {
         </div>
       </div>
 
-      {/* Clock Out Reconciliation Modal */}
-      {isClockOutModalOpen && currentShift && (
-        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-in zoom-in-95">
-            <div className="flex justify-between items-center pb-3 border-b border-slate-100 mb-4">
-              <div className="flex items-center gap-2.5 text-rose-600 font-black text-base uppercase">
-                <LogOut size={20} />
-                <span>Clock Out & Tutup Shift</span>
-              </div>
-              <button onClick={() => setIsClockOutModalOpen(false)} className="p-1 text-slate-400 hover:text-slate-600">
-                <X size={18} />
-              </button>
-            </div>
-
-            {/* Calculations Card */}
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-4 text-xs space-y-2">
-              <div className="flex justify-between items-center text-slate-600">
-                <span>Waktu Clock Out (End Timestamp):</span>
-                <span className="font-mono font-bold text-slate-900 bg-white px-2 py-0.5 rounded border border-slate-200 text-[11px]">
-                  {format(now, 'dd/MM/yyyy HH:mm:ss')}
-                </span>
-              </div>
-              <div className="flex justify-between text-slate-600">
-                <span>Total Transaksi Shift:</span>
-                <span className="font-bold text-blue-600">{totalCompletedCount} Transaksi Selesai</span>
-              </div>
-              <div className="flex justify-between text-slate-600">
-                <span>Modal Awal Kasir:</span>
-                <span className="font-bold tabular-nums">Rp {startingCash.toLocaleString()}</span>
-              </div>
-              <div className="flex justify-between text-slate-600">
-                <span>Total Penjualan Tunai:</span>
-                <span className="font-bold tabular-nums text-emerald-600">+Rp {cashSales.toLocaleString()}</span>
-              </div>
-              <div className="flex justify-between text-slate-900 font-black text-sm pt-2 border-t border-slate-200">
-                <span>Uang Seharusnya di Laci (Expected):</span>
-                <span className="text-blue-600 tabular-nums">Rp {expectedDrawerCash.toLocaleString()}</span>
-              </div>
-            </div>
-
-            {/* Input actual cash */}
-            <div className="space-y-3 mb-5">
-              <div>
-                <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
-                  Hitung Uang Fisik Aktual di Laci (Rp) *
-                </label>
-                <input
-                  type="number"
-                  autoFocus
-                  placeholder="0"
-                  value={actualCashInput ?? ''}
-                  onChange={(e) => setActualCashInput(e.target.value)}
-                  className="w-full text-2xl font-black text-center p-3 bg-slate-50 border-2 border-slate-200 rounded-2xl focus:border-blue-500 outline-none tabular-nums"
-                />
-              </div>
-
-              {/* Live discrepancy preview */}
-              {actualCashInput && (
-                <div className={`p-3 rounded-xl border flex justify-between items-center text-xs ${
-                  discrepancy === 0
-                    ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                    : discrepancy > 0
-                    ? 'bg-blue-50 border-blue-200 text-blue-800'
-                    : 'bg-rose-50 border-rose-200 text-rose-800'
-                }`}>
-                  <span className="font-bold">Selisih Kasir:</span>
-                  <span className="font-black text-sm tabular-nums">
-                    {discrepancy === 0
-                      ? '✓ Pas (Rp 0)'
-                      : `${discrepancy > 0 ? '+' : ''}Rp ${discrepancy.toLocaleString()} (${discrepancy > 0 ? 'Lebih' : 'Kurang'})`}
-                  </span>
-                </div>
-              )}
-
-              {/* Contextual Notes on Shift End */}
-              <div>
-                <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
-                  Catatan Penutupan Shift (Notes / Alasan Selisih Kasir)
-                </label>
-                <textarea
-                  rows={2}
-                  value={clockOutNotes ?? ''}
-                  onChange={(e) => setClockOutNotes(e.target.value)}
-                  placeholder="Contoh: Selisih uang kasir karena salah kembalian struk #102, pecahan kecil diganti, dll."
-                  className="w-full p-3 bg-slate-50 border-2 border-slate-200 rounded-2xl text-xs font-medium text-slate-800 placeholder:text-slate-400 focus:bg-white focus:border-rose-500 outline-none resize-none transition-all"
-                />
-              </div>
-
-              {clockOutError && (
-                <p className="text-rose-600 text-[11px] font-bold text-center">
-                  {clockOutError}
-                </p>
-              )}
-            </div>
-
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setIsClockOutModalOpen(false)}
-                className="flex-1 py-3 text-slate-500 font-bold text-xs uppercase tracking-wider hover:bg-slate-100 rounded-xl"
-              >
-                Batal
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmClockOut}
-                disabled={isClosingShift || !actualCashInput}
-                className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-rose-200 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
-              >
-                {isClosingShift ? 'Menutup Shift...' : `Konfirmasi Clock Out (${totalCompletedCount} Transaksi)`}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Clock Out Modal with 8 closing metrics and reconciliation */}
+      <ClockOutModal
+        isOpen={isClockOutModalOpen}
+        shiftId={currentShift?.shiftId}
+        onClose={() => setIsClockOutModalOpen(false)}
+      />
 
       {/* Clock In Modal */}
       <ClockInModal
