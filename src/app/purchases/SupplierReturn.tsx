@@ -3,6 +3,8 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/core/database';
 import { SupplierReturnService } from '@/core/services/supplier-return-service';
 import { useAuthStore } from '@/core/auth-store';
+import { useDeviceId } from '@/core/device-store';
+import { useToastStore } from '@/core/toast-store';
 import { 
   Undo2, 
   Search, 
@@ -17,6 +19,8 @@ import {
 
 export default function SupplierReturn() {
   const { currentUser } = useAuthStore();
+  const { addToast } = useToastStore();
+  const deviceId = useDeviceId();
   const [selectedSupplierId, setSelectedSupplierId] = useState('');
   const [selectedStorage, setSelectedStorage] = useState<'WARUNG' | 'IKAN' | 'UANG_DIGITAL'>('WARUNG');
   const [productSearch, setProductSearch] = useState('');
@@ -30,7 +34,7 @@ export default function SupplierReturn() {
 
   const addItem = (product: any) => {
     if (items.find(i => i.productId === product.productId)) return;
-    const hpp = costs?.find(c => c.productId === product.productId)?.hpp || 0;
+    const hpp = costs?.find(c => c.productId === product.productId)?.hpp ?? product.hpp ?? 0;
     setItems([...items, { 
       productId: product.productId, 
       name: product.name, 
@@ -50,7 +54,7 @@ export default function SupplierReturn() {
 
   const handleSubmit = async () => {
     if (!selectedSupplierId || items.length === 0 || !currentUser) {
-      alert('Pilih supplier dan tambahkan item.');
+      addToast('Pilih supplier dan tambahkan item.', 'error');
       return;
     }
 
@@ -61,14 +65,14 @@ export default function SupplierReturn() {
         items,
         moneyStorageId: selectedStorage,
         userId: currentUser.userId,
-        deviceId: 'device-1',
+        deviceId,
         reason
       });
-      alert('Retur berhasil dicatat.');
+      addToast('Retur supplier berhasil dicatat & refund kas masuk ke buku besar.', 'success');
       setItems([]);
       setReason('');
     } catch (error: any) {
-      alert('Gagal mencatat retur: ' + error.message);
+      addToast('Gagal mencatat retur: ' + error.message, 'error');
     } finally {
       setIsProcessing(false);
     }
@@ -151,7 +155,7 @@ export default function SupplierReturn() {
                 >
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-bold text-slate-900 uppercase truncate">{p.name}</p>
-                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">HPP: Rp {(costs?.find(c => c.productId === p.productId)?.hpp || 0).toLocaleString()}</p>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">HPP: Rp {(costs?.find(c => c.productId === p.productId)?.hpp ?? p.hpp ?? 0).toLocaleString()}</p>
                   </div>
                   <Plus size={16} className="text-slate-300 group-hover:text-blue-500 transition-all" />
                 </button>

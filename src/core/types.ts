@@ -172,6 +172,8 @@ export interface ReceivablePayment {
   moneyStorageId: string;
   userId: string;
   timestamp: string;
+  paymentDate?: string;
+  notes?: string;
 }
 
 export interface Purchase {
@@ -202,6 +204,7 @@ export interface FinanceEvent {
   direction: 'IN' | 'OUT';
   referenceId: string;
   referenceType: 'TRANSACTION' | 'PURCHASE' | 'RECEIVABLE_PAYMENT' | 'ADJUSTMENT' | 'EXPENSE' | 'CAPITAL' | 'PRIVE' | 'INTERNAL_TRANSFER' | 'SERVICE_REVENUE' | 'MDR_COST' | 'VOID' | 'RETURN';
+  description?: string;
   userId: string;
   deviceId: string;
   timestamp: string;

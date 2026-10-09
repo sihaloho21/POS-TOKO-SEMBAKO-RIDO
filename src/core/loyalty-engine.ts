@@ -69,6 +69,7 @@ export class LoyaltyEngine {
   static async recordReversalEvent(customerId: string, points: number, transactionId: string): Promise<void> {
     if (points <= 0) return;
 
+    const timestamp = new Date().toISOString();
     const event: LoyaltyEvent = {
       loyaltyEventId: uuidv4(),
       customerId,
@@ -76,7 +77,7 @@ export class LoyaltyEngine {
       points: -points,
       referenceId: transactionId,
       referenceType: 'TRANSACTION',
-      timestamp: new Date().toISOString()
+      timestamp
     };
 
     await db.loyaltyEvents.add(event);
@@ -85,7 +86,27 @@ export class LoyaltyEngine {
     if (customer) {
       const newTotal = Math.max(0, (customer.loyaltyPoints || 0) - points);
       await db.customers.update(customerId, { loyaltyPoints: newTotal });
+
+      await db.syncQueue.add({
+        entityType: 'customers',
+        entityId: customerId,
+        action: 'UPDATE',
+        payload: { ...customer, loyaltyPoints: newTotal },
+        status: 'PENDING',
+        retryCount: 0,
+        createdAt: timestamp
+      });
     }
+
+    await db.syncQueue.add({
+      entityType: 'loyaltyEvents',
+      entityId: event.loyaltyEventId,
+      action: 'CREATE',
+      payload: event,
+      status: 'PENDING',
+      retryCount: 0,
+      createdAt: timestamp
+    });
   }
 
   static async getHistory(customerId: string): Promise<LoyaltyEvent[]> {

@@ -17,11 +17,15 @@ import {
 } from 'lucide-react';
 import { PurchaseService } from '@/core/services/purchase-service';
 import { useAuthStore } from '@/core/auth-store';
-import type { Product, Supplier } from '@/core/types';
+import { useDeviceId } from '@/core/device-store';
+import { useToastStore } from '@/core/toast-store';
+import type { Product, Supplier, Purchase } from '@/core/types';
 import { SupplierModal } from '@/app/suppliers/SupplierModal';
 
 export default function Purchases() {
   const { currentUser } = useAuthStore();
+  const { addToast } = useToastStore();
+  const deviceId = useDeviceId();
   const [currentTab, setCurrentTab] = useState<'NEW' | 'HISTORY'>('NEW');
   const [selectedSupplierId, setSelectedSupplierId] = useState('');
   const [invoiceNumber, setInvoiceNumber] = useState('');
@@ -34,6 +38,8 @@ export default function Purchases() {
   const [moneyStorageId, setMoneyStorageId] = useState<'WARUNG' | 'IKAN' | 'UANG_DIGITAL'>('WARUNG');
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSupplierModalOpen, setIsSupplierModalOpen] = useState(false);
+  const [settlePurchaseTarget, setSettlePurchaseTarget] = useState<Purchase | null>(null);
+  const [settleStorageId, setSettleStorageId] = useState<'WARUNG' | 'IKAN' | 'UANG_DIGITAL'>('WARUNG');
 
   const suppliers = useLiveQuery(() => db.suppliers.where('status').equals('ACTIVE').toArray());
   const products = useLiveQuery(() => db.products.where('status').equals('ACTIVE').toArray());
@@ -59,7 +65,7 @@ export default function Purchases() {
 
   const handleSubmit = async () => {
     if (!selectedSupplierId || !invoiceNumber || items.length === 0 || !currentUser) {
-      alert('Lengkapi data pembelian (Supplier, No. Invoice, & Item).');
+      addToast('Lengkapi data pembelian (Supplier, No. Invoice, & Item).', 'error');
       return;
     }
 
@@ -75,16 +81,35 @@ export default function Purchases() {
         paymentStatus,
         moneyStorageId: paymentStatus === 'PAID' ? moneyStorageId : undefined,
         userId: currentUser.userId,
-        deviceId: 'device-1'
+        deviceId
       });
-      alert('Pembelian berhasil dicatat & HPP/WAC telah diperbarui sesuai aturan costing.');
+      addToast('Pembelian berhasil dicatat & HPP/WAC telah diperbarui sesuai aturan costing.', 'success');
       setItems([]);
       setInvoiceNumber('');
       setSelectedSupplierId('');
       setAdditionalCost(0);
       setAdditionalCostNotes('');
     } catch (err: any) {
-      alert('Gagal: ' + err.message);
+      addToast('Gagal: ' + err.message, 'error');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleConfirmSettlePayable = async () => {
+    if (!settlePurchaseTarget || !currentUser) return;
+    setIsProcessing(true);
+    try {
+      await PurchaseService.payPurchasePayable({
+        purchaseId: settlePurchaseTarget.purchaseId,
+        moneyStorageId: settleStorageId,
+        userId: currentUser.userId,
+        deviceId
+      });
+      addToast(`Hutang supplier Faktur #${settlePurchaseTarget.invoiceNumber} berhasil dilunasi!`, 'success');
+      setSettlePurchaseTarget(null);
+    } catch (err: any) {
+      addToast(err.message || 'Gagal melunasi hutang supplier.', 'error');
     } finally {
       setIsProcessing(false);
     }
@@ -375,14 +400,76 @@ export default function Purchases() {
                     <td className="px-6 py-4 text-sm font-black text-slate-900 tabular-nums">Rp {p.total.toLocaleString()}</td>
                     <td className="px-6 py-4">
                       <span className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest border ${p.status === 'PAID' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-amber-50 text-amber-600 border-amber-100'}`}>
-                        {p.status}
+                        {p.status === 'PAID' ? 'PAID (LUNAS)' : 'HUTANG SUPPLIER'}
                       </span>
                     </td>
-                    <td className="px-6 py-4 text-right"><ChevronRight size={18} className="text-slate-300 ml-auto" /></td>
+                    <td className="px-6 py-4 text-right">
+                      {p.status !== 'PAID' && p.status !== 'CANCELLED' ? (
+                        <button
+                          onClick={() => {
+                            setSettlePurchaseTarget(p);
+                            setSettleStorageId('WARUNG');
+                          }}
+                          className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-[10px] font-black uppercase tracking-wider shadow-sm transition-all cursor-pointer"
+                        >
+                          Lunasi Hutang
+                        </button>
+                      ) : (
+                        <ChevronRight size={18} className="text-slate-300 ml-auto" />
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Pelunasan Hutang Supplier */}
+      {settlePurchaseTarget && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-in zoom-in-95">
+            <h3 className="font-black text-slate-900 text-base uppercase tracking-tight mb-2">
+              Pelunasan Hutang Supplier
+            </h3>
+            <p className="text-xs text-slate-500 mb-4">
+              Faktur <strong>#{settlePurchaseTarget.invoiceNumber}</strong> • Total Tagihan:{' '}
+              <strong className="text-slate-900">Rp {settlePurchaseTarget.total.toLocaleString()}</strong>
+            </p>
+
+            <div className="space-y-3 mb-5">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">
+                Pilih Sumber Kas Pembayaran
+              </label>
+              <select
+                value={settleStorageId}
+                onChange={(e) => setSettleStorageId(e.target.value as any)}
+                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-xs text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="WARUNG">Kas Warung</option>
+                <option value="IKAN">Kas Ikan</option>
+                <option value="UANG_DIGITAL">Kas Uang Digital</option>
+              </select>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setSettlePurchaseTarget(null)}
+                className="flex-1 py-3 font-bold text-xs uppercase tracking-wider text-slate-500 hover:bg-slate-100 rounded-xl"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmSettlePayable}
+                disabled={isProcessing}
+                className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-emerald-200 disabled:opacity-50"
+              >
+                {isProcessing ? 'Memproses...' : 'Bayar & Lunasi'}
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -38,6 +38,7 @@ import type { Product, TransactionItem, Customer, Transaction, Bundle } from '@/
 import { v4 as uuidv4 } from 'uuid';
 import { ShiftService } from '@/core/services/shift-service';
 import { StoreStatusService } from '@/core/services/store-status-service';
+import { StockService } from '@/core/services/stock-service';
 import { useDeviceId } from '@/core/device-store';
 import { PrintService } from '@/core/utils/print-service';
 import { useToastStore } from '@/core/toast-store';
@@ -312,7 +313,7 @@ export default function POS() {
   };
 
   // Open Checkout or Gajian Approval
-  const triggerCheckout = () => {
+  const triggerCheckout = async () => {
     if (cart.length === 0 || !currentUser || isProcessing) return;
 
     // Store Status Check (Requirement 8)
@@ -336,8 +337,16 @@ export default function POS() {
         return;
       }
 
-      // Check customer permission for Gajian (credit limit > 0)
-      const hasPermission = selectedCustomer.creditLimit && selectedCustomer.creditLimit >= subtotal;
+      // Check customer remaining credit limit (creditLimit - activeDebt)
+      const activeReceivables = await db.receivables
+        .where('customerId')
+        .equals(selectedCustomer.customerId)
+        .filter(r => r.status === 'OPEN' || r.status === 'PARTIAL' || r.status === 'OVERDUE')
+        .toArray();
+      const activeDebt = activeReceivables.reduce((sum, r) => sum + (r.remainingAmount || 0), 0);
+      const remainingLimit = (selectedCustomer.creditLimit || 0) - activeDebt;
+
+      const hasPermission = remainingLimit >= subtotal && (selectedCustomer.creditLimit || 0) > 0;
       if (!hasPermission) {
         // Requires Owner Approval
         setApprovalError('');
@@ -452,7 +461,10 @@ export default function POS() {
 
     const prodId = uuidv4();
     const priceNum = Number(newProductPrice) || 0;
+    const hppEst = Math.round(priceNum * 0.85);
     const barcodeVal = newProductBarcode.trim() || `888${Date.now().toString().slice(-6)}`;
+    const now = new Date().toISOString();
+    const initialStock = 20;
 
     const newProd: Product = {
       productId: prodId,
@@ -465,19 +477,52 @@ export default function POS() {
       saleUnits: [newProductUnit],
       conversionRules: [],
       normalPrice: priceNum,
-      hpp: priceNum * 0.85, // estimated default
-      stock: 20,
+      hpp: hppEst,
+      stock: 0, // Will be derived from OPENING_BALANCE movement below
       minimumStock: 5,
       targetStock: 25,
       status: 'ACTIVE',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+      createdAt: now,
+      updatedAt: now
     };
 
     await db.products.add(newProd);
+    await db.productCosts.put({
+      productId: prodId,
+      hpp: hppEst,
+      updatedAt: now
+    });
+
+    // Record Opening Balance Stock Movement so getDerivedStock matches 20
+    await StockService.recordMovement({
+      productId: prodId,
+      movementType: 'OPENING_BALANCE',
+      qty: initialStock,
+      unit: newProductUnit,
+      baseQty: initialStock,
+      referenceId: `quick_add_${prodId}`,
+      segmentId: newProductCategory === 'FISH' ? 'IKAN' : 'WARUNG',
+      reason: 'Stok Awal Tambah Produk Cepat (POS)',
+      costSnapshot: hppEst,
+      userId: currentUser?.userId || 'SYSTEM',
+      deviceId: deviceId,
+      timestamp: now
+    });
+
+    const updatedProd = (await db.products.get(prodId)) || { ...newProd, stock: initialStock };
+
+    await db.syncQueue.add({
+      entityType: 'products',
+      entityId: prodId,
+      action: 'CREATE',
+      payload: updatedProd,
+      status: 'PENDING',
+      retryCount: 0,
+      createdAt: now
+    });
 
     // Auto add to cart
-    addToCart(newProd);
+    addToCart(updatedProd);
 
     // Reset & Close
     setNewProductName('');

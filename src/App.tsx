@@ -19,6 +19,7 @@ import StockOpname from './app/inventory/StockOpname';
 import SupplierReturn from './app/purchases/SupplierReturn';
 import Purchases from './app/purchases/Purchases';
 import Suppliers from './app/suppliers/Suppliers';
+import Receivables from './app/receivables/Receivables';
 import ReceiptSettings from './app/settings/ReceiptSettings';
 import TransactionHistory from './app/transactions/TransactionHistory';
 import KasirDashboard from './app/dashboard/KasirDashboard';
@@ -135,6 +136,8 @@ export default function App() {
         return <Purchases />;
       case 'supplier-return':
         return <SupplierReturn />;
+      case 'receivables':
+        return <Receivables />;
       case 'conflicts':
         return <ConflictCenter />;
       case 'audit':

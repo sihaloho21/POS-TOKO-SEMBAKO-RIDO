@@ -92,7 +92,7 @@
         "transactionId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
         "receiptNumber": { "type": "string", "maxLength": 64 },
         "type": { "type": "string", "enum": ["SALE", "GAJIAN", "RETURN", "VOID", "DIGITAL_SERVICE"] },
-        "status": { "type": "string", "enum": ["COMPLETED", "PENDING", "VOIDED", "CANCELLED", "HOLD"] },
+        "status": { "type": "string", "enum": ["COMPLETED", "PENDING", "VOIDED", "CANCELLED", "HOLD", "approval_pending"] },
         "total": { "type": "number" },
         "cashierId": { "type": "string", "maxLength": 128 },
         "clientTimestamp": { "type": "string", "format": "date-time" }
@@ -109,9 +109,24 @@
         "customerId": { "type": "string", "maxLength": 128 },
         "totalAmount": { "type": "number" },
         "paidAmount": { "type": "number" },
-        "status": { "type": "string", "enum": ["OPEN", "PARTIAL", "PAID", "OVERDUE"] }
+        "status": { "type": "string", "enum": ["OPEN", "PARTIAL", "PAID", "OVERDUE", "VOIDED"] }
       },
       "required": ["receivableId", "transactionId", "customerId", "totalAmount", "status"]
+    },
+    "ReceivablePayment": {
+      "title": "Receivable Payment",
+      "description": "Installment or settlement payment for a receivable",
+      "type": "object",
+      "properties": {
+        "paymentId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "receivableId": { "type": "string", "maxLength": 128 },
+        "amount": { "type": "number" },
+        "paymentMethodId": { "type": "string", "maxLength": 64 },
+        "moneyStorageId": { "type": "string", "enum": ["WARUNG", "IKAN", "UANG_DIGITAL"] },
+        "userId": { "type": "string", "maxLength": 128 },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["paymentId", "receivableId", "amount", "paymentMethodId", "moneyStorageId", "userId", "timestamp"]
     },
     "Purchase": {
       "title": "Purchase",
@@ -263,6 +278,7 @@
     "suppliers": { "schema": "Supplier", "description": "Suppliers" },
     "transactions": { "schema": "Transaction", "description": "Sales and returns" },
     "receivables": { "schema": "Receivable", "description": "Customer debts" },
+    "receivablePayments": { "schema": "ReceivablePayment", "description": "Receivable installment payments" },
     "purchases": { "schema": "Purchase", "description": "Supplier purchases" },
     "financeEvents": { "schema": "FinanceEvent", "description": "Financial ledger" },
     "stockMovements": { "schema": "StockMovement", "description": "Inventory ledger" },

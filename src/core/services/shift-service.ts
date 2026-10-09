@@ -89,6 +89,15 @@ export class ShiftService {
     };
 
     await db.financeEvents.add(financeEvent);
+    await db.syncQueue.add({
+      entityType: 'financeEvents',
+      entityId: financeEvent.financeEventId,
+      action: 'CREATE',
+      payload: financeEvent,
+      status: 'PENDING',
+      retryCount: 0,
+      createdAt: timestamp
+    });
 
     await AuditEngine.log({
       userId: params.userId,
@@ -276,6 +285,15 @@ export class ShiftService {
       };
 
       await db.financeEvents.add(reconciliationEvent);
+      await db.syncQueue.add({
+        entityType: 'financeEvents',
+        entityId: reconciliationEvent.financeEventId,
+        action: 'CREATE',
+        payload: reconciliationEvent,
+        status: 'PENDING',
+        retryCount: 0,
+        createdAt: endTimestamp
+      });
     }
 
     const updatedShift: CashierShift = {

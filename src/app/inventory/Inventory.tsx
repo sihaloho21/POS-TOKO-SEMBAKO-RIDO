@@ -287,7 +287,7 @@ export default function Inventory() {
                     <input 
                       type="checkbox" 
                       className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                      checked={products && products.length > 0 && selectedIds.length === products.length}
+                      checked={Boolean(products && products.length > 0 && selectedIds.length === products.length)}
                       onChange={toggleSelectAll}
                     />
                   </th>

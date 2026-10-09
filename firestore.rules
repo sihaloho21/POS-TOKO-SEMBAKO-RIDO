@@ -68,9 +68,9 @@ service cloud.firestore {
       return data.transactionId is string && data.transactionId.size() <= 128 &&
              data.receiptNumber is string && data.receiptNumber.size() <= 64 &&
              data.type in ['SALE', 'GAJIAN', 'RETURN', 'VOID', 'DIGITAL_SERVICE'] &&
-             data.status in ['COMPLETED', 'PENDING', 'VOIDED', 'CANCELLED', 'HOLD'] &&
+             data.status in ['COMPLETED', 'PENDING', 'VOIDED', 'CANCELLED', 'HOLD', 'approval_pending'] &&
              data.total is number &&
-             data.cashierId == request.auth.uid;
+             data.cashierId is string && data.cashierId.size() <= 128;
     }
 
     // --- Collections ---
@@ -84,8 +84,12 @@ service cloud.firestore {
 
     match /products/{productId} {
       allow read: if isKasir() || isWarehouse();
-      allow create: if isManager() || isWarehouse();
-      allow update: if isManager() || isWarehouse();
+      allow create: if isKasir() || isManager() || isWarehouse();
+      allow update: if isKasir() || isManager() || isWarehouse();
+    }
+
+    match /productCosts/{productId} {
+      allow read, write: if isOwner();
     }
 
     match /customers/{customerId} {
@@ -98,7 +102,10 @@ service cloud.firestore {
       allow get: if isKasir();
       allow list: if isKasir();
       allow create: if isKasir() && isValidTransaction(incoming()) && incoming().transactionId == transactionId;
-      allow update: if isManager() && isValidTransaction(incoming());
+      allow update: if isValidTransaction(incoming()) && (
+        isManager() ||
+        (isKasir() && incoming().status == 'approval_pending')
+      );
     }
 
     match /financeEvents/{eventId} {
@@ -117,15 +124,16 @@ service cloud.firestore {
     }
 
     // Fallback for other collections mentioned in blueprint
-    match /bundles/{id} { allow read, write: if isWarehouse(); }
-    match /suppliers/{id} { allow read, write: if isWarehouse(); }
-    match /receivables/{id} { allow read: if isKasir(); allow write: if isManager(); }
+    match /bundles/{id} { allow read: if isKasir() || isWarehouse(); allow write: if isWarehouse(); }
+    match /suppliers/{id} { allow read: if isKasir() || isWarehouse(); allow write: if isWarehouse(); }
+    match /receivables/{id} { allow read: if isKasir(); allow write: if isKasir(); }
+    match /receivablePayments/{id} { allow read: if isKasir(); allow write: if isKasir(); }
     match /purchases/{id} { allow read, write: if isWarehouse(); }
-    match /conflicts/{id} { allow read, write: if isManager(); }
+    match /conflicts/{id} { allow read, write: if isManager() || isKasir(); }
     match /notifications/{id} { allow read, write: if isKasir(); }
     match /shifts/{id} { allow read, write: if isKasir(); }
     match /stockOpnames/{id} { allow read, write: if isWarehouse() || isKasir(); }
-    match /digitalServices/{id} { allow read: if isKasir(); allow write: if isManager(); }
-    match /loyaltyEvents/{id} { allow read, write: if isManager(); }
+    match /digitalServices/{id} { allow read: if isKasir(); allow write: if isKasir(); }
+    match /loyaltyEvents/{id} { allow read: if isKasir(); allow write: if isKasir(); }
   }
 }

@@ -3,6 +3,8 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/core/database';
 import { StockOpnameService } from '@/core/services/stock-opname-service';
 import { useAuthStore } from '@/core/auth-store';
+import { useDeviceId } from '@/core/device-store';
+import { useToastStore } from '@/core/toast-store';
 import type { StockOpname as StockOpnameType } from '@/core/types';
 import { 
   ClipboardList, 
@@ -12,16 +14,24 @@ import {
   AlertTriangle,
   Package,
   ArrowRight,
-  Search
+  Search,
+  ShieldCheck,
+  X
 } from 'lucide-react';
 import { format } from 'date-fns';
 
 export default function StockOpname() {
   const { currentUser } = useAuthStore();
+  const { addToast } = useToastStore();
+  const deviceId = useDeviceId();
   const [isCreating, setIsCreating] = useState(false);
   const [activeOpnameId, setActiveOpnameId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<'ALL' | 'FISH' | 'SEMBAKO'>('ALL');
+  const [isFinalizeModalOpen, setIsFinalizeModalOpen] = useState(false);
+  const [ownerPin, setOwnerPin] = useState('');
+  const [pinError, setPinError] = useState('');
+  const [isFinalizing, setIsFinalizing] = useState(false);
   
   const opnames = useLiveQuery(() => db.stockOpnames.orderBy('createdAt').reverse().toArray());
   const products = useLiveQuery(() => db.products.toArray());
@@ -34,7 +44,7 @@ export default function StockOpname() {
 
   const handleStart = async () => {
     if (!currentUser) return;
-    const id = await StockOpnameService.startOpname(currentUser.userId, 'device-1');
+    const id = await StockOpnameService.startOpname(currentUser.userId, deviceId);
     setActiveOpnameId(id);
     setIsCreating(true);
   };
@@ -47,25 +57,40 @@ export default function StockOpname() {
     await db.stockOpnames.update(activeOpname.opnameId, { items: newItems, updatedAt: new Date().toISOString() });
   };
 
-  const handleFinalize = async () => {
+  const handleFinalize = () => {
+    if (!activeOpname || !currentUser) return;
+    setOwnerPin('');
+    setPinError('');
+    setIsFinalizeModalOpen(true);
+  };
+
+  const handleConfirmFinalize = async () => {
     if (!activeOpname || !currentUser) return;
 
-    if (currentUser.role === 'KASIR') {
-      const pin = prompt('Finalisasi Stock Opname akan mengubah saldo stok fisik secara permanen. Masukkan PIN Owner untuk otorisasi:');
-      if (pin !== '123456') {
-        alert('PIN Owner salah atau otorisasi ditolak. Hitungan fisik Anda tetap tersimpan sebagai Draft.');
+    if (currentUser.role !== 'OWNER') {
+      const ownerUser = await db.users.filter(u => u.role === 'OWNER' && u.pinHash === ownerPin.trim()).first();
+      if (!ownerUser) {
+        setPinError('PIN Owner salah! Otorisasi finalisasi opname ditolak.');
         return;
       }
-    } else {
-      if (!confirm('Finalisasi Stock Opname akan mengubah saldo stok fisik secara permanen. Lanjutkan?')) return;
     }
-    
-    await StockOpnameService.finalizeOpname(activeOpname.opnameId, currentUser.userId, 'device-1');
-    setIsCreating(false);
-    setActiveOpnameId(null);
+
+    setIsFinalizing(true);
+    try {
+      await StockOpnameService.finalizeOpname(activeOpname.opnameId, currentUser.userId, deviceId);
+      addToast('Stock Opname berhasil difinalisasi dan saldo stok diperbarui!', 'success');
+      setIsFinalizeModalOpen(false);
+      setIsCreating(false);
+      setActiveOpnameId(null);
+    } catch (err: any) {
+      addToast(err.message || 'Gagal memfinalisasi Stock Opname.', 'error');
+    } finally {
+      setIsFinalizing(false);
+    }
   };
 
   const handleSaveDraft = () => {
+    addToast('Hitungan fisik disimpan sebagai Draft.', 'success');
     setIsCreating(false);
     setActiveOpnameId(null);
   };
@@ -274,6 +299,67 @@ export default function StockOpname() {
               <p className="text-sm font-bold uppercase tracking-widest">Belum ada riwayat opname</p>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Finalize Opname Confirmation & Owner PIN Modal */}
+      {isFinalizeModalOpen && activeOpname && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-in zoom-in-95">
+            <div className="flex justify-between items-center pb-3 border-b border-slate-100 mb-4">
+              <div className="flex items-center gap-2 text-emerald-600 font-black text-sm uppercase">
+                <ShieldCheck size={18} />
+                <span>Finalisasi Stock Opname</span>
+              </div>
+              <button onClick={() => setIsFinalizeModalOpen(false)} className="p-1 text-slate-400 hover:text-slate-600">
+                <X size={18} />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-600 mb-4 leading-relaxed">
+              Finalisasi Stock Opname akan menyesuaikan saldo stok fisik secara permanen melalui <strong>Stock Movement Ledger</strong> untuk semua item yang memiliki selisih.
+            </p>
+
+            {currentUser?.role !== 'OWNER' && (
+              <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl mb-4 space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-wider text-amber-800 block text-center">
+                  Masukkan PIN Owner untuk Otorisasi
+                </label>
+                <input
+                  type="password"
+                  maxLength={6}
+                  placeholder="6 Digit PIN Owner"
+                  value={ownerPin}
+                  onChange={(e) => {
+                    setOwnerPin(e.target.value);
+                    setPinError('');
+                  }}
+                  className="w-full p-2.5 bg-white border border-amber-300 rounded-xl text-center font-black text-lg tracking-widest outline-none focus:ring-2 focus:ring-amber-500"
+                />
+                {pinError && (
+                  <p className="text-[11px] font-bold text-rose-600 text-center">{pinError}</p>
+                )}
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setIsFinalizeModalOpen(false)}
+                className="flex-1 py-3 font-bold text-xs uppercase tracking-wider text-slate-500 hover:bg-slate-100 rounded-xl"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmFinalize}
+                disabled={isFinalizing || (currentUser?.role !== 'OWNER' && !ownerPin.trim())}
+                className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-emerald-200 disabled:opacity-50"
+              >
+                {isFinalizing ? 'Memproses...' : 'Konfirmasi Finalisasi'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

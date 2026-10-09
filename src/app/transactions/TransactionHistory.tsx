@@ -92,12 +92,9 @@ export default function TransactionHistory() {
 
     if (navigator.clipboard) {
       navigator.clipboard.writeText(text);
-      setFeedbackMsg('Ringkasan struk disalin ke clipboard! Membuka WhatsApp...');
-      setTimeout(() => setFeedbackMsg(''), 3000);
+      setFeedbackMsg(`Ringkasan struk ${tx.receiptNumber} berhasil disalin ke Clipboard (siap ditempel ke WhatsApp)!`);
+      setTimeout(() => setFeedbackMsg(''), 4000);
     }
-
-    const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
-    window.open(waUrl, '_blank');
   };
 
   // KASIR ACTION: Flag transaction for Owner review with status 'approval_pending'
@@ -145,7 +142,8 @@ export default function TransactionHistory() {
       setTimeout(() => setFeedbackMsg(''), 4500);
       setRequestTx(null);
     } catch (err: any) {
-      alert(err.message || 'Gagal mengajukan pembatalan');
+      setFeedbackMsg(err.message || 'Gagal mengajukan pembatalan');
+      setTimeout(() => setFeedbackMsg(''), 4000);
     } finally {
       setIsProcessing(false);
     }
@@ -173,7 +171,8 @@ export default function TransactionHistory() {
       setTimeout(() => setFeedbackMsg(''), 4500);
       setReviewTx(null);
     } catch (err: any) {
-      alert(err.message || 'Gagal memproses persetujuan');
+      setFeedbackMsg(err.message || 'Gagal memproses persetujuan');
+      setTimeout(() => setFeedbackMsg(''), 4000);
     } finally {
       setIsProcessing(false);
     }
@@ -185,9 +184,20 @@ export default function TransactionHistory() {
     setIsProcessing(true);
 
     try {
+      const now = new Date().toISOString();
       await db.transactions.update(tx.transactionId, {
         status: 'COMPLETED',
         approvalStatus: 'REJECTED'
+      });
+
+      await db.syncQueue.add({
+        entityType: 'transactions',
+        entityId: tx.transactionId,
+        action: 'UPDATE',
+        payload: { ...tx, status: 'COMPLETED', approvalStatus: 'REJECTED' },
+        status: 'PENDING',
+        retryCount: 0,
+        createdAt: now
       });
 
       await AuditEngine.log({
@@ -204,7 +214,8 @@ export default function TransactionHistory() {
       setTimeout(() => setFeedbackMsg(''), 4500);
       setReviewTx(null);
     } catch (err: any) {
-      alert(err.message || 'Gagal menolak permohonan');
+      setFeedbackMsg(err.message || 'Gagal menolak permohonan');
+      setTimeout(() => setFeedbackMsg(''), 4000);
     } finally {
       setIsProcessing(false);
     }

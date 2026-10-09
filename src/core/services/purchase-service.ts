@@ -118,19 +118,23 @@ export class PurchaseService {
     // 3. Handle additional cost audit and operational expense if chosen
     if (additionalCost > 0) {
       if (allocation === 'OPERATIONAL_EXPENSE') {
-        const expenseEvent: FinanceEvent = {
-          financeEventId: uuidv4(),
-          amount: additionalCost,
-          storageId: params.moneyStorageId || 'WARUNG',
-          direction: 'OUT',
-          referenceId: purchaseId,
-          referenceType: 'EXPENSE',
-          userId: params.userId,
-          deviceId: params.deviceId,
-          timestamp
-        };
-        await db.financeEvents.add(expenseEvent);
-        await this.addToQueue('financeEvents', expenseEvent.financeEventId, 'CREATE', expenseEvent);
+        // Only record immediate cash outflow if purchase is PAID
+        if (params.paymentStatus === 'PAID' && params.moneyStorageId) {
+          const expenseEvent: FinanceEvent = {
+            financeEventId: uuidv4(),
+            amount: additionalCost,
+            storageId: params.moneyStorageId,
+            direction: 'OUT',
+            referenceId: purchaseId,
+            referenceType: 'EXPENSE',
+            description: `Biaya Tambahan / Ongkir Faktur #${params.invoiceNumber} (${params.additionalCostNotes || 'Beban Opex'})`,
+            userId: params.userId,
+            deviceId: params.deviceId,
+            timestamp
+          };
+          await db.financeEvents.add(expenseEvent);
+          await this.addToQueue('financeEvents', expenseEvent.financeEventId, 'CREATE', expenseEvent);
+        }
 
         await AuditEngine.log({
           userId: params.userId,
@@ -142,6 +146,7 @@ export class PurchaseService {
           after: {
             invoiceNumber: params.invoiceNumber,
             additionalCost,
+            paymentStatus: params.paymentStatus,
             treatment: 'OPERATIONAL_EXPENSE',
             notes: params.additionalCostNotes || 'Beban operasional logistik/pengiriman pembelian'
           }
@@ -157,6 +162,7 @@ export class PurchaseService {
           after: {
             invoiceNumber: params.invoiceNumber,
             additionalCost,
+            paymentStatus: params.paymentStatus,
             treatment: 'CAPITALIZE_INTO_WAC',
             notes: params.additionalCostNotes || 'Kapitalisasi biaya tambahan ke WAC produk',
             mapping: additionalCostMappings
@@ -176,6 +182,7 @@ export class PurchaseService {
         direction: 'OUT',
         referenceId: purchaseId,
         referenceType: 'PURCHASE',
+        description: `Pembayaran Pembelian Faktur #${params.invoiceNumber}`,
         userId: params.userId,
         deviceId: params.deviceId,
         timestamp
@@ -187,7 +194,7 @@ export class PurchaseService {
     // 5. Audit
     await AuditEngine.log({
       userId: params.userId,
-      role: 'SUPERVISOR',
+      role: 'OWNER',
       deviceId: params.deviceId,
       action: 'CREATE_PURCHASE',
       module: 'PURCHASES',
@@ -196,6 +203,53 @@ export class PurchaseService {
     });
 
     return purchaseId;
+  }
+
+  static async payPurchasePayable(params: {
+    purchaseId: string;
+    moneyStorageId: 'WARUNG' | 'IKAN' | 'UANG_DIGITAL';
+    userId: string;
+    deviceId: string;
+  }): Promise<void> {
+    const purchase = await db.purchases.get(params.purchaseId);
+    if (!purchase) throw new Error('Data pembelian tidak ditemukan.');
+    if (purchase.status === 'PAID') throw new Error('Faktur pembelian ini sudah lunas.');
+
+    const timestamp = new Date().toISOString();
+    const financeEvent: FinanceEvent = {
+      financeEventId: uuidv4(),
+      amount: purchase.total,
+      storageId: params.moneyStorageId,
+      direction: 'OUT',
+      referenceId: purchase.purchaseId,
+      referenceType: 'PURCHASE',
+      description: `Pelunasan Hutang Supplier Faktur #${purchase.invoiceNumber}`,
+      userId: params.userId,
+      deviceId: params.deviceId,
+      timestamp
+    };
+
+    const updatedPurchase: Purchase = {
+      ...purchase,
+      status: 'PAID'
+    };
+
+    await db.purchases.update(params.purchaseId, { status: 'PAID' });
+    await db.financeEvents.add(financeEvent);
+
+    await this.addToQueue('purchases', params.purchaseId, 'UPDATE', updatedPurchase);
+    await this.addToQueue('financeEvents', financeEvent.financeEventId, 'CREATE', financeEvent);
+
+    await AuditEngine.log({
+      userId: params.userId,
+      role: 'OWNER',
+      deviceId: params.deviceId,
+      action: 'PAY_SUPPLIER_PAYABLE',
+      module: 'PURCHASES',
+      referenceId: params.purchaseId,
+      before: { status: purchase.status },
+      after: { status: 'PAID', amount: purchase.total, storageId: params.moneyStorageId }
+    });
   }
 
   private static async addToQueue(entityType: string, entityId: string, action: 'CREATE' | 'UPDATE' | 'DELETE', payload: any) {

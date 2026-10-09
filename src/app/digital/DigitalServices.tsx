@@ -15,6 +15,8 @@ import {
 import { v4 as uuidv4 } from 'uuid';
 import { useAuthStore } from '@/core/auth-store';
 import { AuditEngine } from '@/core/audit-engine';
+import { useDeviceId } from '@/core/device-store';
+import { useToastStore } from '@/core/toast-store';
 
 type ServiceType = 'PULSA' | 'PAKET_DATA' | 'TOKEN_LISTRIK' | 'TOPUP' | 'TRANSFER' | 'TARIK_TUNAI';
 
@@ -29,6 +31,8 @@ const SERVICES: { type: ServiceType; label: string; icon: any; color: string }[]
 
 export default function DigitalServices() {
   const { currentUser } = useAuthStore();
+  const { addToast } = useToastStore();
+  const deviceId = useDeviceId();
   const [selectedType, setSelectedType] = useState<ServiceType | null>(null);
   const [formData, setFormData] = useState({ ref: '', principal: '', fee: '2000' });
   const [isProcessing, setIsProcessing] = useState(false);
@@ -39,11 +43,18 @@ export default function DigitalServices() {
     e.preventDefault();
     if (!selectedType || !currentUser) return;
 
+    const principal = Number(formData.principal);
+    const fee = Number(formData.fee);
+    if (principal <= 0 || fee < 0) {
+      addToast('Masukkan nominal pokok dan biaya admin yang valid.', 'error');
+      return;
+    }
+
     setIsProcessing(true);
     const serviceId = uuidv4();
     const transactionId = uuidv4();
     const timestamp = new Date().toISOString();
-    const total = Number(formData.principal) + Number(formData.fee);
+    const total = principal + fee;
 
     try {
       const serviceData = {
@@ -51,8 +62,8 @@ export default function DigitalServices() {
         transactionId,
         serviceType: selectedType,
         customerReference: formData.ref,
-        principal: Number(formData.principal),
-        fee: Number(formData.fee),
+        principal,
+        fee,
         total,
         status: 'SUCCESS' as const
       };
@@ -60,35 +71,115 @@ export default function DigitalServices() {
       // 1. Save Service Record
       await db.digitalServices.add(serviceData);
 
-      // 2. Finance Event (PRD 29: Fee is Service Revenue)
-      // We log two events: Principal (Out from storage if Tarik Tunai, etc.?) 
-      // Actually PRD 64: "Tarik Tunai: Customer pays principal + fee. Warung/Digital Storage goes DOWN by principal."
-      // For Top Up: Storage goes DOWN by principal.
-      
-      const storageId = 'UANG_DIGITAL'; // Default for digital services
+      // 2. Finance Events (PRD 29 & 64: Proper Double-Entry Cash vs Digital Storage Accounting)
+      const financeEvents: any[] = [];
+      const serviceLabel = SERVICES.find(s => s.type === selectedType)?.label || selectedType;
 
-      const financeEvent: any = {
-        financeEventId: uuidv4(),
-        amount: total,
-        storageId,
-        direction: 'IN', // Total money received from customer
-        referenceId: transactionId,
-        referenceType: 'DIGITAL_SERVICE',
-        userId: currentUser.userId,
-        deviceId: 'device-1',
-        timestamp
-      };
-      await db.financeEvents.add(financeEvent);
+      if (selectedType === 'TARIK_TUNAI') {
+        // Tarik Tunai: Customer transfers (principal + fee) into UANG_DIGITAL, receives physical cash (principal) from WARUNG
+        financeEvents.push({
+          financeEventId: uuidv4(),
+          amount: principal,
+          storageId: 'UANG_DIGITAL',
+          direction: 'IN',
+          referenceId: serviceId,
+          referenceType: 'INTERNAL_TRANSFER',
+          description: `Tarik Tunai Masuk Saldo Digital (${formData.ref})`,
+          userId: currentUser.userId,
+          deviceId,
+          timestamp
+        });
+        financeEvents.push({
+          financeEventId: uuidv4(),
+          amount: principal,
+          storageId: 'WARUNG',
+          direction: 'OUT',
+          referenceId: serviceId,
+          referenceType: 'INTERNAL_TRANSFER',
+          description: `Penyerahan Tunai Tarik Tunai (${formData.ref})`,
+          userId: currentUser.userId,
+          deviceId,
+          timestamp
+        });
+        if (fee > 0) {
+          financeEvents.push({
+            financeEventId: uuidv4(),
+            amount: fee,
+            storageId: 'UANG_DIGITAL',
+            direction: 'IN',
+            referenceId: serviceId,
+            referenceType: 'SERVICE_REVENUE',
+            description: `Biaya Admin Tarik Tunai (${formData.ref})`,
+            userId: currentUser.userId,
+            deviceId,
+            timestamp
+          });
+        }
+      } else {
+        // PULSA / PAKET_DATA / TOKEN_LISTRIK / TOPUP / TRANSFER:
+        // Customer pays cash (principal + fee) into WARUNG, store deducts principal from UANG_DIGITAL
+        financeEvents.push({
+          financeEventId: uuidv4(),
+          amount: principal,
+          storageId: 'UANG_DIGITAL',
+          direction: 'OUT',
+          referenceId: serviceId,
+          referenceType: 'INTERNAL_TRANSFER',
+          description: `Potong Saldo Digital ${serviceLabel} (${formData.ref})`,
+          userId: currentUser.userId,
+          deviceId,
+          timestamp
+        });
+        financeEvents.push({
+          financeEventId: uuidv4(),
+          amount: principal,
+          storageId: 'WARUNG',
+          direction: 'IN',
+          referenceId: serviceId,
+          referenceType: 'INTERNAL_TRANSFER',
+          description: `Terima Tunai Pokok ${serviceLabel} (${formData.ref})`,
+          userId: currentUser.userId,
+          deviceId,
+          timestamp
+        });
+        if (fee > 0) {
+          financeEvents.push({
+            financeEventId: uuidv4(),
+            amount: fee,
+            storageId: 'WARUNG',
+            direction: 'IN',
+            referenceId: serviceId,
+            referenceType: 'SERVICE_REVENUE',
+            description: `Pendapatan Jasa / Fee ${serviceLabel} (${formData.ref})`,
+            userId: currentUser.userId,
+            deviceId,
+            timestamp
+          });
+        }
+      }
+
+      for (const fe of financeEvents) {
+        await db.financeEvents.add(fe);
+        await db.syncQueue.add({
+          entityType: 'financeEvents',
+          entityId: fe.financeEventId,
+          action: 'CREATE',
+          payload: fe,
+          status: 'PENDING',
+          retryCount: 0,
+          createdAt: timestamp
+        });
+      }
 
       // 3. Audit
       await AuditEngine.log({
         userId: currentUser.userId,
         role: currentUser.role,
-        deviceId: 'device-1',
+        deviceId,
         action: 'CREATE_DIGITAL_SERVICE',
         module: 'DIGITAL',
         referenceId: serviceId,
-        after: serviceData
+        after: { ...serviceData, financeEventsCount: financeEvents.length }
       });
 
       // 4. Queue Sync
@@ -104,10 +195,10 @@ export default function DigitalServices() {
 
       setFormData({ ref: '', principal: '', fee: '2000' });
       setSelectedType(null);
-      alert('Layanan Digital Berhasil!');
+      addToast(`Layanan Digital (${serviceLabel}) berhasil dicatat ke buku kas!`, 'success');
     } catch (err) {
       console.error(err);
-      alert('Gagal memproses layanan digital.');
+      addToast('Gagal memproses layanan digital.', 'error');
     } finally {
       setIsProcessing(false);
     }

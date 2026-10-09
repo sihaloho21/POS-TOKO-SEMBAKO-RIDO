@@ -68,11 +68,29 @@ export class StockOpnameService {
       }
     }
 
+    const updatedOpname = {
+      ...opname,
+      status: 'COMPLETED' as const,
+      finalizedBy: userId,
+      finalizedAt: timestamp,
+      updatedAt: timestamp
+    };
+
     await db.stockOpnames.update(opnameId, {
       status: 'COMPLETED',
       finalizedBy: userId,
       finalizedAt: timestamp,
       updatedAt: timestamp
+    });
+
+    await db.syncQueue.add({
+      entityType: 'stockOpnames',
+      entityId: opnameId,
+      action: 'UPDATE',
+      payload: updatedOpname,
+      status: 'PENDING',
+      retryCount: 0,
+      createdAt: timestamp
     });
 
     await AuditEngine.log({

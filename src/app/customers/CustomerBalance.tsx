@@ -22,7 +22,7 @@ export function CustomerBalance({ customerId }: CustomerBalanceProps) {
 
   const totalDebt = activeReceivables.reduce((acc, r) => acc + r.remainingAmount, 0);
   const remainingLimit = customer.creditLimit - totalDebt;
-  const usagePercentage = (totalDebt / customer.creditLimit) * 100;
+  const usagePercentage = customer.creditLimit > 0 ? (totalDebt / customer.creditLimit) * 100 : (totalDebt > 0 ? 100 : 0);
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

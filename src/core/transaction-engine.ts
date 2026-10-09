@@ -16,6 +16,7 @@ import { LoyaltyEngine } from './loyalty-engine';
 import { StockService } from './services/stock-service';
 import { BundleService } from './services/bundle-service';
 import { StoreStatusService } from './services/store-status-service';
+import { FinanceService } from './services/finance-service';
 
 export class TransactionEngine {
   static async createSale(params: {
@@ -323,15 +324,16 @@ export class TransactionEngine {
       }
     }
 
-    // 3. Reverse Finance Event if was cash sale
-    if (transaction.paymentMethodId === 'CASH') {
+    // 3. Reverse Finance Event if was normal SALE (not GAJIAN)
+    if (transaction.type !== 'GAJIAN') {
       const reverseFinance: FinanceEvent = {
         financeEventId: uuidv4(),
         amount: transaction.total,
         storageId: transaction.moneyStorageId,
         direction: 'OUT',
         referenceId: params.transactionId,
-        referenceType: 'EXPENSE',
+        referenceType: params.actionType === 'VOID' ? 'VOID' : 'RETURN',
+        description: `${params.actionType} Transaksi #${transaction.receiptNumber} (${transaction.paymentMethodId}) • ${params.reason}`,
         userId: params.userId,
         deviceId: transaction.deviceId,
         timestamp
@@ -340,15 +342,47 @@ export class TransactionEngine {
       await this.addToQueue('financeEvents', reverseFinance.financeEventId, 'CREATE', reverseFinance);
     }
 
-    // 4. If was GAJIAN, cancel or reduce receivable
+    // 4. If was GAJIAN, cancel receivable and refund any already-paid installments
     if (transaction.type === 'GAJIAN') {
       const receivable = await db.receivables.where('transactionId').equals(params.transactionId).first();
       if (receivable) {
+        if (receivable.paidAmount > 0) {
+          const refundPaidFinance: FinanceEvent = {
+            financeEventId: uuidv4(),
+            amount: receivable.paidAmount,
+            storageId: transaction.moneyStorageId || 'WARUNG',
+            direction: 'OUT',
+            referenceId: receivable.receivableId,
+            referenceType: params.actionType === 'VOID' ? 'VOID' : 'RETURN',
+            description: `Pengembalian Cicilan Piutang (${params.actionType} #${transaction.receiptNumber})`,
+            userId: params.userId,
+            deviceId: transaction.deviceId,
+            timestamp
+          };
+          await db.financeEvents.add(refundPaidFinance);
+          await this.addToQueue('financeEvents', refundPaidFinance.financeEventId, 'CREATE', refundPaidFinance);
+        }
+
+        const updatedReceivable: Receivable = {
+          ...receivable,
+          status: 'VOIDED',
+          remainingAmount: 0
+        };
         await db.receivables.update(receivable.receivableId, {
-          status: 'PAID', // or voided
+          status: 'VOIDED',
           remainingAmount: 0
         });
+        await this.addToQueue('receivables', receivable.receivableId, 'UPDATE', updatedReceivable);
       }
+    }
+
+    // 4b. Reverse Loyalty Points if earned
+    if (transaction.loyaltyPointsEarned > 0 && transaction.customerId) {
+      await LoyaltyEngine.recordReversalEvent(
+        transaction.customerId,
+        transaction.loyaltyPointsEarned,
+        params.transactionId
+      );
     }
 
     // 5. Audit Logging
@@ -381,6 +415,7 @@ export class TransactionEngine {
 
   static async settleReceivable(params: {
     cashierId: string;
+    role?: string;
     deviceId: string;
     shiftId: string;
     customerId: string;
@@ -388,63 +423,16 @@ export class TransactionEngine {
     amount: number;
     paymentMethodId: string;
     moneyStorageId: 'WARUNG' | 'IKAN' | 'UANG_DIGITAL';
-  }): Promise<void> {
-    const receivable = await db.receivables.get(params.receivableId);
-    if (!receivable) throw new Error('Receivable not found');
-
-    const timestamp = new Date().toISOString();
-    const paymentId = uuidv4();
-
-    // 1. Record Finance Event
-    const financeEvent: FinanceEvent = {
-      financeEventId: uuidv4(),
-      amount: params.amount,
-      storageId: params.moneyStorageId,
-      direction: 'IN',
-      referenceId: params.receivableId,
-      referenceType: 'RECEIVABLE_PAYMENT',
-      userId: params.cashierId,
-      deviceId: params.deviceId,
-      timestamp
+    paymentDate?: string;
+    notes?: string;
+  }): Promise<{ financeEventId: string; paymentId: string; remainingAmount: number; status: 'PARTIAL' | 'PAID' }> {
+    const result = await FinanceService.recordReceivablePayment(params);
+    return {
+      financeEventId: result.financeEventId,
+      paymentId: result.paymentId,
+      remainingAmount: result.remainingAmount,
+      status: result.status
     };
-    await db.financeEvents.add(financeEvent);
-
-    // 2. Update Receivable
-    const newPaidAmount = receivable.paidAmount + params.amount;
-    const newRemainingAmount = Math.max(0, receivable.totalAmount - newPaidAmount);
-    const newStatus = newRemainingAmount <= 0 ? 'PAID' : 'PARTIAL';
-
-    await db.receivables.update(params.receivableId, {
-      paidAmount: newPaidAmount,
-      remainingAmount: newRemainingAmount,
-      status: newStatus
-    });
-
-    // 3. Record Receivable Payment
-    await (db as any).receivablePayments.add({
-      paymentId,
-      receivableId: params.receivableId,
-      amount: params.amount,
-      paymentMethodId: params.paymentMethodId,
-      moneyStorageId: params.moneyStorageId,
-      userId: params.cashierId,
-      timestamp
-    });
-
-    // 4. Audit Log
-    await AuditEngine.log({
-      userId: params.cashierId,
-      role: 'KASIR',
-      deviceId: params.deviceId,
-      action: 'SETTLE_RECEIVABLE',
-      module: 'FINANCE',
-      referenceId: params.receivableId,
-      after: { paymentId, amount: params.amount, newRemainingAmount }
-    });
-
-    // 5. Sync Queue
-    await this.addToQueue('financeEvents', financeEvent.financeEventId, 'CREATE', financeEvent);
-    await this.addToQueue('receivables', params.receivableId, 'UPDATE', { ...receivable, paidAmount: newPaidAmount, remainingAmount: newRemainingAmount, status: newStatus });
   }
 
   private static async addToQueue(entityType: string, entityId: string, action: 'CREATE' | 'UPDATE' | 'DELETE', payload: any) {

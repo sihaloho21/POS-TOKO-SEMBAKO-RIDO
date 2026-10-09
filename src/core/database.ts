@@ -77,6 +77,10 @@ export class LocalDatabase extends Dexie {
     this.version(8).stores({
       stockMovements: 'stockMovementId, productId, movementType, referenceId, clientTimestamp, timestamp, segmentId'
     });
+
+    this.version(9).stores({
+      receivables: 'receivableId, transactionId, customerId, status, dueDate, createdAt'
+    });
   }
 }
 

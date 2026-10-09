@@ -1,6 +1,10 @@
 import React, { useState, useMemo } from 'react';
 import { db } from '@/core/database';
+import { FinanceService } from '@/core/services/finance-service';
 import { useLiveQuery } from 'dexie-react-hooks';
+import { useAuthStore } from '@/core/auth-store';
+import { useDeviceId } from '@/core/device-store';
+import { useToastStore } from '@/core/toast-store';
 import { 
   TrendingUp, 
   TrendingDown, 
@@ -14,33 +18,150 @@ import {
   ArrowDownRight,
   AlertTriangle,
   Receipt,
-  Scale
+  Scale,
+  X,
+  ArrowLeftRight
 } from 'lucide-react';
 import { format } from 'date-fns';
+import { v4 as uuidv4 } from 'uuid';
 import FinanceCharts from './FinanceCharts';
 
 export default function Finance() {
+  const { currentUser } = useAuthStore();
+  const { addToast } = useToastStore();
+  const deviceId = useDeviceId();
+
   const [filterStorage, setFilterStorage] = useState('ALL');
   const [search, setSearch] = useState('');
+
+  // Prive / Capital / Expense Modal State
+  const [isPriveModalOpen, setIsPriveModalOpen] = useState(false);
+  const [entryType, setEntryType] = useState<'CAPITAL' | 'PRIVE' | 'EXPENSE'>('CAPITAL');
+  const [entryStorage, setEntryStorage] = useState<'WARUNG' | 'IKAN' | 'UANG_DIGITAL'>('WARUNG');
+  const [entryAmount, setEntryAmount] = useState('');
+  const [entryDesc, setEntryDesc] = useState('');
+  const [isSubmittingEntry, setIsSubmittingEntry] = useState(false);
+
+  // Internal Transfer Modal State
+  const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
+  const [fromStorage, setFromStorage] = useState<'WARUNG' | 'IKAN' | 'UANG_DIGITAL'>('WARUNG');
+  const [toStorage, setToStorage] = useState<'WARUNG' | 'IKAN' | 'UANG_DIGITAL'>('UANG_DIGITAL');
+  const [transferAmount, setTransferAmount] = useState('');
+  const [transferNotes, setTransferNotes] = useState('');
+  const [isSubmittingTransfer, setIsSubmittingTransfer] = useState(false);
+
+  const handleSaveEntry = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentUser) return;
+    const amt = Number(entryAmount);
+    if (!amt || amt <= 0) {
+      addToast('Masukkan nominal yang valid (lebih dari Rp 0).', 'error');
+      return;
+    }
+
+    setIsSubmittingEntry(true);
+    try {
+      const direction = entryType === 'CAPITAL' ? 'IN' : 'OUT';
+      const defaultLabel =
+        entryType === 'CAPITAL'
+          ? 'Setoran Modal Tambahan (Capital)'
+          : entryType === 'PRIVE'
+          ? 'Penarikan Prive Owner'
+          : 'Pengeluaran Operasional Toko';
+
+      await FinanceService.recordLedgerEntry({
+        amount: amt,
+        storageId: entryStorage,
+        direction,
+        referenceId: `${entryType.toLowerCase()}_${uuidv4().slice(0, 8)}`,
+        referenceType: entryType,
+        description: entryDesc.trim() ? `${defaultLabel} • ${entryDesc.trim()}` : defaultLabel,
+        userId: currentUser.userId,
+        role: currentUser.role,
+        deviceId
+      });
+
+      addToast(`${defaultLabel} sebesar Rp ${amt.toLocaleString()} berhasil dicatat!`, 'success');
+      setEntryAmount('');
+      setEntryDesc('');
+      setIsPriveModalOpen(false);
+    } catch (err: any) {
+      addToast(err.message || 'Gagal mencatat transaksi kas.', 'error');
+    } finally {
+      setIsSubmittingEntry(false);
+    }
+  };
+
+  const handleSaveTransfer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentUser) return;
+    if (fromStorage === toStorage) {
+      addToast('Kas asal dan kas tujuan tidak boleh sama.', 'error');
+      return;
+    }
+    const amt = Number(transferAmount);
+    if (!amt || amt <= 0) {
+      addToast('Masukkan nominal transfer yang valid (lebih dari Rp 0).', 'error');
+      return;
+    }
+
+    setIsSubmittingTransfer(true);
+    try {
+      const transferRef = `trf_${uuidv4().slice(0, 8)}`;
+      const noteSuffix = transferNotes.trim() ? ` • ${transferNotes.trim()}` : '';
+
+      await FinanceService.recordLedgerEntry({
+        amount: amt,
+        storageId: fromStorage,
+        direction: 'OUT',
+        referenceId: transferRef,
+        referenceType: 'INTERNAL_TRANSFER',
+        description: `Transfer Keluar ke ${toStorage.replace('_', ' ')}${noteSuffix}`,
+        userId: currentUser.userId,
+        role: currentUser.role,
+        deviceId
+      });
+
+      await FinanceService.recordLedgerEntry({
+        amount: amt,
+        storageId: toStorage,
+        direction: 'IN',
+        referenceId: transferRef,
+        referenceType: 'INTERNAL_TRANSFER',
+        description: `Transfer Masuk dari ${fromStorage.replace('_', ' ')}${noteSuffix}`,
+        userId: currentUser.userId,
+        role: currentUser.role,
+        deviceId
+      });
+
+      addToast(`Transfer Rp ${amt.toLocaleString()} dari ${fromStorage} ke ${toStorage} berhasil!`, 'success');
+      setTransferAmount('');
+      setTransferNotes('');
+      setIsTransferModalOpen(false);
+    } catch (err: any) {
+      addToast(err.message || 'Gagal memproses transfer antar kas.', 'error');
+    } finally {
+      setIsSubmittingTransfer(false);
+    }
+  };
   
   const events = useLiveQuery(() => {
     let coll = db.financeEvents.orderBy('timestamp').reverse();
     return coll.filter(e => {
       const matchStorage = filterStorage === 'ALL' || e.storageId === filterStorage;
-      const matchSearch = !search || e.referenceType.toLowerCase().includes(search.toLowerCase()) || e.userId.toLowerCase().includes(search.toLowerCase());
+      const q = search.toLowerCase();
+      const matchSearch =
+        !search ||
+        e.referenceType.toLowerCase().includes(q) ||
+        e.userId.toLowerCase().includes(q) ||
+        (e.description && e.description.toLowerCase().includes(q)) ||
+        e.referenceId.toLowerCase().includes(q);
       return matchStorage && matchSearch;
     }).toArray();
   }, [filterStorage, search]);
   
   const balances = useLiveQuery(async () => {
-    const all = await db.financeEvents.toArray();
-    const storage: Record<string, number> = { WARUNG: 0, IKAN: 0, UANG_DIGITAL: 0 };
-    all.forEach(e => {
-      const amount = Number(e.amount);
-      if (e.direction === 'IN') storage[e.storageId] += amount;
-      else storage[e.storageId] -= amount;
-    });
-    return storage;
+    return await FinanceService.getLedgerBalances();
   });
 
   // Calculate Net Profit & Stock Loss (including Fish Death Loss)
@@ -102,11 +223,17 @@ export default function Finance() {
           <p className="text-slate-500 text-sm font-medium">Buku kas append-only (Source of Truth) untuk seluruh aliran uang.</p>
         </div>
         <div className="flex gap-2">
-          <button className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-slate-50 transition-all">
+          <button
+            onClick={() => setIsPriveModalOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-slate-50 transition-all cursor-pointer"
+          >
             <Plus size={18} /> Prive / Capital
           </button>
-          <button className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl font-black text-xs uppercase tracking-widest hover:bg-blue-500 shadow-lg shadow-blue-200 transition-all">
-            <TrendingUp size={18} /> Transfer Antar Kas
+          <button
+            onClick={() => setIsTransferModalOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl font-black text-xs uppercase tracking-widest hover:bg-blue-500 shadow-lg shadow-blue-200 transition-all cursor-pointer"
+          >
+            <ArrowLeftRight size={18} /> Transfer Antar Kas
           </button>
         </div>
       </div>
@@ -256,7 +383,12 @@ export default function Finance() {
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
                       <div className={`w-2 h-2 rounded-full ${e.direction === 'IN' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-                      <span className="text-xs font-bold text-slate-700 uppercase">{e.referenceType}</span>
+                      <div>
+                        <span className="text-xs font-bold text-slate-700 uppercase block">{e.referenceType.replace('_', ' ')}</span>
+                        {e.description && (
+                          <span className="text-[11px] text-slate-500 font-medium block mt-0.5">{e.description}</span>
+                        )}
+                      </div>
                     </div>
                   </td>
                   <td className="px-6 py-4">
@@ -280,6 +412,230 @@ export default function Finance() {
           </table>
         </div>
       </div>
+
+      {/* Modal: Prive / Capital / Expense */}
+      {isPriveModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-in zoom-in-95">
+            <div className="flex justify-between items-center pb-4 border-b border-slate-100 mb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center">
+                  <Wallet size={20} />
+                </div>
+                <div>
+                  <h3 className="font-black text-slate-900 text-sm uppercase tracking-tight">
+                    Catat Modal / Prive / Biaya
+                  </h3>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                    Transaksi Kas Manual
+                  </p>
+                </div>
+              </div>
+              <button onClick={() => setIsPriveModalOpen(false)} className="p-1 text-slate-400 hover:text-slate-600">
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEntry} className="space-y-4">
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1.5">
+                  Jenis Transaksi
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { id: 'CAPITAL', label: 'Setor Modal (IN)', color: 'bg-emerald-600 border-emerald-600 text-white' },
+                    { id: 'PRIVE', label: 'Tarik Prive (OUT)', color: 'bg-rose-600 border-rose-600 text-white' },
+                    { id: 'EXPENSE', label: 'Biaya Opex (OUT)', color: 'bg-amber-600 border-amber-600 text-white' },
+                  ].map((t) => (
+                    <button
+                      type="button"
+                      key={t.id}
+                      onClick={() => setEntryType(t.id as any)}
+                      className={`py-2.5 px-2 rounded-xl text-[10px] font-black uppercase tracking-wider border transition-all ${
+                        entryType === t.id ? t.color : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1.5">
+                  Pilih Penyimpanan Kas (Storage)
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['WARUNG', 'IKAN', 'UANG_DIGITAL'] as const).map((s) => (
+                    <button
+                      type="button"
+                      key={s}
+                      onClick={() => setEntryStorage(s)}
+                      className={`py-2 rounded-xl text-[10px] font-black uppercase tracking-wider border transition-all ${
+                        entryStorage === s
+                          ? 'bg-blue-600 border-blue-600 text-white'
+                          : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      {s.replace('_', ' ')}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1.5">
+                  Nominal (Rp) *
+                </label>
+                <input
+                  type="number"
+                  required
+                  min="1"
+                  placeholder="Contoh: 500000"
+                  value={entryAmount ?? ''}
+                  onChange={(e) => setEntryAmount(e.target.value)}
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-black text-slate-900 tabular-nums outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1.5">
+                  Keterangan / Catatan
+                </label>
+                <input
+                  type="text"
+                  placeholder="Contoh: Tambahan modal kembalian / Bayar listrik toko"
+                  value={entryDesc ?? ''}
+                  onChange={(e) => setEntryDesc(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-xs text-slate-800 outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsPriveModalOpen(false)}
+                  className="flex-1 py-3 font-bold text-xs uppercase tracking-wider text-slate-500 hover:bg-slate-100 rounded-xl"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingEntry || !entryAmount}
+                  className="flex-1 py-3 bg-blue-600 hover:bg-blue-500 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-blue-200 disabled:opacity-50"
+                >
+                  {isSubmittingEntry ? 'Menyimpan...' : 'Simpan ke Buku Kas'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Transfer Antar Kas */}
+      {isTransferModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-in zoom-in-95">
+            <div className="flex justify-between items-center pb-4 border-b border-slate-100 mb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 bg-blue-600 text-white rounded-xl flex items-center justify-center">
+                  <ArrowLeftRight size={20} />
+                </div>
+                <div>
+                  <h3 className="font-black text-slate-900 text-sm uppercase tracking-tight">
+                    Transfer Antar Kas (Internal)
+                  </h3>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                    Mutasi Saldo Kas Warung / Ikan / Digital
+                  </p>
+                </div>
+              </div>
+              <button onClick={() => setIsTransferModalOpen(false)} className="p-1 text-slate-400 hover:text-slate-600">
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveTransfer} className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1.5">
+                    Dari Kas (OUT)
+                  </label>
+                  <select
+                    value={fromStorage}
+                    onChange={(e) => setFromStorage(e.target.value as any)}
+                    className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-xs text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="WARUNG">Kas Warung</option>
+                    <option value="IKAN">Kas Ikan</option>
+                    <option value="UANG_DIGITAL">Kas Uang Digital</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1.5">
+                    Ke Kas (IN)
+                  </label>
+                  <select
+                    value={toStorage}
+                    onChange={(e) => setToStorage(e.target.value as any)}
+                    className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-xs text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="WARUNG">Kas Warung</option>
+                    <option value="IKAN">Kas Ikan</option>
+                    <option value="UANG_DIGITAL">Kas Uang Digital</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1.5">
+                  Nominal Transfer (Rp) *
+                </label>
+                <input
+                  type="number"
+                  required
+                  min="1"
+                  placeholder="Contoh: 250000"
+                  value={transferAmount ?? ''}
+                  onChange={(e) => setTransferAmount(e.target.value)}
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-black text-slate-900 tabular-nums outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1.5">
+                  Catatan Mutasi (Opsional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="Contoh: Top up saldo agen digital dari uang kas warung"
+                  value={transferNotes ?? ''}
+                  onChange={(e) => setTransferNotes(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-xs text-slate-800 outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsTransferModalOpen(false)}
+                  className="flex-1 py-3 font-bold text-xs uppercase tracking-wider text-slate-500 hover:bg-slate-100 rounded-xl"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingTransfer || !transferAmount || fromStorage === toStorage}
+                  className="flex-1 py-3 bg-blue-600 hover:bg-blue-500 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-blue-200 disabled:opacity-50"
+                >
+                  {isSubmittingTransfer ? 'Memproses...' : 'Proses Transfer'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
