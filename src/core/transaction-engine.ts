@@ -17,6 +17,7 @@ import { StockService } from './services/stock-service';
 import { BundleService } from './services/bundle-service';
 import { StoreStatusService } from './services/store-status-service';
 import { FinanceService } from './services/finance-service';
+import { PerformanceTracker } from './services/performance-tracker';
 
 export class TransactionEngine {
   static async createSale(params: {
@@ -32,6 +33,7 @@ export class TransactionEngine {
     allowInsufficientStock?: boolean;
     allowStoreClosedOverride?: boolean;
   }): Promise<string> {
+    const startTime = performance.now();
     // Check Store Status (Requirement 8)
     // "Ketika TUTUP: Kasir tidak dapat membuat transaksi normal baru. Owner dapat melakukan tindakan tertentu sesuai permission."
     const isStoreOpen = await StoreStatusService.isStoreOpen();
@@ -244,6 +246,16 @@ export class TransactionEngine {
     });
 
     await this.addToQueue('transactions', transactionId, 'CREATE', transaction);
+
+    const durationMs = Math.round(performance.now() - startTime);
+    PerformanceTracker.recordTransactionMetric({
+      transactionId,
+      receiptNumber: transaction.receiptNumber,
+      type: params.type,
+      durationMs,
+      itemCount: params.items.reduce((sum, item) => sum + (item.quantity || 1), 0),
+      timestamp
+    });
 
     return transactionId;
   }

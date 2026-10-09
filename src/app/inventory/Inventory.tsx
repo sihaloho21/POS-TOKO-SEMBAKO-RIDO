@@ -21,8 +21,11 @@ import {
   Calendar,
   RefreshCw,
   Flame,
-  Scale
+  Scale,
+  Camera
 } from 'lucide-react';
+import { CameraBarcodeScanner } from '@/components/CameraBarcodeScanner';
+import { useToastStore } from '@/core/toast-store';
 import type { Product, ProductCost } from '@/core/types';
 import { ProductService } from '@/core/services/product-service';
 import { ProductModal } from './ProductModal';
@@ -39,10 +42,12 @@ import { format } from 'date-fns';
 
 export default function Inventory() {
   const { currentUser } = useAuthStore();
+  const { addToast } = useToastStore();
   const isOwner = currentUser?.role === 'OWNER';
 
   const [currentTab, setCurrentTab] = useState<'MASTER' | 'PREDICTIONS' | 'HEATMAP' | 'SHELF_TALKERS'>('MASTER');
   const [search, setSearch] = useState('');
+  const [isCameraScannerOpen, setIsCameraScannerOpen] = useState(false);
   
   const predictions = useLiveQuery(() => InventoryPredictionService.getPredictions(), []);
   const costs = useLiveQuery(() => isOwner ? db.productCosts.toArray() : Promise.resolve([] as ProductCost[]), [isOwner]);
@@ -84,6 +89,20 @@ export default function Inventory() {
 
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
+
+  const handleCameraScan = (scannedCode: string) => {
+    if (!products) return;
+    const match = products.find(p => p.barcode === scannedCode || (p.sku && p.sku === scannedCode));
+    if (match) {
+      setSearch(match.barcode || match.name);
+      addToast(`Produk "${match.name}" ditemukan!`, 'success');
+      setEditingProduct(match);
+      setIsModalOpen(true);
+    } else {
+      setSearch(scannedCode);
+      addToast(`Barcode "${scannedCode}" tidak ditemukan di inventaris.`, 'warning');
+    }
   };
 
   const toggleSelectAll = () => {
@@ -249,6 +268,16 @@ export default function Inventory() {
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
+            {/* Camera Barcode Scanner Button for Lookup */}
+            <button
+              type="button"
+              onClick={() => setIsCameraScannerOpen(true)}
+              className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-md shadow-blue-200 transition-all shrink-0 cursor-pointer w-full sm:w-auto"
+              title="Scan Barcode Kamera untuk Lookup Produk"
+            >
+              <Camera size={16} />
+              <span>Scan Kamera</span>
+            </button>
             <div className="flex items-center gap-2 w-full sm:w-auto">
               <div className="flex bg-white border border-slate-200 rounded-xl p-1 shadow-sm overflow-hidden shrink-0">
                 {['ALL', 'ACTIVE', 'INACTIVE'].map(status => (
@@ -592,6 +621,20 @@ export default function Inventory() {
           }}
         />
       )}
+
+      {/* Camera Barcode Scanner for Inventory Lookup */}
+      <CameraBarcodeScanner 
+        isOpen={isCameraScannerOpen}
+        onClose={() => setIsCameraScannerOpen(false)}
+        onScan={handleCameraScan}
+        title="Inventory Barcode Lookup"
+        subtitle="Arahkan kamera ke barcode untuk membuka data produk"
+        continuous={false}
+        sampleBarcodes={products?.slice(0, 6).map(p => ({
+          barcode: p.barcode,
+          label: p.name.length > 16 ? p.name.slice(0, 16) + '...' : p.name
+        })) || []}
+      />
     </div>
   );
 }

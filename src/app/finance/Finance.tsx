@@ -562,7 +562,7 @@ export default function Finance() {
                     Dari Kas (OUT)
                   </label>
                   <select
-                    value={fromStorage}
+                    value={fromStorage ?? 'WARUNG'}
                     onChange={(e) => setFromStorage(e.target.value as any)}
                     className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-xs text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
                   >
@@ -577,7 +577,7 @@ export default function Finance() {
                     Ke Kas (IN)
                   </label>
                   <select
-                    value={toStorage}
+                    value={toStorage ?? 'WARUNG'}
                     onChange={(e) => setToStorage(e.target.value as any)}
                     className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-xs text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
                   >

@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import type { Product, ProductType } from '@/core/types';
 import { ProductService } from '@/core/services/product-service';
 import { CostingEngine, type WacSourceEvent } from '@/core/costing-engine';
-import { Save, Package, Barcode, Trash2, CheckCircle, XCircle, Lock, History, AlertTriangle, ShieldCheck, X } from 'lucide-react';
+import { Save, Package, Barcode, Trash2, CheckCircle, XCircle, Lock, History, AlertTriangle, ShieldCheck, X, Camera } from 'lucide-react';
+import { CameraBarcodeScanner } from '@/components/CameraBarcodeScanner';
 import { useAuthStore } from '@/core/auth-store';
 import { db } from '@/core/database';
 
@@ -18,23 +19,38 @@ export function ProductForm({ product, initialProductType, initialBaseUnit, onSa
   const { currentUser } = useAuthStore();
   const isOwner = currentUser?.role === 'OWNER';
 
-  const [formData, setFormData] = useState<Partial<Product>>(
-    product || {
-      productType: initialProductType || 'SEMBAKO',
-      baseUnit: initialBaseUnit || (initialProductType === 'FISH' ? 'KG' : 'PCS'),
-      status: 'ACTIVE',
-      normalPrice: 0,
-      stock: 0,
-      minimumStock: 5,
-      targetStock: 20,
-      saleUnits: [initialBaseUnit || (initialProductType === 'FISH' ? 'KG' : 'PCS')],
-      conversionRules: []
+  const [formData, setFormData] = useState<Partial<Product>>({
+    name: product?.name || '',
+    sku: product?.sku || '',
+    barcode: product?.barcode || '',
+    productType: product?.productType || initialProductType || 'SEMBAKO',
+    baseUnit: product?.baseUnit || initialBaseUnit || (initialProductType === 'FISH' ? 'KG' : 'PCS'),
+    status: product?.status || 'ACTIVE',
+    normalPrice: product?.normalPrice ?? 0,
+    stock: product?.stock ?? 0,
+    minimumStock: product?.minimumStock ?? 5,
+    targetStock: product?.targetStock ?? 20,
+    saleUnits: product?.saleUnits || [initialBaseUnit || (initialProductType === 'FISH' ? 'KG' : 'PCS')],
+    conversionRules: product?.conversionRules || [],
+    tags: product?.tags || []
+  });
+
+  useEffect(() => {
+    if (product) {
+      setFormData({
+        ...product,
+        name: product.name || '',
+        sku: product.sku || '',
+        barcode: product.barcode || '',
+        tags: product.tags || []
+      });
     }
-  );
+  }, [product]);
 
   const [hpp, setHpp] = useState<number>(0);
   const [isSaving, setIsSaving] = useState(false);
   const [tagInput, setTagInput] = useState('');
+  const [isCameraScannerOpen, setIsCameraScannerOpen] = useState(false);
 
   // Cost Adjustment Modal State
   const [isCostModalOpen, setIsCostModalOpen] = useState(false);
@@ -161,10 +177,11 @@ export function ProductForm({ product, initialProductType, initialBaseUnit, onSa
               />
               <button 
                 type="button"
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                title="Trigger Scanner"
+                onClick={() => setIsCameraScannerOpen(true)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                title="Scan Barcode via Kamera Device"
               >
-                <Barcode size={18} />
+                <Camera size={18} />
               </button>
             </div>
           </div>
@@ -255,7 +272,7 @@ export function ProductForm({ product, initialProductType, initialBaseUnit, onSa
               <input
                 className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-bold text-slate-900 shadow-sm"
                 placeholder="Ketik tag dan tekan Enter (misal: PROMO, LEBARAN)"
-                value={tagInput}
+                value={tagInput ?? ''}
                 onChange={(e) => setTagInput(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
@@ -313,6 +330,17 @@ export function ProductForm({ product, initialProductType, initialBaseUnit, onSa
           </button>
         </div>
       </form>
+
+      {/* Camera Barcode Scanner for Product Form */}
+      <CameraBarcodeScanner
+        isOpen={isCameraScannerOpen}
+        onClose={() => setIsCameraScannerOpen(false)}
+        onScan={(code) => {
+          setFormData(prev => ({ ...prev, barcode: code }));
+        }}
+        title="Scan Barcode Produk"
+        subtitle="Arahkan kamera ke kemasan produk"
+      />
     </div>
   );
 }

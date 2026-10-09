@@ -329,7 +329,7 @@ export default function StockOpname() {
                   type="password"
                   maxLength={6}
                   placeholder="6 Digit PIN Owner"
-                  value={ownerPin}
+                  value={ownerPin ?? ''}
                   onChange={(e) => {
                     setOwnerPin(e.target.value);
                     setPinError('');

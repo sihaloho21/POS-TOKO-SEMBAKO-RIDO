@@ -443,7 +443,7 @@ export default function Purchases() {
                 Pilih Sumber Kas Pembayaran
               </label>
               <select
-                value={settleStorageId}
+                value={settleStorageId ?? 'WARUNG'}
                 onChange={(e) => setSettleStorageId(e.target.value as any)}
                 className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-xs text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
               >

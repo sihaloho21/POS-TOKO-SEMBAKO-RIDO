@@ -31,8 +31,10 @@ import {
   Eye,
   AlertOctagon,
   Store,
-  Clock
+  Clock,
+  Camera
 } from 'lucide-react';
+import { CameraBarcodeScanner } from '@/components/CameraBarcodeScanner';
 import { motion, AnimatePresence } from 'motion/react';
 import type { Product, TransactionItem, Customer, Transaction, Bundle } from '@/core/types';
 import { v4 as uuidv4 } from 'uuid';
@@ -110,6 +112,10 @@ export default function POS() {
   const [newProductCategory, setNewProductCategory] = useState<'SEMBAKO' | 'FISH' | 'MINUMAN' | 'LAINNYA'>('SEMBAKO');
   const [newProductUnit, setNewProductUnit] = useState('PCS');
 
+  // Camera Barcode Scanner
+  const [isCameraScannerOpen, setIsCameraScannerOpen] = useState(false);
+  const [lastScannedProduct, setLastScannedProduct] = useState<{ name: string; price?: number; barcode: string } | null>(null);
+
   const [isHeldModalOpen, setIsHeldModalOpen] = useState(false);
 
   // Gajian Owner Approval Modal
@@ -145,6 +151,10 @@ export default function POS() {
         e.preventDefault();
         document.getElementById('pos-search')?.focus();
       }
+      if (e.key === 'F3') {
+        e.preventDefault();
+        setIsCameraScannerOpen(prev => !prev);
+      }
       if (e.key === 'F6') {
         e.preventDefault();
         handleHold();
@@ -155,6 +165,7 @@ export default function POS() {
       }
       if (e.key === 'Escape') {
         setWeightProduct(null);
+        setIsCameraScannerOpen(false);
         setIsPaymentModalOpen(false);
         setIsQuickAddProductOpen(false);
         setIsHeldModalOpen(false);
@@ -455,6 +466,25 @@ export default function POS() {
     }
   };
 
+  const handleCameraScan = (scannedCode: string) => {
+    if (!products) return;
+    const match = products.find(p => p.barcode === scannedCode || (p.sku && p.sku === scannedCode));
+    if (match) {
+      if (match.productType === 'FISH') {
+        setWeightProduct(match);
+        addToast(`Ikan "${match.name}" terdeteksi. Masukkan timbangan KG.`, 'info');
+      } else {
+        addToCart(match);
+        addToast(`"${match.name}" ditambahkan ke keranjang!`, 'success');
+      }
+      setLastScannedProduct({ name: match.name, price: match.normalPrice, barcode: scannedCode });
+    } else {
+      addToast(`Barcode "${scannedCode}" tidak ditemukan. Silakan daftarkan produk.`, 'warning');
+      setNewProductBarcode(scannedCode);
+      setIsQuickAddProductOpen(true);
+    }
+  };
+
   // Quick Add Product by Kasir
   const handleQuickAddProduct = async () => {
     if (!newProductName.trim() || !newProductPrice) return;
@@ -597,6 +627,17 @@ export default function POS() {
                   onChange={(e) => handleSearchChange(e.target.value)}
                 />
               </div>
+
+              {/* Camera Barcode Scanner Button */}
+              <button
+                type="button"
+                onClick={() => setIsCameraScannerOpen(true)}
+                className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-sm shadow-blue-200 transition-all shrink-0 cursor-pointer"
+                title="Scan Barcode via Kamera Device (F3)"
+              >
+                <Camera size={15} />
+                <span>Scan Kamera (F3)</span>
+              </button>
 
               {/* Quick Add Product Button for Kasir */}
               <button
@@ -1436,6 +1477,21 @@ export default function POS() {
       <ClockInModal
         isOpen={isClockInModalOpen}
         onClose={() => setIsClockInOpen(false)}
+      />
+
+      {/* Camera Barcode Scanner for POS */}
+      <CameraBarcodeScanner
+        isOpen={isCameraScannerOpen}
+        onClose={() => setIsCameraScannerOpen(false)}
+        onScan={handleCameraScan}
+        title="POS Camera Barcode Scanner"
+        subtitle="Arahkan kamera ke barcode untuk langsung tambah ke keranjang"
+        continuous={true}
+        lastScannedInfo={lastScannedProduct}
+        sampleBarcodes={products?.slice(0, 6).map(p => ({
+          barcode: p.barcode,
+          label: p.name.length > 16 ? p.name.slice(0, 16) + '...' : p.name
+        })) || []}
       />
     </div>
   );

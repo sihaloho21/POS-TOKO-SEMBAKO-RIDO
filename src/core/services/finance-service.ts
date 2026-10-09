@@ -8,6 +8,7 @@ export interface LedgerBalances {
   IKAN: number;
   UANG_DIGITAL: number;
   TOTAL: number;
+  [key: string]: number;
 }
 
 export interface RecordReceivablePaymentParams {

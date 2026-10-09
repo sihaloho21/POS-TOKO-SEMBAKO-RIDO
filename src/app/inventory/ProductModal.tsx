@@ -45,13 +45,21 @@ export function ProductModal({ product, productId, initialProductType, initialBa
         </div>
 
         <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
-          <ProductForm 
-            product={loadedProduct} 
-            initialProductType={initialProductType}
-            initialBaseUnit={initialBaseUnit}
-            onSave={() => onClose()} 
-            onCancel={onClose} 
-          />
+          {productId && !loadedProduct ? (
+            <div className="py-12 flex flex-col items-center justify-center gap-3 text-slate-400">
+              <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin" />
+              <p className="text-xs font-bold uppercase tracking-widest">Memuat Data Produk...</p>
+            </div>
+          ) : (
+            <ProductForm 
+              key={loadedProduct?.productId || 'new-product'}
+              product={loadedProduct} 
+              initialProductType={initialProductType}
+              initialBaseUnit={initialBaseUnit}
+              onSave={() => onClose()} 
+              onCancel={onClose} 
+            />
+          )}
         </div>
       </div>
     </div>

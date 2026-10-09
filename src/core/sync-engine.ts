@@ -4,6 +4,7 @@ import { db as firestoreDb, auth, handleFirestoreError, OperationType } from '..
 import type { SyncQueueItem } from './types';
 import { addMinutes } from 'date-fns';
 import { StoreStatusService } from './services/store-status-service';
+import { PerformanceTracker } from './services/performance-tracker';
 
 export class SyncEngine {
   private static isSyncing = false;
@@ -47,6 +48,11 @@ export class SyncEngine {
   }
 
   private static async syncItem(item: SyncQueueItem) {
+    const queueWaitLatencyMs = item.createdAt 
+      ? Math.max(0, Date.now() - new Date(item.createdAt).getTime())
+      : 0;
+    const netStart = performance.now();
+
     try {
       await localDb.syncQueue.update(item.queueId!, { status: 'SYNCING' });
 
@@ -74,12 +80,38 @@ export class SyncEngine {
         handleFirestoreError(error, OperationType.WRITE, collectionName);
       }
 
+      const networkDurationMs = Math.round(performance.now() - netStart);
+
       await localDb.syncQueue.update(item.queueId!, { 
         status: 'SYNCED',
         lastError: undefined
       });
+
+      // Log successful sync metric
+      PerformanceTracker.recordSyncMetric({
+        entityType: item.entityType,
+        entityId: String(item.entityId),
+        networkDurationMs,
+        queueWaitLatencyMs,
+        totalLatencyMs: queueWaitLatencyMs + networkDurationMs,
+        success: true,
+        timestamp: new Date().toISOString()
+      });
     } catch (error: any) {
+      const networkDurationMs = Math.round(performance.now() - netStart);
       console.error(`Sync failure for ${item.entityType}/${item.entityId}:`, error);
+
+      // Log failed sync metric
+      PerformanceTracker.recordSyncMetric({
+        entityType: item.entityType,
+        entityId: String(item.entityId),
+        networkDurationMs,
+        queueWaitLatencyMs,
+        totalLatencyMs: queueWaitLatencyMs + networkDurationMs,
+        success: false,
+        error: error?.message || 'Gagal mengirim ke cloud Firestore',
+        timestamp: new Date().toISOString()
+      });
       
       const retryCount = item.retryCount + 1;
       const backoffMinutes = Math.pow(2, Math.min(retryCount, 5)); // Exp backoff

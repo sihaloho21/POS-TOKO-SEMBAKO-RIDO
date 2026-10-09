@@ -38,7 +38,15 @@ export default function ReceiptSettings() {
 
   useEffect(() => {
     if (existingSettings) {
-      setFormData(existingSettings);
+      setFormData({
+        ...DEFAULT_SETTINGS,
+        ...existingSettings,
+        storeName: existingSettings.storeName || DEFAULT_SETTINGS.storeName,
+        address: existingSettings.address || DEFAULT_SETTINGS.address,
+        phone: existingSettings.phone || DEFAULT_SETTINGS.phone,
+        footerMessage: existingSettings.footerMessage || DEFAULT_SETTINGS.footerMessage,
+        paperWidth: existingSettings.paperWidth || DEFAULT_SETTINGS.paperWidth
+      });
     }
   }, [existingSettings]);
 

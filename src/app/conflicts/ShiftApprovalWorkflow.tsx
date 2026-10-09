@@ -537,7 +537,7 @@ export function ShiftApprovalWorkflow({ highlightShiftId }: ShiftApprovalWorkflo
               </label>
               <textarea
                 rows={2}
-                value={approvalNotes}
+                value={approvalNotes ?? ''}
                 onChange={(e) => setApprovalNotes(e.target.value)}
                 placeholder="Contoh: Selisih diterima, selisih receh wajar operasional..."
                 className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
@@ -612,7 +612,7 @@ export function ShiftApprovalWorkflow({ highlightShiftId }: ShiftApprovalWorkflo
               <textarea
                 rows={3}
                 required
-                value={investigationNotes}
+                value={investigationNotes ?? ''}
                 onChange={(e) => setInvestigationNotes(e.target.value)}
                 placeholder="Contoh: Cek rekaman CCTV pukul 14:00 - 15:00, hitung ulang fisik brankas bersama supervisor toko..."
                 className="w-full p-3 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold outline-none focus:ring-2 focus:ring-rose-500 resize-none shadow-xs"
