@@ -6,10 +6,16 @@ import firebaseConfig from '../../firebase-applet-config.json';
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 
-// Use indexedDB persistence for better iframe compatibility
-export const auth = initializeAuth(app, {
-  persistence: indexedDBLocalPersistence
-});
+// Use indexedDB persistence with fallback for better iframe compatibility
+let authInstance;
+try {
+  authInstance = initializeAuth(app, {
+    persistence: indexedDBLocalPersistence
+  });
+} catch {
+  authInstance = getAuth(app);
+}
+export const auth = authInstance;
 
 export enum OperationType {
   CREATE = 'create',

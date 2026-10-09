@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuthStore } from '@/core/auth-store';
 import { 
   LayoutDashboard, 
@@ -42,6 +42,7 @@ import { useDeviceId } from '@/core/device-store';
 import ClockInModal from '@/app/shift/ClockInModal';
 import ClockOutModal from '@/app/shift/ClockOutModal';
 import StoreStatusModal from '@/app/settings/StoreStatusModal';
+import { NotificationCenter } from './NotificationCenter';
 
 interface NavItemProps {
   icon: React.ReactNode;
@@ -111,14 +112,65 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
   const [isClockInOpen, setIsClockInOpen] = useState(false);
   const [isClockOutOpen, setIsClockOutOpen] = useState(false);
   const [isStoreStatusOpen, setIsStoreStatusOpen] = useState(false);
+  const [isNotificationOpen, setIsNotificationOpen] = useState(false);
   
+  const unreadNotificationCount = useLiveQuery(
+    () => db.notifications.filter(n => !n.isRead).count()
+  );
+
   const pendingSyncCount = useLiveQuery(
-    () => db.syncQueue.where('status').anyOf(['PENDING', 'FAILED', 'SYNCING']).count()
+    async () => {
+      try {
+        return await db.syncQueue.where('status').anyOf(['PENDING', 'FAILED', 'SYNCING']).count();
+      } catch {
+        return 0;
+      }
+    },
+    [],
+    0
   );
 
   const conflictCount = useLiveQuery(
-    () => db.conflicts.where('status').equals('PENDING').count()
+    async () => {
+      try {
+        return await db.conflicts.where('status').equals('PENDING').count();
+      } catch {
+        return 0;
+      }
+    },
+    [],
+    0
   );
+
+  const pendingDiscrepanciesCount = useLiveQuery(
+    async () => {
+      try {
+        const list = await db.shifts
+          .where('status')
+          .equals('CLOSED')
+          .filter(s => Boolean(s.discrepancy && s.discrepancy !== 0 && (s.discrepancyApprovalStatus || 'PENDING') !== 'APPROVED'))
+          .toArray();
+        return list.length;
+      } catch {
+        return 0;
+      }
+    },
+    [],
+    0
+  );
+
+  const totalConflictsAndApprovals = (conflictCount || 0) + (pendingDiscrepanciesCount || 0);
+
+  // Quick navigation listener from browser notifications
+  useEffect(() => {
+    const handleQuickNav = () => {
+      onTabChange('conflicts');
+    };
+    window.addEventListener('quick_navigate_approval', handleQuickNav);
+    return () => {
+      window.removeEventListener('quick_navigate_approval', handleQuickNav);
+    };
+  }, [onTabChange]);
 
   const storeConfig = useLiveQuery(() => StoreStatusService.getStoreStatus(), []);
   const currentShift = useLiveQuery(() => ShiftService.getCurrentShift(deviceId, currentUser?.userId), [deviceId, currentUser?.userId]);
@@ -144,7 +196,7 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
     { id: 'receivables', label: 'Receivables', icon: <CreditCard size={18} />, disabled: !isOwner },
     { id: 'finance', label: 'Finance', icon: <TrendingUp size={18} />, disabled: !isOwner },
     { id: 'audit', label: 'Audit Log', icon: <ShieldCheck size={18} />, disabled: !isOwner },
-    { id: 'conflicts', label: 'Conflicts', icon: <AlertTriangle size={18} />, badge: conflictCount, disabled: !isOwner },
+    { id: 'conflicts', label: 'Conflicts & Approvals', icon: <AlertTriangle size={18} />, badge: totalConflictsAndApprovals, disabled: !isOwner },
     { id: 'system-health', label: 'System Health', icon: <Activity size={18} />, disabled: !isOwner },
     { id: 'settings', label: 'Settings', icon: <Settings size={18} />, disabled: !isOwner },
   ];
@@ -303,10 +355,26 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
               </button>
             )}
 
-            <button className="p-2 text-slate-400 hover:text-slate-600 relative">
-              <Bell size={20} />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border-2 border-white" />
-            </button>
+            <div className="relative">
+              <button 
+                type="button"
+                onClick={() => setIsNotificationOpen(!isNotificationOpen)}
+                className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl relative transition-all cursor-pointer"
+                title="Pusat Notifikasi"
+              >
+                <Bell size={20} />
+                {unreadNotificationCount !== undefined && unreadNotificationCount > 0 && (
+                  <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white animate-pulse" />
+                )}
+              </button>
+
+              {isNotificationOpen && (
+                <NotificationCenter 
+                  onClose={() => setIsNotificationOpen(false)} 
+                  onNavigate={onTabChange}
+                />
+              )}
+            </div>
           </div>
         </header>
 

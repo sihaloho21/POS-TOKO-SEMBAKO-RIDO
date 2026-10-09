@@ -21,13 +21,20 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   public componentDidCatch(error: any, errorInfo: ErrorInfo) {
-    const errorDetails = error instanceof Error 
-      ? error.message + '\n' + (error.stack || '')
-      : typeof error === 'object' 
-        ? JSON.stringify(error, null, 2)
-        : String(error);
+    let errorDetails = '';
+    try {
+      if (error instanceof Error) {
+        errorDetails = error.message + '\n' + (error.stack || '');
+      } else if (typeof error === 'object' && error !== null) {
+        errorDetails = JSON.stringify(error, Object.getOwnPropertyNames(error), 2);
+      } else {
+        errorDetails = String(error);
+      }
+    } catch {
+      errorDetails = String(error || 'Unknown error');
+    }
 
-    console.error('Harapan Jaya POS ErrorBoundary caught an error:', errorDetails, errorInfo.componentStack);
+    console.error('Harapan Jaya POS ErrorBoundary caught an error:', errorDetails, errorInfo?.componentStack);
   }
 
   private handleReset = () => {
@@ -37,11 +44,18 @@ export class ErrorBoundary extends Component<Props, State> {
 
   public render() {
     if (this.state.hasError) {
-      const displayMsg = this.state.error instanceof Error
-        ? this.state.error.message
-        : typeof this.state.error === 'object' && this.state.error !== null
-          ? this.state.error.message || JSON.stringify(this.state.error)
-          : String(this.state.error || 'Terjadi kesalahan sistem yang tidak terduga.');
+      let displayMsg = 'Terjadi kesalahan sistem yang tidak terduga.';
+      try {
+        if (this.state.error instanceof Error) {
+          displayMsg = this.state.error.message;
+        } else if (typeof this.state.error === 'object' && this.state.error !== null) {
+          displayMsg = this.state.error.message || JSON.stringify(this.state.error, Object.getOwnPropertyNames(this.state.error));
+        } else if (this.state.error) {
+          displayMsg = String(this.state.error);
+        }
+      } catch {
+        displayMsg = String(this.state.error || 'Terjadi kendala pada tampilan sistem.');
+      }
 
       return (
         <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6 text-slate-100">

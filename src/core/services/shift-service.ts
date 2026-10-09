@@ -1,8 +1,9 @@
 import { db } from '../database';
-import type { CashierShift, FinanceEvent } from '../types';
+import type { CashierShift, FinanceEvent, BusinessConflict } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { AuditEngine } from '../audit-engine';
 import { StoreStatusService } from './store-status-service';
+import { DiscrepancyNotificationService } from './discrepancy-notification-service';
 
 export interface ShiftClosingMetrics {
   shift: CashierShift;
@@ -290,6 +291,7 @@ export class ShiftService {
       actualCash,
       discrepancy,
       discrepancyReason: params.discrepancyReason?.trim(),
+      discrepancyApprovalStatus: discrepancy === 0 ? undefined : (params.approvedByOwner ? 'APPROVED' : 'PENDING'),
       discrepancyApprovedBy: params.approvedByOwner,
       discrepancyApprovedAt: params.approvedByOwner ? endTimestamp : undefined,
       reconciliationEventId,
@@ -298,6 +300,55 @@ export class ShiftService {
     };
 
     await db.shifts.put(updatedShift);
+
+    // Register conflict & trigger browser notification if discrepancy exists
+    if (discrepancy !== 0) {
+      const conflictId = uuidv4();
+      const conflict: BusinessConflict = {
+        conflictId,
+        type: 'SHIFT_DISCREPANCY',
+        entityType: 'SHIFT',
+        entityId: params.shiftId,
+        deviceId: params.currentDeviceId || shift.deviceId,
+        userId: shift.userId,
+        timestamp: endTimestamp,
+        details: {
+          shiftId: params.shiftId,
+          discrepancy,
+          expectedCash,
+          actualCash,
+          discrepancyReason: params.discrepancyReason?.trim(),
+          paymentBreakdown: metrics.paymentBreakdown,
+          transactionCount: metrics.transactionCount,
+          totalSales: metrics.omzet,
+          cashIn: metrics.cashIn,
+          cashOut: metrics.cashOut,
+          message: `Selisih kasir ${shift.userId} sebesar ${discrepancy > 0 ? '+Rp ' : '-Rp '}${Math.abs(discrepancy).toLocaleString()}. Alasan: "${params.discrepancyReason?.trim()}"`
+        },
+        status: params.approvedByOwner ? 'RESOLVED' : 'PENDING',
+        resolvedBy: params.approvedByOwner,
+        resolvedAt: params.approvedByOwner ? endTimestamp : undefined
+      };
+
+      try {
+        await db.conflicts.add(conflict);
+      } catch (err) {
+        console.warn('Failed to add discrepancy conflict:', err);
+      }
+
+      // Notify owner of significant discrepancy via Web Notification API & In-App
+      const cashierUser = await db.users.get(shift.userId);
+      DiscrepancyNotificationService.notifyOwnerSignificantDiscrepancy({
+        shiftId: params.shiftId,
+        cashierId: shift.userId,
+        cashierName: cashierUser?.name,
+        deviceId: params.currentDeviceId || shift.deviceId,
+        expectedCash,
+        actualCash,
+        discrepancy,
+        reason: params.discrepancyReason?.trim() || 'Tidak ada alasan'
+      }).catch(err => console.warn('Error sending discrepancy notification:', err));
+    }
 
     await AuditEngine.log({
       userId: shift.userId,
@@ -325,6 +376,156 @@ export class ShiftService {
       status: 'PENDING',
       retryCount: 0,
       createdAt: endTimestamp
+    });
+
+    return updatedShift;
+  }
+
+  /**
+   * Approves a shift discrepancy during the Owner Approval Workflow.
+   */
+  static async approveShiftDiscrepancy(params: {
+    shiftId: string;
+    ownerUserId: string;
+    ownerName: string;
+    notes?: string;
+  }): Promise<CashierShift> {
+    const shift = await db.shifts.get(params.shiftId);
+    if (!shift) throw new Error('Shift tidak ditemukan.');
+
+    const timestamp = new Date().toISOString();
+    const updatedShift: CashierShift = {
+      ...shift,
+      discrepancyApprovalStatus: 'APPROVED',
+      discrepancyApprovedBy: params.ownerName,
+      discrepancyApprovedAt: timestamp,
+      endNotes: params.notes 
+        ? (shift.endNotes ? `${shift.endNotes} | Disetujui Owner: ${params.notes}` : `Disetujui Owner: ${params.notes}`) 
+        : shift.endNotes
+    };
+
+    await db.shifts.put(updatedShift);
+
+    // Resolve corresponding conflict in db.conflicts
+    const conflict = await db.conflicts
+      .where('entityId')
+      .equals(params.shiftId)
+      .first();
+
+    if (conflict) {
+      await db.conflicts.update(conflict.conflictId, {
+        status: 'RESOLVED',
+        resolvedBy: params.ownerName,
+        resolvedAt: timestamp
+      });
+    }
+
+    await AuditEngine.log({
+      userId: params.ownerUserId,
+      role: 'OWNER',
+      deviceId: 'system',
+      action: 'SHIFT_DISCREPANCY_APPROVED',
+      module: 'SHIFT_RECONCILIATION',
+      referenceId: params.shiftId,
+      after: {
+        shiftId: params.shiftId,
+        approvedBy: params.ownerName,
+        timestamp,
+        notes: params.notes
+      }
+    });
+
+    await db.syncQueue.add({
+      entityType: 'shifts',
+      entityId: params.shiftId,
+      action: 'UPDATE',
+      payload: updatedShift,
+      status: 'PENDING',
+      retryCount: 0,
+      createdAt: timestamp
+    });
+
+    return updatedShift;
+  }
+
+  /**
+   * Requests a manual investigation for a shift discrepancy in the Owner Approval Workflow.
+   */
+  static async requestManualInvestigation(params: {
+    shiftId: string;
+    ownerUserId: string;
+    ownerName: string;
+    investigationNotes: string;
+  }): Promise<CashierShift> {
+    const shift = await db.shifts.get(params.shiftId);
+    if (!shift) throw new Error('Shift tidak ditemukan.');
+
+    if (!params.investigationNotes?.trim()) {
+      throw new Error('Instruksi / Catatan investigasi wajib diisi.');
+    }
+
+    const timestamp = new Date().toISOString();
+    const updatedShift: CashierShift = {
+      ...shift,
+      discrepancyApprovalStatus: 'INVESTIGATION_REQUESTED',
+      investigationNotes: params.investigationNotes.trim(),
+      investigationRequestedBy: params.ownerName,
+      investigationRequestedAt: timestamp
+    };
+
+    await db.shifts.put(updatedShift);
+
+    // Update conflict details if exists, keep PENDING
+    const conflict = await db.conflicts
+      .where('entityId')
+      .equals(params.shiftId)
+      .first();
+
+    if (conflict) {
+      await db.conflicts.update(conflict.conflictId, {
+        details: {
+          ...conflict.details,
+          investigationRequested: true,
+          investigationNotes: params.investigationNotes.trim(),
+          investigationRequestedBy: params.ownerName,
+          investigationRequestedAt: timestamp
+        }
+      });
+    }
+
+    // Add alert notification for cashier and store
+    await db.notifications.add({
+      notificationId: uuidv4(),
+      severity: 'WARNING',
+      referenceId: params.shiftId,
+      message: `Investigasi Manual Diminta: Owner ${params.ownerName} meminta audit shift ${params.shiftId.slice(-6).toUpperCase()}. Catatan: "${params.investigationNotes.trim()}".`,
+      isRead: false,
+      createdAt: timestamp
+    });
+
+    await AuditEngine.log({
+      userId: params.ownerUserId,
+      role: 'OWNER',
+      deviceId: 'system',
+      action: 'SHIFT_INVESTIGATION_REQUESTED',
+      module: 'SHIFT_RECONCILIATION',
+      referenceId: params.shiftId,
+      after: {
+        shiftId: params.shiftId,
+        investigationNotes: params.investigationNotes,
+        requestedBy: params.ownerName,
+        timestamp
+      }
+    });
+
+    await db.syncQueue.add({
+      entityType: 'shifts',
+      entityId: params.shiftId,
+      action: 'UPDATE',
+      payload: updatedShift,
+      status: 'PENDING',
+      retryCount: 0,
+      createdAt: timestamp
     });
 
     return updatedShift;

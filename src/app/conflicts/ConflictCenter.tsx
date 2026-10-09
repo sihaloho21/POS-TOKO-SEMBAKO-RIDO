@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { db } from '@/core/database';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { 
@@ -12,20 +12,74 @@ import {
   ArrowRight,
   Store,
   Receipt,
-  AlertOctagon
+  AlertOctagon,
+  ShieldCheck,
+  RefreshCw,
+  BellRing
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { AuditEngine } from '@/core/audit-engine';
 import { useAuthStore } from '@/core/auth-store';
 import { useToastStore } from '@/core/toast-store';
+import { ShiftApprovalWorkflow } from './ShiftApprovalWorkflow';
 
 export default function ConflictCenter() {
   const { currentUser } = useAuthStore();
   const { addToast } = useToastStore();
+  const [activeSubTab, setActiveSubTab] = useState<'approvals' | 'sync_conflicts'>('approvals');
   const [search, setSearch] = useState('');
+  const [highlightShiftId, setHighlightShiftId] = useState<string | undefined>();
   
+  // Listen for browser notification clicks / quick navigate events
+  useEffect(() => {
+    const handleQuickNav = (e: any) => {
+      if (e.detail?.subTab === 'approvals' || e.detail?.shiftId) {
+        setActiveSubTab('approvals');
+        if (e.detail?.shiftId) {
+          setHighlightShiftId(e.detail.shiftId);
+        }
+      }
+    };
+
+    window.addEventListener('quick_navigate_approval', handleQuickNav);
+    return () => {
+      window.removeEventListener('quick_navigate_approval', handleQuickNav);
+    };
+  }, []);
+
   const conflicts = useLiveQuery(
-    () => db.conflicts.where('status').equals('PENDING').toArray()
+    async () => {
+      try {
+        return await db.conflicts
+          .where('status')
+          .equals('PENDING')
+          .filter(c => c.type !== 'SHIFT_DISCREPANCY')
+          .toArray();
+      } catch (err) {
+        console.warn('Conflicts query warning:', err);
+        return [];
+      }
+    },
+    [],
+    []
+  );
+
+  const pendingDiscrepanciesCount = useLiveQuery(
+    async () => {
+      try {
+        const shifts = await db.shifts
+          .where('status')
+          .equals('CLOSED')
+          .filter(s => Boolean(s.discrepancy && s.discrepancy !== 0 && (s.discrepancyApprovalStatus || 'PENDING') !== 'APPROVED'))
+          .toArray();
+        return shifts.length;
+      } catch (err) {
+        console.warn('Pending discrepancies count query warning:', err);
+        return 0;
+      }
+    },
+    [],
+    0
   );
 
   const resolveConflict = async (conflictId: string, resolution: 'RESOLVE' | 'REJECT') => {
@@ -99,45 +153,90 @@ export default function ConflictCenter() {
     <div className="space-y-8 pb-16">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Conflict Center</h2>
-          <p className="text-slate-500 text-sm font-medium">Review dan selesaikan tabrakan data antar perangkat (Offline Conflicts & Store Status).</p>
+          <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Conflict & Approval Center</h2>
+          <p className="text-slate-500 text-sm font-medium">Review persetujuan selisih kasir & tabrakan sinkronisasi operasional.</p>
         </div>
 
-        <div className="relative w-full sm:w-72">
-          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-          <input
-            type="text"
-            placeholder="Cari ID, Tipe, atau Struk..."
-            value={search ?? ''}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold outline-none focus:ring-2 focus:ring-blue-500"
-          />
-        </div>
-      </div>
-
-      <div className="bg-amber-50 border-2 border-amber-200 rounded-3xl p-6 flex gap-4 items-start shadow-xs">
-        <div className="p-3 bg-amber-500 text-white rounded-2xl shadow-lg shadow-amber-200 shrink-0">
-          <AlertTriangle size={24} />
-        </div>
-        <div>
-          <h3 className="font-bold text-amber-900 uppercase tracking-tight">Peringatan Integritas Bisnis</h3>
-          <p className="text-sm text-amber-800 leading-relaxed font-medium mt-1">
-            Sistem mendeteksi <strong>{conflicts?.length || 0} konflik pending</strong>. Harapan Jaya POS tidak menggunakan 
-            <em> "Last Write Wins"</em> — semua event offline yang bertabrakan (termasuk transaksi offline saat toko TUTUP) 
-            dipertahankan agar Owner dapat memilih resolusi yang paling akurat sesuai kondisi faktual.
-          </p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4">
-        {filteredConflicts?.length === 0 ? (
-          <div className="py-20 bg-white rounded-3xl border border-slate-200 text-center text-slate-300">
-            <CheckCircle size={48} className="mx-auto mb-4 opacity-20 text-emerald-500" />
-            <p className="text-sm font-bold uppercase tracking-widest text-slate-400">Tidak ada konflik pending</p>
-            <p className="text-xs text-slate-400 mt-1">Semua data sinkron dan tidak ada tabrakan operasional.</p>
+        {activeSubTab === 'sync_conflicts' && (
+          <div className="relative w-full sm:w-72">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+            <input
+              type="text"
+              placeholder="Cari ID, Tipe, atau Struk..."
+              value={search ?? ''}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold outline-none focus:ring-2 focus:ring-blue-500"
+            />
           </div>
-        ) : (
-          filteredConflicts?.map((conflict) => {
+        )}
+      </div>
+
+      {/* Main Sub-Tabs */}
+      <div className="flex bg-slate-100 p-1.5 rounded-2xl gap-2 w-full sm:w-max">
+        <button
+          type="button"
+          onClick={() => setActiveSubTab('approvals')}
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer ${
+            activeSubTab === 'approvals'
+              ? 'bg-white text-blue-600 shadow-sm'
+              : 'text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <ShieldCheck size={16} />
+          <span>Approval Workflow Selisih Shift</span>
+          {pendingDiscrepanciesCount !== undefined && pendingDiscrepanciesCount > 0 && (
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500 text-white animate-pulse">
+              {pendingDiscrepanciesCount}
+            </span>
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveSubTab('sync_conflicts')}
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer ${
+            activeSubTab === 'sync_conflicts'
+              ? 'bg-white text-slate-900 shadow-sm'
+              : 'text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <RefreshCw size={15} />
+          <span>Konflik Offline & Toko Tutup</span>
+          {conflicts && conflicts.length > 0 && (
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-500 text-white">
+              {conflicts.length}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {activeSubTab === 'approvals' ? (
+        <ShiftApprovalWorkflow highlightShiftId={highlightShiftId} />
+      ) : (
+        <>
+          <div className="bg-amber-50 border-2 border-amber-200 rounded-3xl p-6 flex gap-4 items-start shadow-xs">
+            <div className="p-3 bg-amber-500 text-white rounded-2xl shadow-lg shadow-amber-200 shrink-0">
+              <AlertTriangle size={24} />
+            </div>
+            <div>
+              <h3 className="font-bold text-amber-900 uppercase tracking-tight">Peringatan Integritas Bisnis</h3>
+              <p className="text-sm text-amber-800 leading-relaxed font-medium mt-1">
+                Sistem mendeteksi <strong>{conflicts?.length || 0} konflik pending</strong>. Harapan Jaya POS tidak menggunakan 
+                <em> "Last Write Wins"</em> — semua event offline yang bertabrakan (termasuk transaksi offline saat toko TUTUP) 
+                dipertahankan agar Owner dapat memilih resolusi yang paling akurat sesuai kondisi faktual.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4">
+            {filteredConflicts?.length === 0 ? (
+              <div className="py-20 bg-white rounded-3xl border border-slate-200 text-center text-slate-300">
+                <CheckCircle size={48} className="mx-auto mb-4 opacity-20 text-emerald-500" />
+                <p className="text-sm font-bold uppercase tracking-widest text-slate-400">Tidak ada konflik pending</p>
+                <p className="text-xs text-slate-400 mt-1">Semua data sinkron dan tidak ada tabrakan operasional.</p>
+              </div>
+            ) : (
+              filteredConflicts?.map((conflict) => {
             const isStoreConflict = conflict.type === 'STORE_STATUS_CONFLICT';
 
             return (
@@ -232,6 +331,8 @@ export default function ConflictCenter() {
           })
         )}
       </div>
-    </div>
-  );
+    </>
+    )}
+  </div>
+);
 }

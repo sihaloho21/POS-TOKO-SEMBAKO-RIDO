@@ -15,7 +15,9 @@ import {
   ArrowUpDown,
   AlertTriangle,
   CheckCircle,
-  X
+  X,
+  ShieldCheck,
+  FileSearch
 } from 'lucide-react';
 import { format, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
 import ShiftReport from './ShiftReport';
@@ -63,6 +65,24 @@ export default function ShiftHistory({ onNavigate }: { onNavigate?: (tab: string
   const totalHistoricalRevenue = shifts?.reduce((acc, s) => acc + (s.totalSales || 0), 0) || 0;
   const totalShiftCount = shifts?.length || 0;
 
+  const pendingApprovalsCount = useLiveQuery(
+    async () => {
+      try {
+        const list = await db.shifts
+          .where('status')
+          .equals('CLOSED')
+          .filter(s => Boolean(s.discrepancy && s.discrepancy !== 0 && (s.discrepancyApprovalStatus || 'PENDING') !== 'APPROVED'))
+          .toArray();
+        return list.length;
+      } catch (err) {
+        console.warn('ShiftHistory pending approvals query warning:', err);
+        return 0;
+      }
+    },
+    [],
+    0
+  );
+
   return (
     <div className="space-y-6">
       {/* Header & High-level Stats */}
@@ -80,8 +100,21 @@ export default function ShiftHistory({ onNavigate }: { onNavigate?: (tab: string
         <div className="flex flex-wrap items-center gap-3">
           {onNavigate && (
             <button
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent('quick_navigate_approval', { detail: { subTab: 'approvals' } }));
+                onNavigate('conflicts');
+              }}
+              className="px-3.5 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-2xl font-black text-xs uppercase tracking-wider shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
+            >
+              <ShieldCheck size={14} />
+              <span>Approval Selisih {pendingApprovalsCount ? `(${pendingApprovalsCount})` : ''}</span>
+            </button>
+          )}
+
+          {onNavigate && (
+            <button
               onClick={() => onNavigate('shift')}
-              className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-xs uppercase tracking-wider shadow-sm shadow-indigo-200 transition-all flex items-center gap-1.5"
+              className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-xs uppercase tracking-wider shadow-sm shadow-indigo-200 transition-all flex items-center gap-1.5 cursor-pointer"
             >
               <Clock size={14} />
               <span>Kelola Sesi Kasir</span>
@@ -213,6 +246,17 @@ export default function ShiftHistory({ onNavigate }: { onNavigate?: (tab: string
                           <p className={`text-[9px] font-black uppercase tracking-tight ${s.actualCash === s.expectedCash ? 'text-emerald-600' : 'text-rose-600'}`}>
                             {s.actualCash === s.expectedCash ? 'Balanced' : `Selisih: Rp ${( (s.actualCash || 0) - (s.expectedCash || 0) ).toLocaleString()}`}
                           </p>
+                          {s.actualCash !== s.expectedCash && (
+                            <span className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded mt-0.5 ${
+                              s.discrepancyApprovalStatus === 'APPROVED'
+                                ? 'bg-emerald-100 text-emerald-700'
+                                : s.discrepancyApprovalStatus === 'INVESTIGATION_REQUESTED'
+                                ? 'bg-rose-100 text-rose-700'
+                                : 'bg-amber-100 text-amber-800'
+                            }`}>
+                              {s.discrepancyApprovalStatus === 'APPROVED' ? '✓ Disetujui' : s.discrepancyApprovalStatus === 'INVESTIGATION_REQUESTED' ? '🔍 Investigasi' : '⏳ Pending'}
+                            </span>
+                          )}
                         </div>
                       ) : (
                         <span className="text-[10px] font-bold text-slate-300 uppercase tracking-widest italic">Belum Tutup</span>

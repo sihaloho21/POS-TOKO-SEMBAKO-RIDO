@@ -11,9 +11,32 @@ import {
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 
-export function NotificationCenter({ onClose }: { onClose: () => void }) {
-  const notifications = useLiveQuery(() => db.notifications.orderBy('createdAt').reverse().limit(50).toArray());
+export function NotificationCenter({ onClose, onNavigate }: { onClose: () => void; onNavigate?: (tab: string) => void }) {
+  const notifications = useLiveQuery(
+    async () => {
+      try {
+        const all = await db.notifications.toArray();
+        return all
+          .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
+          .slice(0, 50);
+      } catch (err) {
+        console.warn('Notifications query warning:', err);
+        return [];
+      }
+    },
+    [],
+    []
+  );
   const unreadCount = notifications?.filter(n => !n.isRead).length || 0;
+
+  const handleClickItem = async (n: any) => {
+    await db.notifications.update(n.notificationId, { isRead: true });
+    if (n.message.toLowerCase().includes('selisih') || n.message.toLowerCase().includes('shift')) {
+      window.dispatchEvent(new CustomEvent('quick_navigate_approval', { detail: { subTab: 'approvals', shiftId: n.referenceId } }));
+      if (onNavigate) onNavigate('conflicts');
+      onClose();
+    }
+  };
 
   const markAllAsRead = async () => {
     const unread = notifications?.filter(n => !n.isRead) || [];
@@ -72,8 +95,8 @@ export function NotificationCenter({ onClose }: { onClose: () => void }) {
           notifications?.map((n) => (
             <div 
               key={n.notificationId} 
-              className={`p-4 flex gap-4 transition-all hover:bg-slate-50 ${n.isRead ? 'opacity-60' : 'bg-blue-50/30'}`}
-              onClick={() => db.notifications.update(n.notificationId, { isRead: true })}
+              className={`p-4 flex gap-4 transition-all hover:bg-slate-50 cursor-pointer ${n.isRead ? 'opacity-60' : 'bg-blue-50/30'}`}
+              onClick={() => handleClickItem(n)}
             >
               <div className="shrink-0 mt-1">
                 {getIcon(n.severity)}

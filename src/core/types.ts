@@ -277,7 +277,7 @@ export interface AuditLog {
 
 export interface BusinessConflict {
   conflictId: string;
-  type: 'STOCK_CONFLICT' | 'STOCK_PENDING_REVIEW' | 'PRICE_CONFLICT' | 'STORE_STATUS_CONFLICT' | 'CONFIG_CONFLICT';
+  type: 'STOCK_CONFLICT' | 'STOCK_PENDING_REVIEW' | 'PRICE_CONFLICT' | 'STORE_STATUS_CONFLICT' | 'CONFIG_CONFLICT' | 'SHIFT_DISCREPANCY';
   entityType: string;
   entityId: string;
   deviceId: string;
@@ -342,8 +342,12 @@ export interface CashierShift {
   actualCash?: number;
   discrepancy?: number;
   discrepancyReason?: string;
+  discrepancyApprovalStatus?: 'PENDING' | 'APPROVED' | 'INVESTIGATION_REQUESTED';
   discrepancyApprovedBy?: string;
   discrepancyApprovedAt?: string;
+  investigationNotes?: string;
+  investigationRequestedBy?: string;
+  investigationRequestedAt?: string;
   reconciliationEventId?: string;
   totalTransactionCount?: number;
   totalSales?: number;
