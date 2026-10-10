@@ -24,16 +24,19 @@ import {
   Check,
   Hourglass,
   FileQuestion,
-  Layers
+  Layers,
+  Undo2
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
+import { QuickRefundModal } from './QuickRefundModal';
 
 export default function TransactionHistory() {
   const { currentUser } = useAuthStore();
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'ALL' | 'COMPLETED' | 'approval_pending' | 'HOLD' | 'VOIDED'>('ALL');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'COMPLETED' | 'RETURN' | 'approval_pending' | 'HOLD' | 'VOIDED'>('ALL');
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
+  const [quickRefundTx, setQuickRefundTx] = useState<Transaction | null>(null);
   
   // Kasir Request Modal
   const [requestTx, setRequestTx] = useState<Transaction | null>(null);
@@ -56,8 +59,14 @@ export default function TransactionHistory() {
     const all = await query.toArray();
 
     return all.filter(tx => {
-      // Status filter
-      if (statusFilter !== 'ALL' && tx.status !== statusFilter) return false;
+      // Status & Return filter
+      if (statusFilter !== 'ALL') {
+        if (statusFilter === 'RETURN') {
+          if (tx.type !== 'RETURN') return false;
+        } else {
+          if (tx.status !== statusFilter) return false;
+        }
+      }
 
       // Search filter
       if (search.trim()) {
@@ -65,7 +74,8 @@ export default function TransactionHistory() {
         const receiptMatch = tx.receiptNumber.toLowerCase().includes(q);
         const cashierMatch = tx.cashierId.toLowerCase().includes(q);
         const itemMatch = tx.items.some(i => i.nameSnapshot.toLowerCase().includes(q));
-        return receiptMatch || cashierMatch || itemMatch;
+        const originalMatch = tx.originalReceiptNumber ? tx.originalReceiptNumber.toLowerCase().includes(q) : false;
+        return receiptMatch || cashierMatch || itemMatch || originalMatch;
       }
       return true;
     });
@@ -257,7 +267,7 @@ export default function TransactionHistory() {
         </div>
 
         <div className="flex items-center gap-1.5 w-full md:w-auto overflow-x-auto pb-1 md:pb-0">
-          {(['ALL', 'COMPLETED', 'approval_pending', 'HOLD', 'VOIDED'] as const).map((st) => (
+          {(['ALL', 'COMPLETED', 'RETURN', 'approval_pending', 'HOLD', 'VOIDED'] as const).map((st) => (
             <button
               key={st}
               onClick={() => setStatusFilter(st)}
@@ -268,7 +278,7 @@ export default function TransactionHistory() {
               }`}
             >
               <span>
-                {st === 'ALL' ? 'Semua' : st === 'approval_pending' ? 'Review Owner' : st}
+                {st === 'ALL' ? 'Semua' : st === 'RETURN' ? 'Retur / Refund' : st === 'approval_pending' ? 'Review Owner' : st}
               </span>
               {st === 'approval_pending' && pendingApprovalsCount && pendingApprovalsCount > 0 ? (
                 <span className="w-4 h-4 bg-amber-500 text-white rounded-full text-[9px] font-black flex items-center justify-center">
@@ -313,13 +323,20 @@ export default function TransactionHistory() {
                       }`}
                     >
                       <td className="py-4 px-6">
-                        <span className="font-mono font-bold text-slate-900 block text-sm">
+                        <span className={`font-mono font-bold block text-sm ${
+                          tx.type === 'RETURN' ? 'text-purple-700' : 'text-slate-900'
+                        }`}>
                           {tx.receiptNumber}
                         </span>
                         <span className="text-slate-400 text-[11px] flex items-center gap-1 mt-0.5">
                           <Clock size={11} />
                           {format(new Date(tx.clientTimestamp), 'dd MMM yyyy, HH:mm')}
                         </span>
+                        {tx.type === 'RETURN' && tx.originalReceiptNumber && (
+                          <span className="text-[10px] text-purple-700 bg-purple-100/80 border border-purple-200 px-1.5 py-0.5 rounded mt-1 inline-block font-bold">
+                            Ref Nota: #{tx.originalReceiptNumber}
+                          </span>
+                        )}
                         {isPendingApproval && tx.voidReason && (
                           <span className="text-[10px] text-amber-700 bg-amber-100/80 px-1.5 py-0.5 rounded mt-1 inline-block font-bold">
                             Catatan Kasir: "{tx.voidReason}"
@@ -336,9 +353,13 @@ export default function TransactionHistory() {
 
                       <td className="py-4 px-6">
                         <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider mb-1 ${
-                          tx.type === 'GAJIAN' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'
+                          tx.type === 'RETURN'
+                            ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                            : tx.type === 'GAJIAN'
+                            ? 'bg-amber-100 text-amber-800'
+                            : 'bg-blue-100 text-blue-800'
                         }`}>
-                          {tx.type}
+                          {tx.type === 'RETURN' ? 'RETUR / REFUND' : tx.type}
                         </span>
                         <span className="block text-[11px] text-slate-500 font-medium">
                           {tx.paymentMethodId}
@@ -351,17 +372,27 @@ export default function TransactionHistory() {
                             {tx.items[0]?.nameSnapshot} {tx.items.length > 1 ? `+${tx.items.length - 1} lainnya` : ''}
                           </span>
                           <span className="text-[11px] text-slate-400">
-                            {tx.items.reduce((acc, i) => acc + i.quantity, 0)} unit total
+                            {tx.items.reduce((acc, i) => acc + i.quantity, 0)} unit {tx.type === 'RETURN' ? 'diretur' : 'total'}
                           </span>
                         </div>
                       </td>
 
-                      <td className="py-4 px-6 text-right font-black text-sm tabular-nums text-slate-900">
-                        Rp {tx.total.toLocaleString()}
+                      <td className={`py-4 px-6 text-right font-black text-sm tabular-nums ${
+                        tx.type === 'RETURN' ? 'text-rose-600' : 'text-slate-900'
+                      }`}>
+                        {tx.type === 'RETURN' ? `-Rp ${tx.total.toLocaleString()}` : `Rp ${tx.total.toLocaleString()}`}
                       </td>
 
                       <td className="py-4 px-6 text-center">
-                        {isPendingApproval ? (
+                        {tx.type === 'RETURN' ? (
+                          <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-100 text-purple-700 border border-purple-200">
+                            RETUR SELESAI
+                          </span>
+                        ) : tx.voidActionType === 'REFUND' ? (
+                          <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-50 text-purple-700 border border-purple-200" title={tx.voidReason}>
+                            REFUNDED
+                          </span>
+                        ) : isPendingApproval ? (
                           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300 animate-pulse">
                             <Hourglass size={10} />
                             APPROVAL PENDING
@@ -382,11 +413,11 @@ export default function TransactionHistory() {
                       </td>
 
                       <td className="py-4 px-6">
-                        <div className="flex items-center justify-center gap-1.5">
+                        <div className="flex items-center justify-center gap-1.5 flex-wrap">
                           <button
                             onClick={() => handlePrint(tx)}
                             title="Cetak Ulang Struk"
-                            className="p-2 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all"
+                            className="p-2 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all cursor-pointer"
                           >
                             <Printer size={15} />
                           </button>
@@ -394,7 +425,7 @@ export default function TransactionHistory() {
                           <button
                             onClick={() => handleShare(tx)}
                             title="Bagikan Struk WhatsApp / Salin"
-                            className="p-2 text-slate-600 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all"
+                            className="p-2 text-slate-600 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all cursor-pointer"
                           >
                             <Share2 size={15} />
                           </button>
@@ -402,13 +433,25 @@ export default function TransactionHistory() {
                           <button
                             onClick={() => setSelectedTx(tx)}
                             title="Lihat Rincian Item"
-                            className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-all"
+                            className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-all cursor-pointer"
                           >
                             <Eye size={15} />
                           </button>
 
+                          {/* Quick Refund Button: For completed sales */}
+                          {tx.status === 'COMPLETED' && tx.type !== 'RETURN' && (
+                            <button
+                              onClick={() => setQuickRefundTx(tx)}
+                              title="Quick Refund: Pilih barang & buat nota retur"
+                              className="px-2.5 py-1.5 text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1 transition-all cursor-pointer shadow-sm shrink-0"
+                            >
+                              <Undo2 size={12} />
+                              <span>Quick Refund</span>
+                            </button>
+                          )}
+
                           {/* KASIR: Request Void/Refund button on COMPLETED transactions */}
-                          {!isVoided && tx.status === 'COMPLETED' && (
+                          {!isVoided && tx.status === 'COMPLETED' && tx.type !== 'RETURN' && (
                             <button
                               onClick={() => {
                                 setRequestTx(tx);
@@ -416,7 +459,7 @@ export default function TransactionHistory() {
                                 setReason('Salah input kasir');
                               }}
                               title="Ajukan Void / Refund ke Owner"
-                              className="px-2.5 py-1.5 text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 transition-all"
+                              className="px-2.5 py-1.5 text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 transition-all cursor-pointer shrink-0"
                             >
                               <RotateCcw size={12} />
                               Request Void
@@ -428,7 +471,7 @@ export default function TransactionHistory() {
                             isOwner ? (
                               <button
                                 onClick={() => setReviewTx(tx)}
-                                className="px-2.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1 shadow-sm transition-all"
+                                className="px-2.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1 shadow-sm transition-all cursor-pointer shrink-0"
                                 title="Review dan setujui permohonan void/refund"
                               >
                                 <Check size={12} />
@@ -556,18 +599,31 @@ export default function TransactionHistory() {
             <div className="flex gap-2">
               <button
                 onClick={() => handlePrint(selectedTx)}
-                className="flex-1 py-3 bg-blue-600 text-white font-black text-xs uppercase tracking-wider rounded-xl hover:bg-blue-500 shadow-md shadow-blue-200 flex items-center justify-center gap-2"
+                className="flex-1 py-3 bg-blue-600 text-white font-black text-xs uppercase tracking-wider rounded-xl hover:bg-blue-500 shadow-md shadow-blue-200 flex items-center justify-center gap-2 cursor-pointer"
               >
                 <Printer size={16} />
                 Cetak Struk
               </button>
               <button
                 onClick={() => handleShare(selectedTx)}
-                className="flex-1 py-3 bg-emerald-600 text-white font-black text-xs uppercase tracking-wider rounded-xl hover:bg-emerald-500 shadow-md shadow-emerald-200 flex items-center justify-center gap-2"
+                className="flex-1 py-3 bg-emerald-600 text-white font-black text-xs uppercase tracking-wider rounded-xl hover:bg-emerald-500 shadow-md shadow-emerald-200 flex items-center justify-center gap-2 cursor-pointer"
               >
                 <Share2 size={16} />
                 Bagikan WA
               </button>
+              {selectedTx.status === 'COMPLETED' && selectedTx.type !== 'RETURN' && (
+                <button
+                  onClick={() => {
+                    const target = selectedTx;
+                    setSelectedTx(null);
+                    setQuickRefundTx(target);
+                  }}
+                  className="flex-1 py-3 bg-purple-600 text-white font-black text-xs uppercase tracking-wider rounded-xl hover:bg-purple-500 shadow-md shadow-purple-200 flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Undo2 size={16} />
+                  Quick Refund
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -747,6 +803,17 @@ export default function TransactionHistory() {
           </div>
         </div>
       )}
+
+      {/* Quick Refund Modal */}
+      <QuickRefundModal
+        isOpen={!!quickRefundTx}
+        transaction={quickRefundTx}
+        onClose={() => setQuickRefundTx(null)}
+        onSuccess={(returnTx) => {
+          setFeedbackMsg(`Nota Retur ${returnTx.receiptNumber} berhasil dibuat dengan total refund Rp ${returnTx.total.toLocaleString()}!`);
+          setTimeout(() => setFeedbackMsg(''), 5000);
+        }}
+      />
     </div>
   );
 }

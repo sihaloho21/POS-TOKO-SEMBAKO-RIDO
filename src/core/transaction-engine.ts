@@ -425,6 +425,250 @@ export class TransactionEngine {
     });
   }
 
+  static async processQuickRefund(params: {
+    originalTransactionId: string;
+    staffId: string;
+    staffName: string;
+    staffRole: string;
+    authorizedBy: string;
+    reason: string;
+    itemsToReturn: {
+      productId: string;
+      nameSnapshot: string;
+      quantity: number;
+      unit: string;
+      unitPrice: number;
+      subtotal: number;
+      restock: boolean;
+      isBundle?: boolean;
+      bundleComponentsSnapshot?: any[];
+    }[];
+    refundAmount: number;
+    refundStorageId: 'WARUNG' | 'IKAN' | 'UANG_DIGITAL';
+    refundPaymentMethod: string;
+    notes?: string;
+  }): Promise<Transaction> {
+    const startTime = performance.now();
+    const originalTx = await db.transactions.get(params.originalTransactionId);
+    if (!originalTx) {
+      throw new Error('Transaksi asal tidak ditemukan.');
+    }
+    if (params.itemsToReturn.length === 0) {
+      throw new Error('Pilih minimal satu barang untuk diretur.');
+    }
+    if (params.refundAmount <= 0) {
+      throw new Error('Nominal pengembalian dana harus lebih besar dari Rp 0.');
+    }
+
+    const timestamp = new Date().toISOString();
+    const returnTxId = uuidv4();
+    const shortCode = Date.now().toString().slice(-4);
+    const returnReceiptNumber = `RET-${originalTx.receiptNumber.replace(/^INV-/, '')}-${shortCode}`;
+
+    // 1. Process Stock Movements
+    for (const item of params.itemsToReturn) {
+      if (item.quantity <= 0) continue;
+
+      if (item.isBundle && item.bundleComponentsSnapshot?.length) {
+        for (const comp of item.bundleComponentsSnapshot) {
+          const compProduct = await db.products.get(comp.componentProductId);
+          const compSegmentId = compProduct?.productType === 'FISH' ? 'IKAN' : 'WARUNG';
+          const totalCompQty = comp.qtyPerBundle ? comp.qtyPerBundle * item.quantity : comp.totalQty;
+
+          if (item.restock) {
+            await StockService.recordMovement({
+              productId: comp.componentProductId,
+              movementType: 'BUNDLE_RETURN_COMPONENT_IN',
+              qty: totalCompQty,
+              unit: comp.unit,
+              baseQty: totalCompQty,
+              referenceId: returnTxId,
+              transactionId: returnTxId,
+              segmentId: compSegmentId,
+              reason: `Retur Paket (${params.reason}): ${item.nameSnapshot}`,
+              costSnapshot: comp.wacSnapshot,
+              userId: params.staffId,
+              deviceId: originalTx.deviceId,
+              timestamp
+            });
+          } else {
+            await StockService.recordMovement({
+              productId: comp.componentProductId,
+              movementType: 'DAMAGED_OUT',
+              qty: totalCompQty,
+              unit: comp.unit,
+              baseQty: totalCompQty,
+              referenceId: returnTxId,
+              transactionId: returnTxId,
+              segmentId: compSegmentId,
+              reason: `Barang Rusak Cacat (${params.reason}): ${comp.nameSnapshot}`,
+              costSnapshot: comp.wacSnapshot,
+              userId: params.staffId,
+              deviceId: originalTx.deviceId,
+              timestamp
+            });
+          }
+        }
+      } else {
+        const product = await db.products.get(item.productId);
+        let baseQty = item.quantity;
+        if (product && item.unit !== product.baseUnit) {
+          const conversion = product.conversionRules?.find(r => r.toUnit === item.unit);
+          if (conversion && conversion.factor > 0) {
+            baseQty = item.quantity * conversion.factor;
+          }
+        }
+
+        const segmentId = originalTx.moneyStorageId === 'IKAN' ? 'IKAN' : 'WARUNG';
+        if (item.restock) {
+          await StockService.recordMovement({
+            productId: item.productId,
+            movementType: 'SALE_RETURN_IN',
+            qty: item.quantity,
+            unit: item.unit,
+            baseQty,
+            referenceId: returnTxId,
+            transactionId: returnTxId,
+            segmentId,
+            reason: `Quick Refund (${params.reason}): ${item.nameSnapshot}`,
+            costSnapshot: product?.hpp ?? 0,
+            userId: params.staffId,
+            deviceId: originalTx.deviceId,
+            timestamp
+          });
+        } else {
+          await StockService.recordMovement({
+            productId: item.productId,
+            movementType: 'DAMAGED_OUT',
+            qty: item.quantity,
+            unit: item.unit,
+            baseQty,
+            referenceId: returnTxId,
+            transactionId: returnTxId,
+            segmentId,
+            reason: `Barang Rusak Tidak Direstock (${params.reason}): ${item.nameSnapshot}`,
+            costSnapshot: product?.hpp ?? 0,
+            userId: params.staffId,
+            deviceId: originalTx.deviceId,
+            timestamp
+          });
+        }
+      }
+    }
+
+    // 2. Finance Outflow
+    const refundFinance: FinanceEvent = {
+      financeEventId: uuidv4(),
+      amount: params.refundAmount,
+      storageId: params.refundStorageId,
+      direction: 'OUT',
+      referenceId: returnTxId,
+      referenceType: 'RETURN',
+      description: `Pengembalian Uang (Quick Refund) Nota #${returnReceiptNumber} dari #${originalTx.receiptNumber} (${params.refundPaymentMethod}) • ${params.reason}`,
+      userId: params.staffId,
+      deviceId: originalTx.deviceId,
+      timestamp
+    };
+    await db.financeEvents.add(refundFinance);
+    await this.addToQueue('financeEvents', refundFinance.financeEventId, 'CREATE', refundFinance);
+
+    // 3. Proportional Loyalty Reversal
+    if (originalTx.loyaltyPointsEarned > 0 && originalTx.customerId) {
+      const ratio = Math.min(1, params.refundAmount / Math.max(1, originalTx.total));
+      const pointsToReverse = Math.round(originalTx.loyaltyPointsEarned * ratio);
+      if (pointsToReverse > 0) {
+        await LoyaltyEngine.recordReversalEvent(
+          originalTx.customerId,
+          pointsToReverse,
+          returnTxId
+        ).catch(err => console.warn('Loyalty reversal error:', err));
+      }
+    }
+
+    // 4. Return Transaction Record
+    const returnItems: TransactionItem[] = params.itemsToReturn.map(i => ({
+      productId: i.productId,
+      nameSnapshot: i.nameSnapshot,
+      barcodeSnapshot: '',
+      quantity: i.quantity,
+      unit: i.unit,
+      unitPrice: i.unitPrice,
+      priceSource: 'NORMAL',
+      discount: 0,
+      netPrice: i.unitPrice,
+      subtotal: i.subtotal,
+      isBundle: i.isBundle,
+      bundleComponentsSnapshot: i.bundleComponentsSnapshot
+    }));
+
+    const returnTx: Transaction = {
+      transactionId: returnTxId,
+      receiptNumber: returnReceiptNumber,
+      type: 'RETURN',
+      status: 'COMPLETED',
+      customerId: originalTx.customerId,
+      cashierId: params.staffId,
+      deviceId: originalTx.deviceId,
+      shiftId: originalTx.shiftId,
+      items: returnItems,
+      subtotal: params.refundAmount,
+      discount: 0,
+      total: params.refundAmount,
+      paymentMethodId: params.refundPaymentMethod,
+      moneyStorageId: params.refundStorageId,
+      loyaltyPointsEarned: 0,
+      clientTimestamp: timestamp,
+      originalTransactionId: originalTx.transactionId,
+      originalReceiptNumber: originalTx.receiptNumber,
+      returnReason: params.reason,
+      authorizedBy: params.authorizedBy,
+      isRestocked: params.itemsToReturn.some(i => i.restock)
+    };
+
+    await db.transactions.add(returnTx);
+    await this.addToQueue('transactions', returnTxId, 'CREATE', returnTx);
+
+    // 5. Update original transaction state
+    const isFullRefund = params.refundAmount >= originalTx.total;
+    const updateOriginal: Partial<Transaction> = {
+      voidReason: `Ada pengembalian dana: ${returnReceiptNumber} (${params.reason})`,
+      voidActionType: 'REFUND',
+      approvalStatus: 'APPROVED'
+    };
+    if (isFullRefund) {
+      updateOriginal.status = 'VOIDED';
+    }
+    await db.transactions.update(originalTx.transactionId, updateOriginal);
+    await this.addToQueue('transactions', originalTx.transactionId, 'UPDATE', {
+      ...originalTx,
+      ...updateOriginal
+    });
+
+    // 6. Audit Logging
+    await AuditEngine.log({
+      userId: params.staffId,
+      role: params.staffRole,
+      deviceId: originalTx.deviceId,
+      action: 'QUICK_REFUND',
+      module: 'TRANSACTIONS',
+      referenceId: returnTxId,
+      reason: `${params.reason} (Otorisasi: ${params.authorizedBy})`,
+      after: returnTx
+    });
+
+    // 7. Track Performance
+    PerformanceTracker.recordTransactionMetric({
+      transactionId: returnTxId,
+      receiptNumber: returnReceiptNumber,
+      type: 'VOID',
+      durationMs: Math.max(1, Math.round(performance.now() - startTime)),
+      itemCount: params.itemsToReturn.length,
+      timestamp
+    });
+
+    return returnTx;
+  }
+
   static async settleReceivable(params: {
     cashierId: string;
     role?: string;

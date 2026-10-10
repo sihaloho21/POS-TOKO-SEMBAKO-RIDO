@@ -114,6 +114,16 @@ export class PrintService {
 
           <div class="dashed"></div>
 
+          ${transaction.type === 'RETURN' ? `
+            <div class="center bold" style="font-size: 1.05em; background: #eee; padding: 3px 0; margin-bottom: 6px;">
+              *** NOTA RETUR / REFUND ***
+            </div>
+            ${transaction.originalReceiptNumber ? `<div style="font-size: 0.85em;">Ref Struk Asal: ${transaction.originalReceiptNumber}</div>` : ''}
+            ${transaction.returnReason ? `<div style="font-size: 0.85em;">Alasan: ${transaction.returnReason}</div>` : ''}
+            ${transaction.authorizedBy ? `<div style="font-size: 0.85em;">Otorisasi: ${transaction.authorizedBy}</div>` : ''}
+            <div class="dashed"></div>
+          ` : ''}
+
           <div class="flex-between">
             <span>${format(new Date(transaction.clientTimestamp), 'dd/MM/yy')}</span>
             <span>${format(new Date(transaction.clientTimestamp), 'HH:mm')}</span>
@@ -128,7 +138,7 @@ export class PrintService {
           <div class="dashed"></div>
 
           <div class="flex-between bold">
-            <span>SUBTOTAL</span>
+            <span>${transaction.type === 'RETURN' ? 'TOTAL DIRETUR' : 'SUBTOTAL'}</span>
             <span>${transaction.subtotal.toLocaleString()}</span>
           </div>
           ${transaction.discount > 0 ? `
@@ -138,8 +148,8 @@ export class PrintService {
             </div>
           ` : ''}
           <div class="flex-between bold" style="font-size: 1.1em;">
-            <span>TOTAL</span>
-            <span>${transaction.total.toLocaleString()}</span>
+            <span>${transaction.type === 'RETURN' ? 'TOTAL PENGEMBALIAN' : 'TOTAL'}</span>
+            <span>${transaction.type === 'RETURN' ? '-Rp ' : 'Rp '}${transaction.total.toLocaleString()}</span>
           </div>
 
           <div class="dashed"></div>

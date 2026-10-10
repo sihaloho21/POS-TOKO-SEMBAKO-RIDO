@@ -150,6 +150,11 @@ export interface Transaction {
   voidRequestedBy?: string;
   voidRequestedAt?: string;
   voidActionType?: 'VOID' | 'RETURN' | 'REFUND';
+  originalTransactionId?: string;
+  originalReceiptNumber?: string;
+  returnReason?: string;
+  authorizedBy?: string;
+  isRestocked?: boolean;
 }
 
 export interface Receivable {
