@@ -6,7 +6,8 @@ import { StockService } from './stock-service';
 
 export class StockOpnameService {
   static async startOpname(userId: string, deviceId: string): Promise<string> {
-    const products = await db.products.toArray();
+    const allProducts = await db.products.toArray();
+    const products = allProducts.filter(p => p.productType !== 'BUNDLE');
     const opnameId = uuidv4();
     const timestamp = new Date().toISOString();
 
@@ -47,20 +48,26 @@ export class StockOpnameService {
     const timestamp = new Date().toISOString();
 
     for (const item of opname.items) {
-      const diff = item.physicalQty - item.expectedQty;
+      const product = await db.products.get(item.productId);
+      if (!product) continue;
+
+      const currentDerived = await StockService.getDerivedStock(item.productId);
+      const diff = Number((item.physicalQty - currentDerived).toFixed(2));
       if (diff !== 0) {
-        const product = await db.products.get(item.productId);
+        const costDoc = await db.productCosts.get(item.productId);
+        const wac = costDoc?.hpp ?? product.hpp ?? 0;
         const movementType = diff > 0 ? 'STOCK_OPNAME_IN' : 'STOCK_OPNAME_OUT';
         
         await StockService.recordMovement({
           productId: item.productId,
           movementType,
           qty: Math.abs(diff),
-          unit: product?.baseUnit || 'PCS',
+          unit: product.baseUnit || 'PCS',
           baseQty: Math.abs(diff),
           referenceId: opnameId,
-          segmentId: product?.productType === 'FISH' ? 'IKAN' : 'WARUNG',
-          reason: `Hasil Stock Opname (${diff > 0 ? 'Surplus' : 'Defisit'} ${Math.abs(diff)})`,
+          segmentId: product.productType === 'FISH' ? 'IKAN' : 'WARUNG',
+          reason: `Hasil Stock Opname (${diff > 0 ? 'Surplus' : 'Defisit'} ${Math.abs(diff)} ${product.baseUnit})`,
+          costSnapshot: wac,
           userId,
           deviceId,
           timestamp

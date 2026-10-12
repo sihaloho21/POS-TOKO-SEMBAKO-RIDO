@@ -65,17 +65,39 @@ export function BulkBarcodeModal({ onClose }: BulkBarcodeModalProps) {
   };
 
   const handlePrint = () => {
-    if (!selectedProducts) return;
-    
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
+    if (!selectedProducts || selectedProducts.length === 0) return;
 
     const labelsHtml = selectedProducts.map(p => {
-      const barcode = p.barcode.length === 13 ? p.barcode : BarcodeService.generateInternalEAN13(p.barcode || p.productId.slice(-10));
+      const isValidEan13 = /^\d{13}$/.test(p.barcode || '') && BarcodeService.validateEAN13(p.barcode);
+      const barcodeValue = isValidEan13
+        ? p.barcode
+        : (p.barcode || BarcodeService.generateInternalEAN13(p.productId.replace(/\D/g, '').slice(-9) || '100000001'));
+
+      const svgNode = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      try {
+        JsBarcode(svgNode, barcodeValue, {
+          format: isValidEan13 ? 'EAN13' : 'CODE128',
+          width: 1.2,
+          height: 30,
+          displayValue: true,
+          fontSize: 8,
+          margin: 0
+        });
+      } catch {
+        JsBarcode(svgNode, p.productId.slice(0, 8).toUpperCase(), {
+          format: 'CODE128',
+          width: 1.2,
+          height: 30,
+          displayValue: true,
+          fontSize: 8,
+          margin: 0
+        });
+      }
+
       return `
         <div class="barcode-label">
           ${config.showName ? `<div class="product-name">${p.name}</div>` : ''}
-          <svg id="barcode-${p.productId}"></svg>
+          ${svgNode.outerHTML}
           ${config.showPrice ? `<div class="price">Rp ${p.normalPrice.toLocaleString()}</div>` : ''}
         </div>
       `;
@@ -142,38 +164,37 @@ export function BulkBarcodeModal({ onClose }: BulkBarcodeModalProps) {
               max-height: ${config.height * 0.5}mm;
             }
           </style>
-          <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.0/dist/JsBarcode.all.min.js"></script>
         </head>
         <body>
           ${labelsHtml}
-          <script>
-            window.onload = function() {
-              ${selectedProducts.map(p => {
-                const barcode = p.barcode.length === 13 ? p.barcode : BarcodeService.generateInternalEAN13(p.barcode || p.productId.slice(-10));
-                return `
-                  JsBarcode("#barcode-${p.productId}", "${barcode}", {
-                    format: "EAN13",
-                    width: 1.2,
-                    height: 30,
-                    displayValue: true,
-                    fontSize: 8,
-                    margin: 0
-                  });
-                `;
-              }).join('')}
-              
-              setTimeout(() => {
-                window.print();
-                window.onafterprint = function() { window.close(); };
-              }, 500);
-            };
-          </script>
         </body>
       </html>
     `;
 
-    printWindow.document.write(html);
-    printWindow.document.close();
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentWindow?.document;
+    if (!doc) return;
+    doc.open();
+    doc.write(html);
+    doc.close();
+
+    setTimeout(() => {
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+      setTimeout(() => {
+        if (document.body.contains(iframe)) {
+          document.body.removeChild(iframe);
+        }
+      }, 1000);
+    }, 300);
   };
 
   return (

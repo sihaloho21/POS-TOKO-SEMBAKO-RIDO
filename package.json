@@ -24,6 +24,7 @@
     "express": "^4.21.2",
     "fflate": "^0.8.2",
     "firebase": "^12.19.0",
+    "html5-qrcode": "^2.3.8",
     "jsbarcode": "^3.11.6",
     "jspdf": "^2.5.1",
     "jspdf-autotable": "^3.8.2",

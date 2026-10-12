@@ -354,25 +354,50 @@ export class TransactionEngine {
       await this.addToQueue('financeEvents', reverseFinance.financeEventId, 'CREATE', reverseFinance);
     }
 
-    // 4. If was GAJIAN, cancel receivable and refund any already-paid installments
+    // 4. If was GAJIAN, cancel receivable and refund any already-paid installments per their original storageId
     if (transaction.type === 'GAJIAN') {
       const receivable = await db.receivables.where('transactionId').equals(params.transactionId).first();
       if (receivable) {
         if (receivable.paidAmount > 0) {
-          const refundPaidFinance: FinanceEvent = {
-            financeEventId: uuidv4(),
-            amount: receivable.paidAmount,
-            storageId: transaction.moneyStorageId || 'WARUNG',
-            direction: 'OUT',
-            referenceId: receivable.receivableId,
-            referenceType: params.actionType === 'VOID' ? 'VOID' : 'RETURN',
-            description: `Pengembalian Cicilan Piutang (${params.actionType} #${transaction.receiptNumber})`,
-            userId: params.userId,
-            deviceId: transaction.deviceId,
-            timestamp
-          };
-          await db.financeEvents.add(refundPaidFinance);
-          await this.addToQueue('financeEvents', refundPaidFinance.financeEventId, 'CREATE', refundPaidFinance);
+          const pastPayments = await db.receivablePayments
+            .where('receivableId')
+            .equals(receivable.receivableId)
+            .toArray();
+
+          if (pastPayments.length > 0) {
+            for (const payment of pastPayments) {
+              if (payment.amount <= 0) continue;
+              const refundPaidFinance: FinanceEvent = {
+                financeEventId: uuidv4(),
+                amount: payment.amount,
+                storageId: payment.moneyStorageId || transaction.moneyStorageId || 'WARUNG',
+                direction: 'OUT',
+                referenceId: receivable.receivableId,
+                referenceType: params.actionType === 'VOID' ? 'VOID' : 'RETURN',
+                description: `Pengembalian Cicilan Piutang (${params.actionType} #${transaction.receiptNumber}) [${payment.paymentMethodId}]`,
+                userId: params.userId,
+                deviceId: transaction.deviceId,
+                timestamp
+              };
+              await db.financeEvents.add(refundPaidFinance);
+              await this.addToQueue('financeEvents', refundPaidFinance.financeEventId, 'CREATE', refundPaidFinance);
+            }
+          } else {
+            const refundPaidFinance: FinanceEvent = {
+              financeEventId: uuidv4(),
+              amount: receivable.paidAmount,
+              storageId: transaction.moneyStorageId || 'WARUNG',
+              direction: 'OUT',
+              referenceId: receivable.receivableId,
+              referenceType: params.actionType === 'VOID' ? 'VOID' : 'RETURN',
+              description: `Pengembalian Cicilan Piutang (${params.actionType} #${transaction.receiptNumber})`,
+              userId: params.userId,
+              deviceId: transaction.deviceId,
+              timestamp
+            };
+            await db.financeEvents.add(refundPaidFinance);
+            await this.addToQueue('financeEvents', refundPaidFinance.financeEventId, 'CREATE', refundPaidFinance);
+          }
         }
 
         const updatedReceivable: Receivable = {

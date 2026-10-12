@@ -80,23 +80,38 @@ export default function Receivables() {
   const customers = useLiveQuery(() => db.customers.toArray(), [refreshKey]);
   const transactions = useLiveQuery(() => db.transactions.toArray(), [refreshKey]);
   const payments = useLiveQuery(() => db.receivablePayments.orderBy('timestamp').reverse().toArray(), [refreshKey]);
+  const users = useLiveQuery(() => db.users.toArray(), []);
   const currentShift = useLiveQuery(
     () => ShiftService.getCurrentShift(deviceId, currentUser?.userId),
     [deviceId, currentUser?.userId]
   );
 
+  const userMap = useMemo(() => {
+    const map = new Map<string, string>();
+    users?.forEach(u => map.set(u.userId, u.name));
+    return map;
+  }, [users]);
+
   // Auto-detect and sync overdue receivables in background
   useEffect(() => {
     if (!receivables) return;
-    const now = new Date();
-    receivables.forEach(async (r) => {
-      if ((r.status === 'OPEN' || r.status === 'PARTIAL') && r.remainingAmount > 0) {
-        const due = new Date(r.dueDate);
-        if (due < now && differenceInDays(now, due) >= 1) {
-          await db.receivables.update(r.receivableId, { status: 'OVERDUE' });
+    let isMounted = true;
+    const syncOverdue = async () => {
+      const now = new Date();
+      for (const r of receivables) {
+        if (!isMounted) break;
+        if ((r.status === 'OPEN' || r.status === 'PARTIAL') && r.remainingAmount > 0) {
+          const due = new Date(r.dueDate);
+          if (due < now && differenceInDays(now, due) >= 1) {
+            await db.receivables.update(r.receivableId, { status: 'OVERDUE' });
+          }
         }
       }
-    });
+    };
+    syncOverdue();
+    return () => {
+      isMounted = false;
+    };
   }, [receivables]);
 
   // Maps for fast lookup
@@ -286,6 +301,19 @@ export default function Receivables() {
 
     setIsSubmitting(true);
     try {
+      // Pre-validate paymentDate against all invoices that will receive an allocation
+      let previewRemain = paymentAmount;
+      for (const inv of activeInvoices) {
+        if (previewRemain <= 0) break;
+        const invCreatedStr = format(new Date(inv.createdAt), 'yyyy-MM-dd');
+        if (paymentDate < invCreatedStr) {
+          throw new Error(
+            `Tanggal pembayaran (${paymentDate}) tidak boleh sebelum tanggal nota #${inv.receiptNumber} (${invCreatedStr})`
+          );
+        }
+        previewRemain -= Math.min(previewRemain, inv.remainingAmount);
+      }
+
       let remainingToAllocate = paymentAmount;
       let settledCount = 0;
 
@@ -336,9 +364,10 @@ export default function Receivables() {
 
     setIsSubmitting(true);
     try {
-      const updatedDueDateIso = new Date(newDueDate).toISOString();
+      const localDueDate = new Date(`${newDueDate}T23:59:59`);
+      const updatedDueDateIso = localDueDate.toISOString();
       const now = new Date();
-      const newStatus = new Date(newDueDate) < now && differenceInDays(now, new Date(newDueDate)) >= 1
+      const newStatus = localDueDate < now && differenceInDays(now, localDueDate) >= 1
         ? 'OVERDUE'
         : selectedReceivable.paidAmount > 0 ? 'PARTIAL' : 'OPEN';
 
@@ -978,7 +1007,7 @@ export default function Receivables() {
                         </td>
                         <td className="px-6 py-4">
                           <span className="text-xs font-bold text-slate-500 uppercase">
-                            {p.userId}
+                            {userMap.get(p.userId) || p.userId}
                           </span>
                         </td>
                       </tr>

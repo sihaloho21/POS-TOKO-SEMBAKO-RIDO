@@ -17,14 +17,17 @@ export function InventoryHeatmap() {
   const heatmapData = useMemo(() => {
     if (!products || !transactions) return [];
 
-    const stats = products.map(product => {
+    const activeProducts = products.filter(p => p.status === 'ACTIVE');
+    const stats = activeProducts.map(product => {
       let totalSold = 0;
       let transactionCount = 0;
       
       transactions.forEach(tx => {
-        const item = tx.items.find(i => i.productId === product.productId);
-        if (item) {
-          totalSold += item.quantity;
+        const matchingItems = tx.items.filter(i => i.productId === product.productId);
+        if (matchingItems.length > 0) {
+          matchingItems.forEach(item => {
+            totalSold += (item.baseQty ?? item.quantity ?? 0);
+          });
           transactionCount++;
         }
       });

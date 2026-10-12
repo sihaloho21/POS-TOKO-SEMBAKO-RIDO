@@ -938,6 +938,13 @@ export class FishService {
     const timestamp = new Date().toISOString();
     let adjustmentsCount = 0;
 
+    const opnameItemsSnapshot: {
+      productId: string;
+      nameSnapshot: string;
+      expectedQty: number;
+      physicalQty: number;
+    }[] = [];
+
     for (const item of params.items) {
       const product = await db.products.get(item.productId);
       if (!product) continue;
@@ -946,6 +953,13 @@ export class FishService {
       const diffKg = Number((item.physicalKg - currentStockKg).toFixed(2));
       const costDoc = await db.productCosts.get(item.productId);
       const wacKg = costDoc?.hpp ?? product.hpp ?? 0;
+
+      opnameItemsSnapshot.push({
+        productId: item.productId,
+        nameSnapshot: product.name,
+        expectedQty: currentStockKg,
+        physicalQty: item.physicalKg
+      });
 
       if (diffKg !== 0) {
         const movementType = diffKg > 0 ? 'STOCK_OPNAME_IN' : 'STOCK_OPNAME_OUT';
@@ -976,16 +990,7 @@ export class FishService {
       status: 'COMPLETED',
       createdBy: params.userId,
       deviceId: params.deviceId || 'device-1',
-      items: await Promise.all(params.items.map(async it => {
-        const p = await db.products.get(it.productId);
-        const expected = await StockService.getDerivedStock(it.productId);
-        return {
-          productId: it.productId,
-          nameSnapshot: p?.name || it.productId,
-          expectedQty: expected,
-          physicalQty: it.physicalKg
-        };
-      })),
+      items: opnameItemsSnapshot,
       finalizedBy: params.userId,
       finalizedAt: timestamp,
       createdAt: timestamp,

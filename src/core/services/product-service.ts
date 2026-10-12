@@ -17,8 +17,19 @@ export class ProductService {
     const exportData = products.map(p => {
       const cost = costs.find(c => c.productId === p.productId);
       return {
-        ...p,
-        hpp: cost?.hpp || 0
+        name: p.name,
+        barcode: p.barcode,
+        sku: p.sku || '',
+        categoryId: p.categoryId || 'GENERAL',
+        productType: p.productType,
+        baseUnit: p.baseUnit,
+        normalPrice: p.normalPrice,
+        hpp: cost?.hpp ?? p.hpp ?? 0,
+        stock: p.stock,
+        minimumStock: p.minimumStock,
+        targetStock: p.targetStock,
+        status: p.status,
+        tags: (p.tags || []).join(',')
       };
     });
 

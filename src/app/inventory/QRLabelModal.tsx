@@ -15,10 +15,20 @@ export function QRLabelModal({ product, onClose }: QRLabelModalProps) {
     const content = printRef.current;
     if (!content) return;
 
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    document.body.appendChild(iframe);
 
-    printWindow.document.write(`
+    const doc = iframe.contentWindow?.document;
+    if (!doc) return;
+
+    doc.open();
+    doc.write(`
       <html>
         <head>
           <title>Print Label - ${product.name}</title>
@@ -63,16 +73,20 @@ export function QRLabelModal({ product, onClose }: QRLabelModalProps) {
           <div class="label-container">
             ${content.innerHTML}
           </div>
-          <script>
-            window.onload = function() {
-              window.print();
-              window.onafterprint = function() { window.close(); };
-            };
-          </script>
         </body>
       </html>
     `);
-    printWindow.document.close();
+    doc.close();
+
+    setTimeout(() => {
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+      setTimeout(() => {
+        if (document.body.contains(iframe)) {
+          document.body.removeChild(iframe);
+        }
+      }, 1000);
+    }, 250);
   };
 
   return (

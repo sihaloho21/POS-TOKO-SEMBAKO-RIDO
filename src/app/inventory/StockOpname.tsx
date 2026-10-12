@@ -16,9 +16,11 @@ import {
   ArrowRight,
   Search,
   ShieldCheck,
-  X
+  X,
+  Camera
 } from 'lucide-react';
 import { format } from 'date-fns';
+import { BarcodeScannerModal } from './BarcodeScannerModal';
 
 export default function StockOpname() {
   const { currentUser } = useAuthStore();
@@ -32,6 +34,7 @@ export default function StockOpname() {
   const [ownerPin, setOwnerPin] = useState('');
   const [pinError, setPinError] = useState('');
   const [isFinalizing, setIsFinalizing] = useState(false);
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
   
   const opnames = useLiveQuery(() => db.stockOpnames.orderBy('createdAt').reverse().toArray());
   const products = useLiveQuery(() => db.products.toArray());
@@ -131,10 +134,18 @@ export default function StockOpname() {
                 <input 
                   type="text" 
                   placeholder="Cari produk..." 
-                  className="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold focus:ring-2 focus:ring-blue-500 outline-none"
+                  className="w-full pl-10 pr-10 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold focus:ring-2 focus:ring-blue-500 outline-none"
                   value={search ?? ''}
                   onChange={(e) => setSearch(e.target.value)}
                 />
+                <button
+                  type="button"
+                  onClick={() => setIsScannerOpen(true)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-blue-600 hover:bg-blue-50 rounded-lg"
+                  title="Scan Barcode untuk Filter Opname"
+                >
+                  <Camera size={15} />
+                </button>
               </div>
               <button 
                 onClick={handleSaveDraft}
@@ -361,6 +372,21 @@ export default function StockOpname() {
             </div>
           </div>
         </div>
+      )}
+
+      {isScannerOpen && (
+        <BarcodeScannerModal
+          mode="PICK_CODE"
+          title="Scan Produk untuk Stock Opname"
+          onClose={() => setIsScannerOpen(false)}
+          onScanCode={(code, matched) => {
+            if (matched) {
+              setSearch(matched.name);
+            } else {
+              setSearch(code);
+            }
+          }}
+        />
       )}
     </div>
   );

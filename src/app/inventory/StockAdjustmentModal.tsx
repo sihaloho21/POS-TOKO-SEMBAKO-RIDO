@@ -12,8 +12,10 @@ import {
   Package, 
   ShieldAlert, 
   CheckCircle,
-  Scale
+  Scale,
+  Camera
 } from 'lucide-react';
+import { BarcodeScannerModal } from './BarcodeScannerModal';
 
 interface StockAdjustmentModalProps {
   initialProductId?: string;
@@ -44,6 +46,7 @@ export function StockAdjustmentModal({ initialProductId, onClose, onSuccess }: S
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [successMessage, setSuccessMessage] = useState<string>('');
+  const [isScannerOpen, setIsScannerOpen] = useState<boolean>(false);
 
   const products = useLiveQuery(() => db.products.filter(p => p.status === 'ACTIVE').toArray());
   const selectedProduct = useLiveQuery<Product | undefined>(
@@ -167,9 +170,19 @@ export function StockAdjustmentModal({ initialProductId, onClose, onSuccess }: S
           <form onSubmit={handleSubmit} className="space-y-4 pt-4">
             {/* Product Selector */}
             <div>
-              <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
-                Pilih Produk *
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-[10px] font-black uppercase tracking-wider text-slate-500">
+                  Pilih Produk *
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setIsScannerOpen(true)}
+                  className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-indigo-600 hover:text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-lg"
+                >
+                  <Camera size={12} />
+                  Scan Barcode
+                </button>
+              </div>
               <select
                 value={selectedProductId ?? ''}
                 onChange={(e) => setSelectedProductId(e.target.value)}
@@ -353,6 +366,22 @@ export function StockAdjustmentModal({ initialProductId, onClose, onSuccess }: S
           </form>
         )}
       </div>
+
+      {isScannerOpen && (
+        <BarcodeScannerModal
+          mode="PICK_CODE"
+          title="Scan Barcode Produk untuk Penyesuaian Stok"
+          onClose={() => setIsScannerOpen(false)}
+          onScanCode={(code, matched) => {
+            if (matched) {
+              setSelectedProductId(matched.productId);
+              setErrorMessage('');
+            } else {
+              setErrorMessage(`Produk dengan barcode "${code}" tidak ditemukan.`);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -21,13 +21,23 @@ export class SupplierReturnService {
       const refund = item.quantity * item.price;
       totalRefundAmount += refund;
 
-      // 1. Stock Movement OUT via StockService
+      // 1. Stock Movement OUT via StockService with proper multi-unit conversion
       const product = await db.products.get(item.productId);
+      const unitUsed = item.unit || product?.baseUnit || 'PCS';
+      let baseQty = item.quantity;
+      if (product && unitUsed !== product.baseUnit) {
+        const conversion = product.conversionRules?.find(r => r.toUnit === unitUsed);
+        if (conversion && conversion.factor > 0) {
+          baseQty = item.quantity * conversion.factor;
+        }
+      }
+
       await StockService.recordMovement({
         productId: item.productId,
         movementType: 'SUPPLIER_RETURN_OUT',
         qty: item.quantity,
-        unit: item.unit || product?.baseUnit || 'PCS',
+        unit: unitUsed,
+        baseQty,
         referenceId: returnId,
         segmentId: params.moneyStorageId === 'IKAN' ? 'IKAN' : 'WARUNG',
         reason: params.reason || 'Retur Barang ke Supplier (SUPPLIER_RETURN_OUT)',
@@ -45,7 +55,8 @@ export class SupplierReturnService {
       storageId: params.moneyStorageId,
       direction: 'IN',
       referenceId: returnId,
-      referenceType: 'PURCHASE', // Simplified
+      referenceType: 'PURCHASE',
+      description: `Refund Retur Supplier (${params.reason || 'Retur Barang'})`,
       userId: params.userId,
       deviceId: params.deviceId,
       timestamp

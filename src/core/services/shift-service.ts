@@ -173,21 +173,25 @@ export class ShiftService {
 
     let cashSales = 0;
     for (const tx of transactions) {
+      if (tx.type === 'GAJIAN') {
+        paymentBreakdown.HUTANG = (paymentBreakdown.HUTANG || 0) + (tx.total || 0);
+        continue;
+      }
       const method = (tx.paymentMethodId || 'CASH').toUpperCase();
       paymentBreakdown[method] = (paymentBreakdown[method] || 0) + (tx.total || 0);
-      if (method === 'CASH') {
+      if (method === 'CASH' && tx.moneyStorageId === 'WARUNG') {
         cashSales += (tx.total || 0);
       }
     }
 
-    // Cash in from receivable payments during this shift if any
+    // Cash in from receivable payments during this shift into WARUNG drawer
     const shiftPayments = await db.receivablePayments
       .filter(p => Boolean(p.timestamp >= shift.startTime && (!shift.endTime || p.timestamp <= shift.endTime)))
       .toArray();
     
     let cashFromReceivables = 0;
     for (const p of shiftPayments) {
-      if ((p.paymentMethodId || 'CASH').toUpperCase() === 'CASH') {
+      if ((p.paymentMethodId || 'CASH').toUpperCase() === 'CASH' && p.moneyStorageId === 'WARUNG') {
         cashFromReceivables += (p.amount || 0);
       }
     }

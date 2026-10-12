@@ -222,6 +222,30 @@ export default function POS() {
 
   const subtotal = cart.reduce((acc, item) => acc + item.subtotal, 0);
 
+  // Recalculate cart item prices when customer or transactionType (SALE <-> GAJIAN) changes
+  useEffect(() => {
+    if (cart.length === 0 || !products) return;
+    setCart(prevCart =>
+      prevCart.map(item => {
+        const prod = products.find(p => p.productId === item.productId);
+        if (!prod) return item;
+        const pricing = PricingEngine.calculateItemPrice({
+          product: prod,
+          customer: selectedCustomer || undefined,
+          transactionType,
+          unit: item.unit || prod.baseUnit
+        });
+        return {
+          ...item,
+          unitPrice: pricing.price,
+          priceSource: pricing.priceSource,
+          netPrice: pricing.price,
+          subtotal: Math.round(pricing.price * item.quantity)
+        };
+      })
+    );
+  }, [selectedCustomer, transactionType]);
+
   const addToCart = (product: Product, kg?: number) => {
     if (product.productType === 'FISH' && kg === undefined) {
       setWeightProduct(product);

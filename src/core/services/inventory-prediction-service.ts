@@ -13,7 +13,9 @@ export interface InventoryPrediction {
 
 export class InventoryPredictionService {
   static async getPredictions(): Promise<InventoryPrediction[]> {
-    const products = await db.products.filter(p => p.status === 'ACTIVE').toArray();
+    const products = await db.products
+      .filter(p => p.status === 'ACTIVE' && p.productType !== 'BUNDLE')
+      .toArray();
     const transactions = await db.transactions
       .where('clientTimestamp')
       .above(subDays(new Date(), 30).toISOString())
@@ -21,11 +23,14 @@ export class InventoryPredictionService {
       .toArray();
 
     return products.map(product => {
-      // 1. Calculate Daily Burn Rate (last 30 days)
+      // 1. Calculate Daily Burn Rate in baseUnit (last 30 days)
       let totalSold = 0;
       transactions.forEach(tx => {
-        const item = tx.items.find(i => i.productId === product.productId);
-        if (item) totalSold += item.quantity;
+        tx.items.forEach(item => {
+          if (item.productId === product.productId) {
+            totalSold += (item.baseQty ?? item.quantity ?? 0);
+          }
+        });
       });
 
       const dailyBurnRate = totalSold / 30;

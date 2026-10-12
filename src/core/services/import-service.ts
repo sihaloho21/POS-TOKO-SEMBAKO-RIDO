@@ -1,7 +1,6 @@
 import Papa from 'papaparse';
-import { v4 as uuidv4 } from 'uuid';
-import { db } from '../database';
 import type { Product, ProductType } from '../types';
+import { ProductService } from './product-service';
 
 export interface ImportResult {
   success: number;
@@ -22,66 +21,51 @@ export class ImportService {
             errors: []
           };
 
-          const timestamp = new Date().toISOString();
-          const productsToSync: Product[] = [];
-
           for (let i = 0; i < results.data.length; i++) {
             const row: any = results.data[i];
             try {
               // Validation
               if (!row.name || !row.normalPrice) {
-                throw new Error(`Row ${i + 1}: Name and Normal Price are required.`);
+                throw new Error(`Baris ${i + 1}: Nama dan Harga Jual (normalPrice) wajib diisi.`);
               }
 
-              const productId = uuidv4();
-              const product: Product = {
-                productId,
+              const stockVal = parseFloat(row.stock || '0');
+              const normalPriceVal = parseFloat(row.normalPrice);
+              let hppVal = parseFloat(row.hpp || '0');
+              if (stockVal > 0 && hppVal <= 0) {
+                // Default fallback opening cost if user omitted hpp on positive stock
+                hppVal = Math.max(1, Math.round(normalPriceVal * 0.85));
+              }
+
+              const baseUnit = (row.baseUnit || 'PCS').toUpperCase();
+              const rawTags = row.tags
+                ? String(row.tags).split(/[;,]/).map((t: string) => t.trim().toUpperCase()).filter(Boolean)
+                : [];
+
+              const productData: Partial<Product> = {
                 barcode: row.barcode || `INT-${Date.now()}-${i}`,
                 sku: row.sku || '',
-                name: row.name,
+                name: String(row.name).trim(),
                 categoryId: row.categoryId || 'GENERAL',
-                productType: (row.productType as ProductType) || 'SEMBAKO',
-                baseUnit: row.baseUnit || 'PCS',
-                saleUnits: [row.baseUnit || 'PCS'],
+                productType: ((row.productType as ProductType) || 'SEMBAKO'),
+                baseUnit,
+                saleUnits: [baseUnit],
                 conversionRules: [],
-                normalPrice: parseFloat(row.normalPrice),
-                hpp: parseFloat(row.hpp || '0'),
-                stock: parseFloat(row.stock || '0'),
+                normalPrice: normalPriceVal,
+                hpp: hppVal,
+                stock: stockVal,
                 minimumStock: parseFloat(row.minimumStock || '5'),
                 targetStock: parseFloat(row.targetStock || '20'),
-                tags: row.tags ? row.tags.split(',').map((t: string) => t.trim().toUpperCase()).filter(Boolean) : [],
-                status: 'ACTIVE',
-                createdAt: timestamp,
-                updatedAt: timestamp
+                tags: rawTags,
+                status: row.status === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE',
               };
 
-              await db.products.add(product);
-              
-              const hppValue = parseFloat(row.hpp || '0');
-              await db.productCosts.add({
-                productId,
-                hpp: hppValue,
-                updatedAt: timestamp
-              });
-              productsToSync.push(product);
+              await ProductService.saveProduct(productData, hppVal);
               result.success++;
             } catch (error: any) {
               result.failed++;
-              result.errors.push(error.message);
+              result.errors.push(`Baris ${i + 1}: ${error.message}`);
             }
-          }
-
-          // Batch sync queue
-          for (const product of productsToSync) {
-            await db.syncQueue.add({
-              entityType: 'products',
-              entityId: product.productId,
-              action: 'CREATE',
-              payload: product,
-              status: 'PENDING',
-              retryCount: 0,
-              createdAt: timestamp
-            });
           }
 
           resolve(result);
@@ -98,9 +82,10 @@ export class ImportService {
   }
 
   static downloadTemplate() {
-    const csvContent = "name,barcode,sku,categoryId,productType,baseUnit,normalPrice,hpp,stock,minimumStock,targetStock,tags\n" +
-                       "Beras Pandan 5kg,8991234567890,SKU-001,SEMBAKO,SEMBAKO,KG,75000,65000,100,10,50,LEBARAN,PROMO\n" +
-                       "Telur Ayam,8990987654321,SKU-002,SEMBAKO,SEMBAKO,BUTIR,2000,1500,500,50,200,HARIAN";
+    const csvContent =
+      'name,barcode,sku,categoryId,productType,baseUnit,normalPrice,hpp,stock,minimumStock,targetStock,tags\n' +
+      '"Beras Pandan 5kg",8991234567890,SKU-001,SEMBAKO,SEMBAKO,KG,75000,65000,100,10,50,"LEBARAN,PROMO"\n' +
+      '"Telur Ayam",8990987654321,SKU-002,SEMBAKO,SEMBAKO,BUTIR,2000,1500,500,50,200,"HARIAN"';
     
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);

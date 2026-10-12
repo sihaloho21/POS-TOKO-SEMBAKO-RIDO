@@ -164,10 +164,18 @@ export default function Finance() {
     return await FinanceService.getLedgerBalances();
   });
 
-  // Calculate Net Profit & Stock Loss (including Fish Death Loss)
+  const users = useLiveQuery(() => db.users.toArray(), []);
+  const userMap = useMemo(() => {
+    const map = new Map<string, string>();
+    users?.forEach(u => map.set(u.userId, u.name));
+    return map;
+  }, [users]);
+
+  // Calculate Net Profit & Stock Loss (including Fish Death Loss, Service Revenue & Operational Expense)
   const pnlSummary = useLiveQuery(async () => {
     const txs = await db.transactions.where('status').equals('COMPLETED').toArray();
     const movements = await db.stockMovements.toArray();
+    const allFinanceEvents = await db.financeEvents.toArray();
 
     let totalRevenue = 0;
     let totalHpp = 0;
@@ -182,7 +190,17 @@ export default function Finance() {
       }
     }
 
-    const grossProfit = totalRevenue - totalHpp;
+    let serviceRevenue = 0;
+    let operationalExpense = 0;
+    for (const fe of allFinanceEvents) {
+      if (fe.referenceType === 'SERVICE_REVENUE' && fe.direction === 'IN') {
+        serviceRevenue += Number(fe.amount || 0);
+      } else if (fe.referenceType === 'EXPENSE' && fe.direction === 'OUT') {
+        operationalExpense += Number(fe.amount || 0);
+      }
+    }
+
+    const grossProfit = (totalRevenue - totalHpp) + serviceRevenue;
 
     let fishDeathLossRp = 0;
     let fishDeathLossKg = 0;
@@ -201,10 +219,12 @@ export default function Finance() {
     }
 
     const totalStockLossRp = fishDeathLossRp + otherLossRp;
-    const netProfit = grossProfit - totalStockLossRp;
+    const netProfit = grossProfit - totalStockLossRp - operationalExpense;
 
     return {
       totalRevenue,
+      serviceRevenue,
+      operationalExpense,
       totalHpp,
       grossProfit,
       fishDeathLossKg,
@@ -398,7 +418,9 @@ export default function Finance() {
                     </div>
                   </td>
                   <td className="px-6 py-4">
-                    <span className="text-xs font-bold text-slate-500 uppercase">{e.userId}</span>
+                    <span className="text-xs font-bold text-slate-500 uppercase">
+                      {userMap.get(e.userId) || e.userId}
+                    </span>
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-2 text-[10px] font-mono text-slate-400">
