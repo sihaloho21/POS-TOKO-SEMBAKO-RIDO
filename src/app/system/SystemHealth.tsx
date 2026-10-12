@@ -98,10 +98,8 @@ export default function SystemHealth() {
   };
 
   const handleClearMetrics = () => {
-    if (confirm('Bersihkan riwayat log performa dan latensi?')) {
-      PerformanceTracker.clearMetrics();
-      addToast('Log performa berhasil direset.', 'info');
-    }
+    PerformanceTracker.clearMetrics();
+    addToast('Log performa berhasil direset.', 'info');
   };
 
   const txSpeedBadge =
@@ -583,7 +581,7 @@ export default function SystemHealth() {
             Event-Based Ledger &amp; Low-Latency Local Cache
           </h3>
           <p className="text-slate-400 text-sm max-w-xl leading-relaxed font-medium">
-            Harapan Jaya POS dirancang dengan filosofi <strong>Local-First Offline</strong>: Seluruh transaksi divalidasi dan disimpan secara instan ke IndexedDB lokal (sub-100ms) tanpa menunggu respon jaringan cloud. 
+            Toko Sembako Riama dirancang dengan filosofi <strong>Local-First Offline</strong>: Seluruh transaksi divalidasi dan disimpan secara instan ke IndexedDB lokal (sub-100ms) tanpa menunggu respon jaringan cloud. 
             Sinkronisasi ke Firestore berjalan asinkron di latar belakang (background worker) untuk menjamin kasir dapat melayani pelanggan tanpa jeda antrian.
           </p>
         </div>

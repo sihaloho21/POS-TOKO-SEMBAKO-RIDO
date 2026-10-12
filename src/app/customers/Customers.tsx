@@ -11,26 +11,76 @@ import {
   History,
   Trophy,
   ShoppingBag,
-  Edit
+  Edit,
+  Trash2,
+  AlertTriangle
 } from 'lucide-react';
 import { LoyaltyHistory } from './LoyaltyHistory';
 import { RecentActivity } from './RecentActivity';
 import { CustomerBalance } from './CustomerBalance';
 import { CustomerModal } from './CustomerModal';
 import type { Customer } from '@/core/types';
+import { useToastStore } from '@/core/toast-store';
 
 export default function Customers() {
+  const { addToast } = useToastStore();
   const [search, setSearch] = useState('');
   const [viewingLoyaltyId, setViewingLoyaltyId] = useState<string | null>(null);
   const [viewingActivityId, setViewingActivityId] = useState<string | null>(null);
   const [viewingBalanceId, setViewingBalanceId] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | undefined>(undefined);
+  const [deletingCustomer, setDeletingCustomer] = useState<Customer | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const customers = useLiveQuery(
     () => db.customers.filter(c => c.name.toLowerCase().includes(search.toLowerCase()) || (c.phone || '').includes(search)).toArray(),
     [search]
   );
+
+  const handleDeleteCustomer = async () => {
+    if (!deletingCustomer) return;
+    setIsDeleting(true);
+    try {
+      const customerId = deletingCustomer.customerId;
+      // Check if customer has unpaid receivables
+      const unpaidReceivables = await db.receivables
+        .where('customerId')
+        .equals(customerId)
+        .filter(r => r.status !== 'PAID' && (r.remainingBalance || 0) > 0)
+        .count();
+
+      if (unpaidReceivables > 0) {
+        addToast(`Tidak dapat menghapus ${deletingCustomer.name} karena masih memiliki ${unpaidReceivables} tagihan piutang yang belum lunas.`, 'error');
+        setDeletingCustomer(null);
+        return;
+      }
+
+      const timestamp = new Date().toISOString();
+      await db.customers.delete(customerId);
+      await db.syncQueue.add({
+        entityType: 'customers',
+        entityId: customerId,
+        action: 'DELETE',
+        payload: { customerId },
+        status: 'PENDING',
+        retryCount: 0,
+        createdAt: timestamp
+      });
+
+      if (viewingLoyaltyId === customerId) setViewingLoyaltyId(null);
+      if (viewingActivityId === customerId) setViewingActivityId(null);
+      if (viewingBalanceId === customerId) setViewingBalanceId(null);
+
+      addToast(`Data pelanggan "${deletingCustomer.name}" berhasil dihapus.`, 'success');
+      setDeletingCustomer(null);
+    } catch (error) {
+      console.error('Failed to delete customer:', error);
+      addToast('Gagal menghapus data pelanggan.', 'error');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -119,7 +169,7 @@ export default function Customers() {
                         </span>
                       </td>
                       <td className="px-6 py-4 text-right">
-                        <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                        <div className="flex items-center justify-end gap-1 sm:opacity-70 group-hover:opacity-100 transition-all">
                           <button 
                             onClick={() => {
                               setViewingBalanceId(viewingBalanceId === customer.customerId ? null : customer.customerId);
@@ -162,6 +212,13 @@ export default function Customers() {
                             title="Edit Pelanggan"
                           >
                             <Edit size={18} />
+                          </button>
+                          <button 
+                            onClick={() => setDeletingCustomer(customer)}
+                            className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
+                            title="Hapus Pelanggan"
+                          >
+                            <Trash2 size={18} />
                           </button>
                         </div>
                       </td>
@@ -208,6 +265,44 @@ export default function Customers() {
             setEditingCustomer(undefined);
           }}
         />
+      )}
+
+      {deletingCustomer && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden p-6 space-y-6">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0">
+                <AlertTriangle size={24} />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Hapus Pelanggan?</h3>
+                <p className="text-xs font-medium text-slate-500 leading-relaxed">
+                  Apakah Anda yakin ingin menghapus pelanggan <span className="font-black text-slate-800">{deletingCustomer.name}</span> dari database? Tindakan ini tidak dapat dibatalkan.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => setDeletingCustomer(null)}
+                className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-black text-xs uppercase tracking-widest transition-all"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={handleDeleteCustomer}
+                className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-black text-xs uppercase tracking-widest transition-all shadow-lg shadow-rose-200 flex items-center justify-center gap-2"
+              >
+                <Trash2 size={16} />
+                {isDeleting ? 'Menghapus...' : 'Ya, Hapus'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

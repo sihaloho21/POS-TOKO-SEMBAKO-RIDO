@@ -211,7 +211,7 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
               <RefreshCw className="text-white" size={20} />
             </div>
             <div>
-              <h2 className="font-bold text-slate-900 leading-none tracking-tight">HARAPAN JAYA</h2>
+              <h2 className="font-bold text-slate-900 leading-none tracking-tight">TOKO SEMBAKO RIAMA</h2>
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Business System</span>
             </div>
           </div>
@@ -228,11 +228,6 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
                     }
                   }}
                 />
-                {item.badge ? (
-                  <span className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
-                    {item.badge}
-                  </span>
-                ) : null}
               </div>
             ))}
           </nav>
@@ -404,7 +399,7 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
               <div className="flex justify-between items-center mb-8">
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white"><RefreshCw size={16} /></div>
-                  <h2 className="font-bold text-slate-900">Harapan Jaya</h2>
+                  <h2 className="font-bold text-slate-900">TOKO SEMBAKO RIAMA</h2>
                 </div>
                 <button onClick={() => setIsSidebarOpen(false)} className="p-2 text-slate-400"><X /></button>
               </div>

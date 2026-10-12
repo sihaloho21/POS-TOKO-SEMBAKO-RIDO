@@ -114,7 +114,7 @@ export function SupplierDetailModal({
               {supplier.phone && (
                 <>
                   <a
-                    href={`https://wa.me/${waPhone}?text=Halo%20${encodeURIComponent(supplier.name)},%20kami%20dari%20Toko%20Harapan%20Jaya`}
+                    href={`https://wa.me/${waPhone}?text=Halo%20${encodeURIComponent(supplier.name)},%20kami%20dari%20Toko%20Sembako%20Riama`}
                     target="_blank"
                     rel="noreferrer"
                     className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black uppercase tracking-wider rounded-xl transition-all shadow-md shadow-emerald-900/30"

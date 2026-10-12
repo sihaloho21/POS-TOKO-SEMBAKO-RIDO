@@ -20,7 +20,7 @@ import SupplierReturn from './app/purchases/SupplierReturn';
 import Purchases from './app/purchases/Purchases';
 import Suppliers from './app/suppliers/Suppliers';
 import Receivables from './app/receivables/Receivables';
-import ReceiptSettings from './app/settings/ReceiptSettings';
+import Settings from './app/settings/Settings';
 import TransactionHistory from './app/transactions/TransactionHistory';
 import KasirDashboard from './app/dashboard/KasirDashboard';
 import ToastContainer from './app/components/ToastContainer';
@@ -145,7 +145,7 @@ export default function App() {
       case 'system-health':
         return <SystemHealth />;
       case 'settings':
-        return <ReceiptSettings />;
+        return <Settings />;
       default:
         return (
           <div className="flex flex-col items-center justify-center h-full text-slate-400">

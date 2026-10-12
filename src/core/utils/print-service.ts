@@ -54,12 +54,16 @@ export class PrintService {
   }
 
   static async printReceipt(transaction: Transaction): Promise<void> {
-    const settings: ReceiptSettings = await db.settings.get('current') || {
-      storeName: 'TOKO HARAPAN JAYA',
-      address: 'Jl. Raya Cikande No. 123',
-      phone: '0812-3456-7890',
-      footerMessage: 'Terima kasih telah berbelanja!',
-      paperWidth: '58mm'
+    const rawSettings = await db.settings.get('current');
+    const settings: ReceiptSettings = {
+      id: 'current',
+      storeName: (!rawSettings?.storeName || rawSettings.storeName === 'TOKO HARAPAN JAYA') ? 'TOKO SEMBAKO RIAMA' : rawSettings.storeName,
+      address: rawSettings?.address || 'Jl. Raya Cikande No. 123',
+      phone: rawSettings?.phone || '0812-3456-7890',
+      footerMessage: rawSettings?.footerMessage || 'Terima kasih telah berbelanja!',
+      showPoints: rawSettings?.showPoints ?? true,
+      showSavings: rawSettings?.showSavings ?? true,
+      paperWidth: rawSettings?.paperWidth || '58mm'
     };
 
     const is58mm = settings.paperWidth === '58mm';
@@ -156,7 +160,7 @@ export class PrintService {
 
           <div class="center footer">
             <p style="white-space: pre-line;">${settings.footerMessage}</p>
-            <p style="margin-top: 10px; font-size: 0.7em;">Powered by Harapan Jaya POS</p>
+            <p style="margin-top: 10px; font-size: 0.7em;">Toko Sembako Riama</p>
           </div>
 
           <script>
@@ -175,12 +179,16 @@ export class PrintService {
   }
 
   static async printShiftSummary(data: ShiftSummaryPrintData): Promise<void> {
-    const settings: ReceiptSettings = await db.settings.get('current') || {
-      storeName: 'TOKO HARAPAN JAYA',
-      address: 'Jl. Raya Cikande No. 123',
-      phone: '0812-3456-7890',
-      footerMessage: 'Terima kasih telah berbelanja!',
-      paperWidth: '58mm'
+    const rawSettings = await db.settings.get('current');
+    const settings: ReceiptSettings = {
+      id: 'current',
+      storeName: (!rawSettings?.storeName || rawSettings.storeName === 'TOKO HARAPAN JAYA') ? 'TOKO SEMBAKO RIAMA' : rawSettings.storeName,
+      address: rawSettings?.address || 'Jl. Raya Cikande No. 123',
+      phone: rawSettings?.phone || '0812-3456-7890',
+      footerMessage: rawSettings?.footerMessage || 'Terima kasih telah berbelanja!',
+      showPoints: rawSettings?.showPoints ?? true,
+      showSavings: rawSettings?.showSavings ?? true,
+      paperWidth: rawSettings?.paperWidth || '58mm'
     };
 
     const is58mm = settings.paperWidth === '58mm';
@@ -314,7 +322,7 @@ export class PrintService {
 
           <div class="center footer">
             <div>Dicetak: ${printedAtFormatted}</div>
-            <p style="margin-top: 6px; font-size: 0.75em;">*** LAPORAN RESMI HARAPAN JAYA POS ***</p>
+            <p style="margin-top: 6px; font-size: 0.75em;">*** LAPORAN RESMI TOKO SEMBAKO RIAMA ***</p>
           </div>
 
           <script>

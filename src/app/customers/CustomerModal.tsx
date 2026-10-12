@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/core/database';
 import type { Customer } from '@/core/types';
-import { X, User, Phone, MapPin, CreditCard, Save, Loader2 } from 'lucide-react';
+import { X, User, Phone, MapPin, CreditCard, Save, Loader2, Trash2 } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
+import { useToastStore } from '@/core/toast-store';
 
 interface CustomerModalProps {
   customer?: Customer;
@@ -10,6 +11,7 @@ interface CustomerModalProps {
 }
 
 export function CustomerModal({ customer, onClose }: CustomerModalProps) {
+  const { addToast } = useToastStore();
   const [formData, setFormData] = useState<Partial<Customer>>({
     name: '',
     phone: '',
@@ -20,12 +22,52 @@ export function CustomerModal({ customer, onClose }: CustomerModalProps) {
     status: 'ACTIVE'
   });
   const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => {
     if (customer) {
       setFormData(customer);
     }
   }, [customer]);
+
+  const handleDelete = async () => {
+    if (!customer?.customerId) return;
+    setIsDeleting(true);
+    try {
+      const unpaidReceivables = await db.receivables
+        .where('customerId')
+        .equals(customer.customerId)
+        .filter(r => r.status !== 'PAID' && (r.remainingBalance || 0) > 0)
+        .count();
+
+      if (unpaidReceivables > 0) {
+        addToast(`Tidak dapat menghapus ${customer.name} karena masih memiliki ${unpaidReceivables} tagihan piutang belum lunas.`, 'error');
+        setConfirmDelete(false);
+        return;
+      }
+
+      const timestamp = new Date().toISOString();
+      await db.customers.delete(customer.customerId);
+      await db.syncQueue.add({
+        entityType: 'customers',
+        entityId: customer.customerId,
+        action: 'DELETE',
+        payload: { customerId: customer.customerId },
+        status: 'PENDING',
+        retryCount: 0,
+        createdAt: timestamp
+      });
+
+      addToast(`Pelanggan "${customer.name}" berhasil dihapus.`, 'success');
+      onClose();
+    } catch (error) {
+      console.error('Failed to delete customer:', error);
+      addToast('Gagal menghapus data pelanggan.', 'error');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const handleSave = async () => {
     if (!formData.name) return;
@@ -53,10 +95,11 @@ export function CustomerModal({ customer, onClose }: CustomerModalProps) {
         createdAt: timestamp
       });
 
+      addToast(formData.customerId ? 'Data pelanggan berhasil diperbarui.' : 'Pelanggan baru berhasil ditambahkan.', 'success');
       onClose();
     } catch (error) {
       console.error('Failed to save customer:', error);
-      alert('Gagal menyimpan data pelanggan.');
+      addToast('Gagal menyimpan data pelanggan.', 'error');
     } finally {
       setIsSaving(false);
     }
@@ -170,6 +213,30 @@ export function CustomerModal({ customer, onClose }: CustomerModalProps) {
         </div>
 
         <div className="p-6 bg-slate-50 border-t border-slate-100 flex gap-3">
+          {customer?.customerId && (
+            confirmDelete ? (
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={isDeleting || isSaving}
+                className="px-4 py-4 bg-rose-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-rose-500 transition-all shadow-lg shadow-rose-200 flex items-center justify-center gap-1.5"
+              >
+                <Trash2 size={16} />
+                {isDeleting ? 'Menghapus...' : 'Konfirmasi Hapus'}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(true)}
+                disabled={isDeleting || isSaving}
+                className="px-4 py-4 bg-rose-50 border border-rose-200 text-rose-600 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-rose-100 transition-all flex items-center justify-center gap-1.5"
+                title="Hapus Pelanggan"
+              >
+                <Trash2 size={16} />
+                Hapus
+              </button>
+            )
+          )}
           <button 
             onClick={onClose}
             className="flex-1 py-4 bg-white border border-slate-200 text-slate-600 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-100 transition-all"

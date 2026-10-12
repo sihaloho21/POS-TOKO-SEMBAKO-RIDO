@@ -98,7 +98,7 @@ export default function TransactionHistory() {
   const handleShare = (tx: Transaction) => {
     const custName = getCustomerName(tx.customerId);
     const itemList = tx.items.map(i => `• ${i.nameSnapshot} (${i.quantity} ${i.unit}) = Rp ${i.subtotal.toLocaleString()}`).join('\n');
-    const text = `*TOKO SEMBAKO HARAPAN JAYA*\nStruk: ${tx.receiptNumber}\nTanggal: ${format(new Date(tx.clientTimestamp), 'dd/MM/yyyy HH:mm')}\nPelanggan: ${custName}\n------------------------\n${itemList}\n------------------------\n*TOTAL: Rp ${tx.total.toLocaleString()}*\nMetode: ${tx.paymentMethodId} (${tx.type})\nTerima kasih atas kunjungan Anda!`;
+    const text = `*TOKO SEMBAKO RIAMA*\nStruk: ${tx.receiptNumber}\nTanggal: ${format(new Date(tx.clientTimestamp), 'dd/MM/yyyy HH:mm')}\nPelanggan: ${custName}\n------------------------\n${itemList}\n------------------------\n*TOTAL: Rp ${tx.total.toLocaleString()}*\nMetode: ${tx.paymentMethodId} (${tx.type})\nTerima kasih atas kunjungan Anda!`;
 
     if (navigator.clipboard) {
       navigator.clipboard.writeText(text);

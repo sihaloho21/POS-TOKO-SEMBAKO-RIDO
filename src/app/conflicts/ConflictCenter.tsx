@@ -221,7 +221,7 @@ export default function ConflictCenter() {
             <div>
               <h3 className="font-bold text-amber-900 uppercase tracking-tight">Peringatan Integritas Bisnis</h3>
               <p className="text-sm text-amber-800 leading-relaxed font-medium mt-1">
-                Sistem mendeteksi <strong>{conflicts?.length || 0} konflik pending</strong>. Harapan Jaya POS tidak menggunakan 
+                Sistem mendeteksi <strong>{conflicts?.length || 0} konflik pending</strong>. Toko Sembako Riama tidak menggunakan 
                 <em> "Last Write Wins"</em> — semua event offline yang bertabrakan (termasuk transaksi offline saat toko TUTUP) 
                 dipertahankan agar Owner dapat memilih resolusi yang paling akurat sesuai kondisi faktual.
               </p>

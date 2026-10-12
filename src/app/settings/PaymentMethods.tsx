@@ -14,8 +14,10 @@ import {
 } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import type { PaymentMethod } from '@/core/types';
+import { useToastStore } from '@/core/toast-store';
 
 export default function PaymentMethods() {
+  const { addToast } = useToastStore();
   const [isAdding, setIsAdding] = useState(false);
   const [formData, setFormData] = useState<Partial<PaymentMethod>>({
     name: '',
@@ -48,9 +50,8 @@ export default function PaymentMethods() {
   };
 
   const deleteMethod = async (id: string) => {
-    if (confirm('Hapus metode pembayaran ini?')) {
-      await db.paymentMethods.delete(id);
-    }
+    await db.paymentMethods.delete(id);
+    addToast('Metode pembayaran berhasil dihapus.', 'success');
   };
 
   const getIcon = (type: string) => {

@@ -46,9 +46,7 @@ export function NotificationCenter({ onClose, onNavigate }: { onClose: () => voi
   };
 
   const clearAll = async () => {
-    if (confirm('Hapus semua notifikasi?')) {
-      await db.notifications.clear();
-    }
+    await db.notifications.clear();
   };
 
   const getIcon = (severity: string) => {

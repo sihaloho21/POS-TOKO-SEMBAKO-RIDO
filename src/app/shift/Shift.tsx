@@ -76,7 +76,7 @@ export default function Shift({ onNavigate }: { onNavigate?: (tab: string) => vo
       addToast('Shift berhasil dibuka!', 'success');
       setOpenShiftNotes('');
     } catch (error: any) {
-      alert(error.message);
+      addToast(error.message || 'Gagal membuka shift.', 'error');
     } finally {
       setIsLoading(false);
     }

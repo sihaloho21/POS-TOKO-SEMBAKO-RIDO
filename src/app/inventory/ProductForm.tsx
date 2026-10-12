@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import type { Product, ProductType } from '@/core/types';
+import type { Product, ProductType, ConversionRule } from '@/core/types';
 import { ProductService } from '@/core/services/product-service';
 import { CostingEngine, type WacSourceEvent } from '@/core/costing-engine';
-import { Save, Package, Barcode, Trash2, CheckCircle, XCircle, Lock, History, AlertTriangle, ShieldCheck, X, Camera } from 'lucide-react';
+import { Save, Package, Barcode, Trash2, CheckCircle, XCircle, Lock, History, AlertTriangle, ShieldCheck, X, Camera, Plus, Scale } from 'lucide-react';
 import { CameraBarcodeScanner } from '@/components/CameraBarcodeScanner';
 import { useAuthStore } from '@/core/auth-store';
+import { useToastStore } from '@/core/toast-store';
 import { db } from '@/core/database';
 
 interface ProductFormProps {
@@ -17,7 +18,9 @@ interface ProductFormProps {
 
 export function ProductForm({ product, initialProductType, initialBaseUnit, onSave, onCancel }: ProductFormProps) {
   const { currentUser } = useAuthStore();
+  const { addToast } = useToastStore();
   const isOwner = currentUser?.role === 'OWNER';
+  const isEditing = Boolean(product?.productId);
 
   const [formData, setFormData] = useState<Partial<Product>>({
     name: product?.name || '',
@@ -42,15 +45,20 @@ export function ProductForm({ product, initialProductType, initialBaseUnit, onSa
         name: product.name || '',
         sku: product.sku || '',
         barcode: product.barcode || '',
+        conversionRules: product.conversionRules || [],
         tags: product.tags || []
       });
     }
   }, [product]);
 
-  const [hpp, setHpp] = useState<number>(0);
+  const [hpp, setHpp] = useState<number>(product?.hpp ?? 0);
   const [isSaving, setIsSaving] = useState(false);
   const [tagInput, setTagInput] = useState('');
   const [isCameraScannerOpen, setIsCameraScannerOpen] = useState(false);
+
+  // Multi-Unit Conversion Rule Input State
+  const [newRuleUnit, setNewRuleUnit] = useState('');
+  const [newRuleFactor, setNewRuleFactor] = useState('');
 
   // Cost Adjustment Modal State
   const [isCostModalOpen, setIsCostModalOpen] = useState(false);
@@ -68,7 +76,11 @@ export function ProductForm({ product, initialProductType, initialBaseUnit, onSa
     async function loadHpp() {
       if (product && isOwner) {
         const cost = await db.productCosts.get(product.productId);
-        if (cost) setHpp(cost.hpp);
+        if (cost && cost.hpp !== undefined) {
+          setHpp(cost.hpp);
+        } else if (product.hpp !== undefined) {
+          setHpp(product.hpp);
+        }
       }
     }
     loadHpp();
@@ -80,9 +92,9 @@ export function ProductForm({ product, initialProductType, initialBaseUnit, onSa
     setIsTraceModalOpen(true);
     try {
       const trace = await CostingEngine.getWacTraceability(product.productId);
-      setTraceEvents(trace.events);
+      setTraceEvents(trace.events || []);
     } catch (e: any) {
-      alert('Gagal memuat histori WAC: ' + e.message);
+      addToast('Gagal memuat histori WAC: ' + e.message, 'error');
     } finally {
       setIsLoadingTrace(false);
     }
@@ -108,24 +120,71 @@ export function ProductForm({ product, initialProductType, initialBaseUnit, onSa
       setIsCostModalOpen(false);
       setNewAdjustmentHpp('');
       setAdjustmentNotes('');
-      alert(`HPP berhasil disesuaikan menjadi Rp ${res.newHpp.toLocaleString()} dan dicatat pada audit trail.`);
+      addToast(`HPP berhasil disesuaikan menjadi Rp ${(res.newHpp ?? 0).toLocaleString()} dan dicatat pada audit trail.`, 'success');
     } catch (err: any) {
-      alert('Gagal menyesuaikan HPP: ' + err.message);
+      addToast('Gagal menyesuaikan HPP: ' + err.message, 'error');
     } finally {
       setIsSubmittingAdjustment(false);
     }
+  };
+
+  const handleAddConversionRule = () => {
+    const unit = newRuleUnit.trim().toUpperCase();
+    const factor = Number(newRuleFactor);
+    const baseUnit = (formData.baseUnit || 'PCS').toUpperCase();
+    if (!unit || factor <= 0 || unit === baseUnit) {
+      addToast('Masukkan nama satuan turunan (berbeda dari satuan dasar) dan faktor konversi > 0.', 'warning');
+      return;
+    }
+    const existingRules = formData.conversionRules || [];
+    if (existingRules.some(r => r.toUnit === unit)) {
+      addToast(`Satuan ${unit} sudah terdaftar.`, 'warning');
+      return;
+    }
+    const updatedRules: ConversionRule[] = [...existingRules, { fromUnit: baseUnit, toUnit: unit, factor }];
+    const updatedSaleUnits = Array.from(new Set([baseUnit, ...updatedRules.map(r => r.toUnit)]));
+    setFormData({
+      ...formData,
+      conversionRules: updatedRules,
+      saleUnits: updatedSaleUnits
+    });
+    setNewRuleUnit('');
+    setNewRuleFactor('');
+  };
+
+  const handleRemoveConversionRule = (toUnit: string) => {
+    const baseUnit = (formData.baseUnit || 'PCS').toUpperCase();
+    const updatedRules = (formData.conversionRules || []).filter(r => r.toUnit !== toUnit);
+    const updatedSaleUnits = Array.from(new Set([baseUnit, ...updatedRules.map(r => r.toUnit)]));
+    setFormData({
+      ...formData,
+      conversionRules: updatedRules,
+      saleUnits: updatedSaleUnits
+    });
   };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
     try {
-      // For existing product, keep current hpp so it does not perform free edit
-      const productId = await ProductService.saveProduct(formData, isOwner ? hpp : undefined);
+      const baseUnit = (formData.baseUnit || 'PCS').toUpperCase();
+      const rules = (formData.conversionRules || []).map(r => ({ ...r, fromUnit: baseUnit }));
+      const saleUnits = Array.from(new Set([baseUnit, ...rules.map(r => r.toUnit)]));
+
+      const payload: Partial<Product> = {
+        ...formData,
+        baseUnit,
+        conversionRules: rules,
+        saleUnits
+      };
+
+      // For existing product, pass undefined for hpp so it does not trigger No Direct Free Edit error
+      const productId = await ProductService.saveProduct(payload, !isEditing && isOwner ? hpp : undefined);
+      addToast(isEditing ? 'Data produk berhasil diperbarui!' : 'Produk baru berhasil ditambahkan!', 'success');
       onSave(productId);
     } catch (error: any) {
       console.error('Failed to save product:', error);
-      alert('Gagal menyimpan produk: ' + (error?.message || 'Terjadi kesalahan'));
+      addToast('Gagal menyimpan produk: ' + (error?.message || 'Terjadi kesalahan'), 'error');
     } finally {
       setIsSaving(false);
     }
@@ -137,7 +196,7 @@ export function ProductForm({ product, initialProductType, initialBaseUnit, onSa
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* Name Field */}
           <div className="md:col-span-2 space-y-2">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Nama Produk</label>
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Nama Produk *</label>
             <div className="relative">
               <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">
                 <Package size={18} />
@@ -150,6 +209,39 @@ export function ProductForm({ product, initialProductType, initialBaseUnit, onSa
                 placeholder="Masukkan nama produk..."
               />
             </div>
+          </div>
+
+          {/* Product Type & Base Unit */}
+          <div className="space-y-2">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Kategori Tipe Produk</label>
+            <select
+              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-bold text-slate-900 shadow-sm"
+              value={formData.productType ?? 'SEMBAKO'}
+              onChange={(e) => {
+                const newType = e.target.value as ProductType;
+                const defaultUnit = newType === 'FISH' ? 'KG' : 'PCS';
+                setFormData({
+                  ...formData,
+                  productType: newType,
+                  baseUnit: formData.baseUnit || defaultUnit
+                });
+              }}
+            >
+              <option value="SEMBAKO">SEMBAKO / WARUNG</option>
+              <option value="FISH">IKAN HIDUP / SEGAR (KG)</option>
+              <option value="GENERAL">UMUM / LAINNYA</option>
+            </select>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Satuan Dasar (Base Unit)</label>
+            <input
+              required
+              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-bold text-slate-900 uppercase shadow-sm"
+              value={formData.baseUnit ?? 'PCS'}
+              onChange={(e) => setFormData({ ...formData, baseUnit: e.target.value.toUpperCase() })}
+              placeholder="Contoh: PCS, KG, BUNGKUS, LITER"
+            />
           </div>
 
           {/* SKU Field */}
@@ -188,12 +280,13 @@ export function ProductForm({ product, initialProductType, initialBaseUnit, onSa
 
           {/* Price Field */}
           <div className="space-y-2">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Harga Jual (Base)</label>
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Harga Jual (per {formData.baseUnit || 'Base'}) *</label>
             <div className="relative">
               <div className="absolute left-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-400">Rp</div>
               <input
                 type="number"
                 required
+                min="0"
                 className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-bold text-slate-900 tabular-nums shadow-sm"
                 value={formData.normalPrice ?? 0}
                 onChange={(e) => setFormData({ ...formData, normalPrice: Number(e.target.value) })}
@@ -204,19 +297,181 @@ export function ProductForm({ product, initialProductType, initialBaseUnit, onSa
           {/* HPP Field (Owner Only) */}
           {isOwner && (
             <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">WAC / HPP (Modal)</label>
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                  WAC / HPP Modal ({isEditing ? 'Protected' : 'Opening Cost'})
+                </label>
+                {isEditing && (
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewAdjustmentHpp(String(hpp ?? 0));
+                        setIsCostModalOpen(true);
+                      }}
+                      className="text-[9px] font-black text-blue-600 hover:text-blue-700 bg-blue-50 px-2 py-0.5 rounded uppercase tracking-wider flex items-center gap-1"
+                    >
+                      <ShieldCheck size={11} />
+                      Koreksi HPP Resmi
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleOpenTraceability}
+                      className="text-[9px] font-black text-slate-600 hover:text-slate-900 bg-slate-100 px-2 py-0.5 rounded uppercase tracking-wider flex items-center gap-1"
+                    >
+                      <History size={11} />
+                      Jejak WAC
+                    </button>
+                  </div>
+                )}
+              </div>
               <div className="relative">
                 <div className="absolute left-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-400">Rp</div>
                 <input
                   type="number"
                   required
-                  className="w-full pl-10 pr-4 py-3 bg-blue-50 border border-blue-100 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-bold text-blue-900 tabular-nums shadow-sm"
+                  min="0"
+                  disabled={isEditing}
+                  className={`w-full pl-10 pr-4 py-3 border rounded-xl outline-none font-bold tabular-nums shadow-sm ${
+                    isEditing
+                      ? 'bg-slate-100 border-slate-200 text-slate-500 cursor-not-allowed'
+                      : 'bg-blue-50 border-blue-100 text-blue-900 focus:ring-2 focus:ring-blue-500'
+                  }`}
                   value={hpp ?? 0}
                   onChange={(e) => setHpp(Number(e.target.value))}
                 />
+                {isEditing && (
+                  <Lock size={14} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400" />
+                )}
               </div>
+              {isEditing && (
+                <p className="text-[9px] text-slate-400 font-medium leading-tight">
+                  Sesuai aturan No Direct Free Edit: HPP hanya berubah lewat Pembelian atau tombol <strong>Koreksi HPP Resmi</strong>.
+                </p>
+              )}
             </div>
           )}
+
+          {/* Stock Thresholds & Opening Balance */}
+          <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-4 p-4 bg-slate-50/80 border border-slate-200/80 rounded-2xl">
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">
+                {isEditing ? 'Stok Saat Ini (Derived)' : 'Stok Awal (Opening)'}
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  step="any"
+                  min="0"
+                  disabled={isEditing}
+                  className={`w-full px-3.5 py-2.5 border rounded-xl font-black text-sm tabular-nums outline-none ${
+                    isEditing
+                      ? 'bg-slate-100 border-slate-200 text-slate-500 cursor-not-allowed'
+                      : 'bg-white border-slate-200 text-slate-900 focus:ring-2 focus:ring-blue-500'
+                  }`}
+                  value={formData.stock ?? 0}
+                  onChange={(e) => setFormData({ ...formData, stock: Number(e.target.value) })}
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-400 uppercase">
+                  {formData.baseUnit || 'PCS'}
+                </span>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">
+                Minimum Stok (Alert)
+              </label>
+              <input
+                type="number"
+                step="any"
+                min="0"
+                className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl font-black text-sm text-slate-900 tabular-nums outline-none focus:ring-2 focus:ring-blue-500"
+                value={formData.minimumStock ?? 5}
+                onChange={(e) => setFormData({ ...formData, minimumStock: Number(e.target.value) })}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">
+                Target Stok Ideal
+              </label>
+              <input
+                type="number"
+                step="any"
+                min="0"
+                className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl font-black text-sm text-slate-900 tabular-nums outline-none focus:ring-2 focus:ring-blue-500"
+                value={formData.targetStock ?? 20}
+                onChange={(e) => setFormData({ ...formData, targetStock: Number(e.target.value) })}
+              />
+            </div>
+          </div>
+
+          {/* Multi-Unit Conversion Rules */}
+          <div className="md:col-span-2 p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest flex items-center gap-1.5">
+                  <Scale size={14} className="text-blue-600" />
+                  Konversi Multi-Satuan Jual (Multi-Unit Conversion)
+                </label>
+                <p className="text-[10px] text-slate-400 font-medium">
+                  Contoh: 1 DUS = 40 {formData.baseUnit || 'PCS'}, atau 1 KARUNG = 25 {formData.baseUnit || 'KG'}.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2 items-center">
+              <input
+                type="text"
+                placeholder="Nama Satuan (misal: DUS, PACK, RENCENG)"
+                value={newRuleUnit}
+                onChange={(e) => setNewRuleUnit(e.target.value.toUpperCase())}
+                className="flex-1 min-w-[160px] px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-900 uppercase outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-bold text-slate-500">=</span>
+                <input
+                  type="number"
+                  step="any"
+                  min="0.01"
+                  placeholder="Isi / Faktor"
+                  value={newRuleFactor}
+                  onChange={(e) => setNewRuleFactor(e.target.value)}
+                  className="w-28 px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-black text-slate-900 tabular-nums outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <span className="text-[10px] font-black text-slate-500 uppercase">{formData.baseUnit || 'PCS'}</span>
+              </div>
+              <button
+                type="button"
+                onClick={handleAddConversionRule}
+                className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1 transition-all"
+              >
+                <Plus size={14} />
+                Tambah Satuan
+              </button>
+            </div>
+
+            {formData.conversionRules && formData.conversionRules.length > 0 && (
+              <div className="flex flex-wrap gap-2 pt-1">
+                {formData.conversionRules.map((rule) => (
+                  <div
+                    key={rule.toUnit}
+                    className="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 shadow-xs"
+                  >
+                    <span>1 {rule.toUnit} = <strong>{rule.factor}</strong> {formData.baseUnit || 'PCS'}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveConversionRule(rule.toUnit)}
+                      className="text-slate-400 hover:text-rose-600 transition-colors"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* Price Alert Threshold */}
           <div className="space-y-2">
@@ -331,6 +586,148 @@ export function ProductForm({ product, initialProductType, initialBaseUnit, onSa
         </div>
       </form>
 
+      {/* Official Cost Adjustment Modal (Owner Only) */}
+      {isCostModalOpen && product && (
+        <div className="fixed inset-0 z-[200] bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-in zoom-in-95">
+            <div className="flex justify-between items-center pb-3 border-b border-slate-100 mb-4">
+              <div className="flex items-center gap-2 text-blue-600 font-black text-xs uppercase tracking-wider">
+                <ShieldCheck size={18} />
+                <span>Koreksi HPP / WAC Resmi</span>
+              </div>
+              <button type="button" onClick={() => setIsCostModalOpen(false)} className="text-slate-400 hover:text-slate-600">
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveCostAdjustment} className="space-y-4">
+              <div className="p-3 bg-blue-50/70 border border-blue-100 rounded-xl text-xs text-blue-900">
+                <p className="font-bold">{product.name}</p>
+                <p className="text-[11px] text-blue-700 mt-0.5">
+                  WAC Saat Ini: <strong>Rp {(hpp ?? 0).toLocaleString()}</strong> / {product.baseUnit}
+                </p>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                  Nilai HPP / WAC Baru (Rp) *
+                </label>
+                <input
+                  type="number"
+                  required
+                  min="0"
+                  value={newAdjustmentHpp}
+                  onChange={(e) => setNewAdjustmentHpp(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-black text-sm text-slate-900 tabular-nums outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                  Alasan Koreksi *
+                </label>
+                <select
+                  value={adjustmentReason}
+                  onChange={(e) => setAdjustmentReason(e.target.value)}
+                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="Koreksi Faktur Supplier">Koreksi Faktur Supplier</option>
+                  <option value="Penyesuaian Harga Pasar">Penyesuaian Harga Pasar</option>
+                  <option value="Salah Input Saldo Awal">Salah Input Saldo Awal</option>
+                  <option value="Rekonsiliasi Audit Akuntansi">Rekonsiliasi Audit Akuntansi</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                  Catatan Audit Trail
+                </label>
+                <textarea
+                  rows={2}
+                  value={adjustmentNotes}
+                  onChange={(e) => setAdjustmentNotes(e.target.value)}
+                  placeholder="Detail referensi faktur atau alasan penyesuaian..."
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsCostModalOpen(false)}
+                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-xs uppercase rounded-xl"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingAdjustment}
+                  className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-black text-xs uppercase rounded-xl shadow-md shadow-blue-200 disabled:opacity-50"
+                >
+                  {isSubmittingAdjustment ? 'Menyimpan...' : 'Simpan & Audit'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* WAC Source Traceability Modal */}
+      {isTraceModalOpen && product && (
+        <div className="fixed inset-0 z-[200] bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 animate-in zoom-in-95 max-h-[85vh] flex flex-col">
+            <div className="flex justify-between items-center pb-3 border-b border-slate-100 mb-4">
+              <div>
+                <h4 className="font-black text-slate-900 text-sm uppercase tracking-tight">
+                  Jejak Historis WAC (Cost Traceability)
+                </h4>
+                <p className="text-xs text-slate-500 font-bold">{product.name}</p>
+              </div>
+              <button type="button" onClick={() => setIsTraceModalOpen(false)} className="text-slate-400 hover:text-slate-600">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-2.5 pr-1 custom-scrollbar">
+              {isLoadingTrace ? (
+                <div className="py-12 text-center text-xs font-bold text-slate-400">Memuat riwayat biaya...</div>
+              ) : traceEvents.length === 0 ? (
+                <div className="py-12 text-center text-xs font-bold text-slate-400">Belum ada riwayat perubahan WAC.</div>
+              ) : (
+                traceEvents.map((ev) => (
+                  <div key={ev.eventId} className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs space-y-1">
+                    <div className="flex justify-between items-center">
+                      <span className="font-black text-[10px] px-2 py-0.5 rounded bg-blue-100 text-blue-800 uppercase">
+                        {ev.eventType}
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-mono">
+                        {new Date(ev.timestamp).toLocaleString('id-ID')}
+                      </span>
+                    </div>
+                    <p className="font-bold text-slate-800">{ev.notes}</p>
+                    <div className="flex flex-wrap justify-between items-center pt-1 text-[11px] text-slate-600 border-t border-slate-200/60">
+                      <span>Qty: <strong>{ev.qty ?? 0}</strong></span>
+                      <span>Harga Satuan: <strong>Rp {(ev.unitCost ?? 0).toLocaleString()}</strong></span>
+                      <span className="text-blue-700 font-black">WAC Hasil: Rp {(ev.wacResult ?? 0).toLocaleString()}</span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="pt-4 mt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setIsTraceModalOpen(false)}
+                className="w-full py-2.5 bg-slate-900 text-white font-black text-xs uppercase tracking-wider rounded-xl"
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Camera Barcode Scanner for Product Form */}
       <CameraBarcodeScanner
         isOpen={isCameraScannerOpen}
@@ -344,3 +741,4 @@ export function ProductForm({ product, initialProductType, initialBaseUnit, onSa
     </div>
   );
 }
+

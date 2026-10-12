@@ -34,7 +34,7 @@ export class ErrorBoundary extends Component<Props, State> {
       errorDetails = String(error || 'Unknown error');
     }
 
-    console.error('Harapan Jaya POS ErrorBoundary caught an error:', errorDetails, errorInfo?.componentStack);
+    console.error('Toko Sembako Riama ErrorBoundary caught an error:', errorDetails, errorInfo?.componentStack);
   }
 
   private handleReset = () => {

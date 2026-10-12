@@ -723,10 +723,18 @@ export default function POS() {
                   const availableBundles = isBundle ? (bundleStocks[product.productId] ?? 0) : 0;
 
                   return (
-                    <button
+                    <div
                       key={product.productId}
+                      role="button"
+                      tabIndex={0}
                       onClick={() => addToCart(product)}
-                      className="group flex flex-col p-3 bg-white border border-slate-100 rounded-2xl hover:border-blue-500 hover:shadow-lg transition-all text-left relative overflow-hidden"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          addToCart(product);
+                        }
+                      }}
+                      className="group flex flex-col p-3 bg-white border border-slate-100 rounded-2xl hover:border-blue-500 hover:shadow-lg transition-all text-left relative overflow-hidden cursor-pointer select-none"
                     >
                       {isBundle && (
                         <span className="absolute top-2 right-2 text-[8px] font-black uppercase tracking-wider bg-indigo-600 text-white px-1.5 py-0.5 rounded-md shadow-sm z-10">
@@ -774,7 +782,7 @@ export default function POS() {
                           )}
                         </div>
                       </div>
-                    </button>
+                    </div>
                   );
                 })}
               </div>
@@ -1269,7 +1277,7 @@ export default function POS() {
 
             <div className="space-y-2 mb-5">
               <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block text-center">
-                Masukkan PIN Owner (123456)
+                Masukkan PIN Owner
               </label>
               <input
                 type="password"

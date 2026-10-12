@@ -119,11 +119,6 @@ export default function Login() {
     }
   };
 
-  const handleQuickLogin = (rolePin: string) => {
-    setPin(rolePin);
-    handleLogin(rolePin);
-  };
-
   if (isInitializing) return null;
 
   return (
@@ -137,43 +132,30 @@ export default function Login() {
           <div className="w-14 h-14 bg-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-lg shadow-blue-200">
             <Lock className="text-white w-7 h-7" />
           </div>
-          <h1 className="text-2xl font-black text-slate-900 tracking-tight uppercase">Harapan Jaya POS</h1>
+          <h1 className="text-2xl font-black text-slate-900 tracking-tight uppercase">TOKO SEMBAKO RIAMA</h1>
           <p className="text-xs text-slate-500 font-bold uppercase tracking-wider mt-1">Sistem Keamanan PIN 6-Digit</p>
         </div>
 
-        {/* Strict 2 Roles Selector Banner */}
+        {/* Strict 2 Roles Info Banner (PINs hidden from UI) */}
         <div className="mb-6 bg-slate-50 border border-slate-200/80 rounded-2xl p-3">
           <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 text-center mb-2.5">
-            PILIH PERAN RESMI (ROLE HANYA 2)
+            PERAN AKSES TERDAFTAR
           </p>
           <div className="grid grid-cols-2 gap-2">
-            <button
-              onClick={() => handleQuickLogin('123456')}
-              className="flex flex-col items-center p-2.5 bg-white border border-blue-200 rounded-xl hover:border-blue-500 hover:shadow-md transition-all group text-left"
-            >
+            <div className="flex flex-col items-center p-2.5 bg-white border border-blue-200 rounded-xl text-center">
               <div className="flex items-center gap-1.5 text-blue-600 font-black text-xs uppercase tracking-wider mb-0.5">
                 <ShieldCheck size={14} />
                 1. OWNER
               </div>
               <span className="text-[10px] font-bold text-slate-500">Owner Rido</span>
-              <span className="text-[9px] font-mono text-blue-500 font-bold mt-1 bg-blue-50 px-2 py-0.5 rounded">
-                PIN: 123456
-              </span>
-            </button>
+            </div>
 
-            <button
-              onClick={() => handleQuickLogin('654321')}
-              className="flex flex-col items-center p-2.5 bg-white border border-emerald-200 rounded-xl hover:border-emerald-500 hover:shadow-md transition-all group text-left"
-            >
-              <div className="flex items-center gap-1.5 text-emerald-600 font-black text-xs uppercase tracking-wider mb-0.5">
+            <div className="flex flex-col items-center justify-center p-2.5 bg-white border border-emerald-200 rounded-xl text-center">
+              <div className="flex items-center gap-1.5 text-emerald-600 font-black text-xs uppercase tracking-wider">
                 <UserCheck size={14} />
                 2. KASIR
               </div>
-              <span className="text-[10px] font-bold text-slate-500">Kasir Harapan</span>
-              <span className="text-[9px] font-mono text-emerald-600 font-bold mt-1 bg-emerald-50 px-2 py-0.5 rounded">
-                PIN: 654321
-              </span>
-            </button>
+            </div>
           </div>
         </div>
 
@@ -204,7 +186,7 @@ export default function Login() {
         <Keypad onKeyPress={handleKeyPress} />
 
         <div className="mt-6 text-center text-[10px] text-slate-400 font-bold uppercase tracking-widest">
-          Owner: 123456 • Kasir: 654321
+          Masukkan 6-Digit PIN Anda
         </div>
       </motion.div>
     </div>

@@ -12,14 +12,18 @@ import { LowStockBanner } from './LowStockBanner';
 import { SalesTrendChart } from './SalesTrendChart';
 import { InventoryProjectionsWidget } from './InventoryProjectionsWidget';
 import { VisualAnalyticsSection } from './VisualAnalyticsSection';
+import { useToastStore } from '@/core/toast-store';
+import { IntegrityService } from '@/core/services/integrity-service';
 
 export default function Dashboard({ onTabChange }: { onTabChange: (tab: string) => void }) {
+  const { addToast } = useToastStore();
+  const [isRebuilding, setIsRebuilding] = React.useState(false);
   const transactions = useLiveQuery(() => db.transactions.toArray());
   const products = useLiveQuery(() => db.products.toArray());
   const customers = useLiveQuery(() => db.customers.toArray());
   
   const lowStockProducts = useLiveQuery(() => 
-    db.products.filter(p => p.status === 'ACTIVE' && p.stock <= p.minimumStock).toArray()
+    db.products.filter(p => p.status === 'ACTIVE' && (p.stock ?? 0) <= (p.minimumStock ?? 0)).toArray()
   );
 
   // Real-time Storage Balances
@@ -27,19 +31,33 @@ export default function Dashboard({ onTabChange }: { onTabChange: (tab: string) 
     const all = await db.financeEvents.toArray();
     const store: Record<string, number> = { WARUNG: 0, IKAN: 0, UANG_DIGITAL: 0 };
     all.forEach(e => {
-      const amt = Number(e.amount);
-      if (e.direction === 'IN') store[e.storageId] += amt;
-      else store[e.storageId] -= amt;
+      const amt = Number(e.amount) || 0;
+      const sid = e.storageId || 'WARUNG';
+      if (store[sid] === undefined) store[sid] = 0;
+      if (e.direction === 'IN') store[sid] += amt;
+      else store[sid] -= amt;
     });
     return store;
   });
+
+  const handleRebuildMetrics = async () => {
+    setIsRebuilding(true);
+    try {
+      await IntegrityService.reconcileDerivedBalances();
+      addToast('Metrik & saldo inventaris berhasil direkonsiliasi ulang!', 'success');
+    } catch (e: any) {
+      addToast('Gagal merekonsiliasi metrik: ' + (e?.message || ''), 'error');
+    } finally {
+      setIsRebuilding(false);
+    }
+  };
 
   return (
     <div className="space-y-8 pb-10">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Owner Dashboard</h2>
-          <p className="text-slate-500 text-sm font-medium">Monitoring performa bisnis Harapan Jaya secara real-time.</p>
+          <p className="text-slate-500 text-sm font-medium">Monitoring performa bisnis Toko Sembako Riama secara real-time.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button 
@@ -48,8 +66,13 @@ export default function Dashboard({ onTabChange }: { onTabChange: (tab: string) 
           >
             <CalendarClock size={16} /> Shift History
           </button>
-          <button className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-slate-50 transition-all">
-            <RefreshCw size={16} /> Rebuild Metrics
+          <button 
+            onClick={handleRebuildMetrics}
+            disabled={isRebuilding}
+            className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-slate-50 transition-all disabled:opacity-50"
+          >
+            <RefreshCw size={16} className={isRebuilding ? 'animate-spin' : ''} /> 
+            {isRebuilding ? 'Rebuilding...' : 'Rebuild Metrics'}
           </button>
         </div>
       </div>
@@ -68,7 +91,7 @@ export default function Dashboard({ onTabChange }: { onTabChange: (tab: string) 
           <SalesTrendChart transactions={transactions || []} />
         </div>
 
-        <InventoryProjectionsWidget />
+        <InventoryProjectionsWidget onNavigate={() => onTabChange('inventory')} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -78,7 +101,7 @@ export default function Dashboard({ onTabChange }: { onTabChange: (tab: string) 
             <div className="space-y-2">
               <div className="flex justify-between text-[10px] font-black text-slate-400 uppercase tracking-widest">
                 <span>WARUNG STORAGE</span>
-                <span className="text-blue-400">Rp {balances?.WARUNG.toLocaleString()}</span>
+                <span className="text-blue-400">Rp {(balances?.WARUNG ?? 0).toLocaleString()}</span>
               </div>
               <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
                 <div className="h-full bg-blue-500 w-[65%]" />
@@ -87,7 +110,7 @@ export default function Dashboard({ onTabChange }: { onTabChange: (tab: string) 
             <div className="space-y-2">
               <div className="flex justify-between text-[10px] font-black text-slate-400 uppercase tracking-widest">
                 <span>IKAN STORAGE</span>
-                <span className="text-emerald-400">Rp {balances?.IKAN.toLocaleString()}</span>
+                <span className="text-emerald-400">Rp {(balances?.IKAN ?? 0).toLocaleString()}</span>
               </div>
               <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
                 <div className="h-full bg-emerald-500 w-[40%]" />
@@ -96,7 +119,7 @@ export default function Dashboard({ onTabChange }: { onTabChange: (tab: string) 
             <div className="space-y-2">
               <div className="flex justify-between text-[10px] font-black text-slate-400 uppercase tracking-widest">
                 <span>UANG DIGITAL</span>
-                <span className="text-purple-400">Rp {balances?.UANG_DIGITAL.toLocaleString()}</span>
+                <span className="text-purple-400">Rp {(balances?.UANG_DIGITAL ?? 0).toLocaleString()}</span>
               </div>
               <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
                 <div className="h-full bg-purple-500 w-[20%]" />

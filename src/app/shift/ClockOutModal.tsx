@@ -353,7 +353,7 @@ export default function ClockOutModal({ isOpen, shiftId, onClose, onSuccess }: C
                       <input
                         type="password"
                         maxLength={6}
-                        placeholder="Masukkan 6 Digit PIN Owner (123456)"
+                        placeholder="Masukkan 6 Digit PIN Owner"
                         value={ownerPin ?? ''}
                         onChange={(e) => setOwnerPin(e.target.value)}
                         className="w-full pl-9 pr-3 py-2.5 bg-white border border-rose-300 rounded-xl text-center font-black tracking-widest text-slate-900 outline-none focus:ring-2 focus:ring-rose-500 text-sm shadow-sm"

@@ -5,6 +5,7 @@ import {
   Fish as FishIcon, 
   Search, 
   Plus, 
+  Edit,
   AlertTriangle,
   Weight,
   TrendingUp,
@@ -47,6 +48,7 @@ import { ProductModal } from './ProductModal';
 import { StockHistory } from './StockHistory';
 import type { Product, ProductCost, StockMovement, Supplier } from '@/core/types';
 import { useAuthStore } from '@/core/auth-store';
+import { useToastStore } from '@/core/toast-store';
 import { 
   FishService, 
   MINIMAL_FISH_SPECIES, 
@@ -65,6 +67,7 @@ const SPECIES_CHART_COLORS: Record<string, string> = {
 
 export default function FishManagement() {
   const { currentUser } = useAuthStore();
+  const { addToast } = useToastStore();
   const isOwner = currentUser?.role === 'OWNER';
   
   // Navigation Tabs: STOCK, DEATH_LOG, WAC_HISTORY, SUPPLIERS
@@ -270,9 +273,9 @@ export default function FishManagement() {
       await FishService.ensureMinimalFishProducts(currentUser?.userId || 'SYSTEM');
       await FishService.ensureFishSuppliers(currentUser?.userId || 'SYSTEM');
       await refreshProcurementCycles();
-      alert('5 Produk Ikan Minimal (Nila, Mas, Gurame, Lele, Patin) dan Supplier (Cikande & Rau) berhasil diinisialisasi!');
+      addToast('5 Produk Ikan Minimal (Nila, Mas, Gurame, Lele, Patin) dan Supplier (Cikande & Rau) berhasil diinisialisasi!', 'success');
     } catch (e: any) {
-      alert('Gagal inisialisasi: ' + e.message);
+      addToast('Gagal inisialisasi: ' + e.message, 'error');
     }
   };
 
@@ -280,7 +283,7 @@ export default function FishManagement() {
   const handleSaveDeath = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!deathProductId || !deathKg || Number(deathKg) <= 0) {
-      alert('Pilih jenis ikan dan masukkan bobot mati (> 0 KG).');
+      addToast('Pilih jenis ikan dan masukkan bobot mati (> 0 KG).', 'warning');
       return;
     }
 
@@ -296,6 +299,7 @@ export default function FishManagement() {
       });
 
       setDeathSuccessMsg(`Mortalitas ${res.lossKg} KG (${deathDate}) berhasil dicatat! Stock Loss: Rp ${res.lossAmountRp.toLocaleString()} otomatis memotong Laba Bersih harian.`);
+      addToast(`Mortalitas ${res.lossKg} KG dicatat! Stock Loss: Rp ${res.lossAmountRp.toLocaleString()}`, 'success');
       setTimeout(() => {
         setDeathSuccessMsg('');
         setIsDeathModalOpen(false);
@@ -304,7 +308,7 @@ export default function FishManagement() {
         setDeathNotes('');
       }, 1800);
     } catch (err: any) {
-      alert('Gagal mencatat kematian: ' + err.message);
+      addToast('Gagal mencatat kematian: ' + err.message, 'error');
     } finally {
       setIsSubmittingDeath(false);
     }
@@ -314,7 +318,7 @@ export default function FishManagement() {
   const handleSaveRestock = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!restockProductId || !restockSupplierId || !restockKg || !restockPriceKg) {
-      alert('Lengkapi semua data pembelian (Ikan, Supplier, KG, Harga/KG).');
+      addToast('Lengkapi semua data pembelian (Ikan, Supplier, KG, Harga/KG).', 'warning');
       return;
     }
 
@@ -333,6 +337,7 @@ export default function FishManagement() {
       await refreshProcurementCycles();
 
       setRestockSuccessMsg(`Restock berhasil! WAC baru per KG: Rp ${res.newWacKg.toLocaleString()} (Stok baru: ${res.newStockKg.toFixed(2)} KG).`);
+      addToast(`Restock berhasil! WAC baru: Rp ${res.newWacKg.toLocaleString()}/KG`, 'success');
       setTimeout(() => {
         setRestockSuccessMsg('');
         setIsRestockModalOpen(false);
@@ -341,7 +346,7 @@ export default function FishManagement() {
         setRestockPriceKg('');
       }, 1800);
     } catch (err: any) {
-      alert('Gagal restock: ' + err.message);
+      addToast('Gagal restock: ' + err.message, 'error');
     } finally {
       setIsSubmittingRestock(false);
     }
@@ -378,12 +383,13 @@ export default function FishManagement() {
       });
 
       setOpnameSuccessMsg(`Stock Opname Ikan selesai! ${res.adjustmentsCount} jenis ikan disesuaikan.`);
+      addToast(`Stock Opname Ikan selesai! ${res.adjustmentsCount} disesuaikan.`, 'success');
       setTimeout(() => {
         setOpnameSuccessMsg('');
         setIsOpnameModalOpen(false);
       }, 1500);
     } catch (err: any) {
-      alert('Gagal opname: ' + err.message);
+      addToast('Gagal opname: ' + err.message, 'error');
     } finally {
       setIsSubmittingOpname(false);
     }
@@ -851,6 +857,17 @@ export default function FishManagement() {
                             >
                               <Truck size={14} />
                               <span className="hidden sm:inline">Restock</span>
+                            </button>
+
+                            <button
+                              onClick={() => {
+                                setEditingProductId(p.productId);
+                                setIsProductModalOpen(true);
+                              }}
+                              className="p-2 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-slate-100 transition-colors"
+                              title="Edit Data Ikan & Harga"
+                            >
+                              <Edit size={16} />
                             </button>
 
                             <button 

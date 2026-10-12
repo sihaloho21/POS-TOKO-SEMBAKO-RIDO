@@ -4,7 +4,7 @@ import { InventoryPredictionService, type InventoryPrediction } from '@/core/ser
 import { TrendingUp, AlertCircle, ShoppingCart, Calendar, Zap, Clock } from 'lucide-react';
 import { format } from 'date-fns';
 
-export function InventoryProjectionsWidget() {
+export function InventoryProjectionsWidget({ onNavigate }: { onNavigate?: () => void } = {}) {
   const [priority, setPriority] = useState<'URGENT' | 'VELOCITY'>('URGENT');
   const projections = useLiveQuery(() => InventoryPredictionService.getPredictions(), []);
 
@@ -130,7 +130,7 @@ export function InventoryProjectionsWidget() {
         </div>
         <button 
           className="px-6 py-2.5 bg-slate-900 text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-slate-200 hover:bg-slate-800 transition-all flex items-center gap-2"
-          onClick={() => window.location.hash = '#/inventory'}
+          onClick={() => onNavigate ? onNavigate() : undefined}
         >
           View Full Report
         </button>

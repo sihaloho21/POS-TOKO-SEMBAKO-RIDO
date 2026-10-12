@@ -157,13 +157,13 @@ export function QuickRefundModal({
     }
 
     try {
-      // Check for Owner/Manager in db.users or fallback master PIN 123456
+      // Check for Owner/Manager in db.users or fallback master PIN 240595
       const supervisor = await db.users
         .filter(u => (u.role === 'OWNER' || u.role === 'MANAGER') && u.pinHash === cleanPin)
         .first();
 
-      if (supervisor || cleanPin === '123456') {
-        const authName = supervisor ? `${supervisor.name} (${supervisor.role})` : 'Owner Otorisasi (PIN 123456)';
+      if (supervisor || cleanPin === '240595') {
+        const authName = supervisor ? `${supervisor.name} (${supervisor.role})` : 'Owner Otorisasi';
         setIsPinVerified(true);
         setVerifiedAuthorizerName(authName);
         setPinError('');
@@ -171,9 +171,9 @@ export function QuickRefundModal({
         setPinError('PIN Otorisasi salah! Hanya Owner/Manager yang dapat menyetujui refund.');
       }
     } catch {
-      if (cleanPin === '123456') {
+      if (cleanPin === '240595') {
         setIsPinVerified(true);
-        setVerifiedAuthorizerName('Owner Otorisasi (PIN 123456)');
+        setVerifiedAuthorizerName('Owner Otorisasi');
         setPinError('');
       } else {
         setPinError('Gagal memverifikasi PIN.');
@@ -625,13 +625,13 @@ export function QuickRefundModal({
                 ) : (
                   <div className="space-y-2">
                     <p className="text-[11px] text-amber-800 font-medium">
-                      Sebagai Kasir, proses Quick Refund membutuhkan verifikasi PIN Owner / Manager (atau PIN 123456).
+                      Sebagai Kasir, proses Quick Refund membutuhkan verifikasi PIN Owner / Manager.
                     </p>
                     <div className="flex gap-2">
                       <input
                         type="password"
                         maxLength={6}
-                        placeholder="PIN Owner (123456)"
+                        placeholder="Masukkan PIN Owner"
                         value={supervisorPin}
                         onChange={(e) => setSupervisorPin(e.target.value)}
                         className="p-2 bg-white border border-amber-300 rounded-xl text-xs font-mono font-bold text-slate-900 outline-none focus:ring-2 focus:ring-amber-500 flex-1 max-w-[200px]"

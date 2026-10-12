@@ -19,14 +19,14 @@ export class BackupService {
     const jsonString = JSON.stringify(backupData);
     const data = strToU8(jsonString);
     const zipped = zipSync({
-      "harapan_jaya_backup.json": data
+      "toko_sembako_riama_backup.json": data
     });
 
     const blob = new Blob([zipped], { type: 'application/zip' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `backup_harapan_jaya_${new Date().toISOString().split('T')[0]}.zip`;
+    link.download = `backup_toko_sembako_riama_${new Date().toISOString().split('T')[0]}.zip`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -40,10 +40,10 @@ export class BackupService {
         try {
           const buffer = new Uint8Array(e.target?.result as ArrayBuffer);
           const unzipped = unzipSync(buffer);
-          const jsonFile = unzipped['harapan_jaya_backup.json'];
+          const jsonFile = unzipped['toko_sembako_riama_backup.json'] || unzipped['harapan_jaya_backup.json'];
           
           if (!jsonFile) {
-            throw new Error('Invalid backup file: harapan_jaya_backup.json not found inside ZIP.');
+            throw new Error('File backup tidak valid: data JSON tidak ditemukan di dalam ZIP.');
           }
 
           const jsonString = strFromU8(jsonFile);

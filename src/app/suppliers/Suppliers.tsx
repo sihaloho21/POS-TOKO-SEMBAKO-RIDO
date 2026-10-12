@@ -436,7 +436,7 @@ export default function Suppliers({ onNavigate }: SuppliersProps) {
                               {supplier.phone}
                             </span>
                             <a
-                              href={`https://wa.me/${waNumber}?text=Halo%20${encodeURIComponent(supplier.name)},%20dari%20Toko%20Harapan%20Jaya`}
+                              href={`https://wa.me/${waNumber}?text=Halo%20${encodeURIComponent(supplier.name)},%20dari%20Toko%20Sembako%20Riama`}
                               target="_blank"
                               rel="noreferrer"
                               title="Kirim pesan WhatsApp"

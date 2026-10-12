@@ -3,6 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { useAuthStore } from '@/core/auth-store';
 import { ShiftService } from '@/core/services/shift-service';
 import { useToastStore } from '@/core/toast-store';
+import { useDeviceId } from '@/core/device-store';
 import { 
   Clock, 
   Banknote, 
@@ -31,7 +32,7 @@ export default function ClockInModal({ isOpen, onClose, onSuccess }: ClockInModa
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  const deviceId = 'device-1';
+  const deviceId = useDeviceId();
 
   // Live query active shifts to detect overlap
   const activeShifts = useLiveQuery(() => ShiftService.getActiveShifts(), []);
@@ -56,7 +57,7 @@ export default function ClockInModal({ isOpen, onClose, onSuccess }: ClockInModa
     try {
       const shiftId = await ShiftService.openShift({
         userId: currentUser.userId,
-        deviceId: 'device-1',
+        deviceId,
         startingCash: Number(startingCash) || 0,
         notes: notes.trim()
       });
@@ -180,7 +181,7 @@ export default function ClockInModal({ isOpen, onClose, onSuccess }: ClockInModa
               <ShieldCheck size={14} className="text-slate-400" />
               Perangkat POS
             </span>
-            <span className="font-bold text-slate-700">device-1 (Terminal Utama)</span>
+            <span className="font-bold text-slate-700">{deviceId} (Terminal Utama)</span>
           </div>
         </div>
 

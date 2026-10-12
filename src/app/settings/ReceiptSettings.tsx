@@ -3,6 +3,7 @@ import { db } from '@/core/database';
 import { useLiveQuery } from 'dexie-react-hooks';
 import type { ReceiptSettings as ReceiptSettingsType } from '@/core/types';
 import { BackupService } from '@/core/services/backup-service';
+import { useToastStore } from '@/core/toast-store';
 import { 
   Printer, 
   Store, 
@@ -20,7 +21,7 @@ import {
 
 const DEFAULT_SETTINGS: ReceiptSettingsType = {
   id: 'current',
-  storeName: 'TOKO HARAPAN JAYA',
+  storeName: 'TOKO SEMBAKO RIAMA',
   address: 'Jl. Raya Cikande No. 123',
   phone: '0812-3456-7890',
   footerMessage: 'Terima kasih telah berbelanja!',
@@ -30,6 +31,7 @@ const DEFAULT_SETTINGS: ReceiptSettingsType = {
 };
 
 export default function ReceiptSettings() {
+  const { addToast } = useToastStore();
   const [formData, setFormData] = useState<ReceiptSettingsType>(DEFAULT_SETTINGS);
   const [isSaving, setIsSaving] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
@@ -38,10 +40,14 @@ export default function ReceiptSettings() {
 
   useEffect(() => {
     if (existingSettings) {
+      const normalizedStoreName =
+        !existingSettings.storeName || existingSettings.storeName === 'TOKO HARAPAN JAYA'
+          ? DEFAULT_SETTINGS.storeName
+          : existingSettings.storeName;
       setFormData({
         ...DEFAULT_SETTINGS,
         ...existingSettings,
-        storeName: existingSettings.storeName || DEFAULT_SETTINGS.storeName,
+        storeName: normalizedStoreName,
         address: existingSettings.address || DEFAULT_SETTINGS.address,
         phone: existingSettings.phone || DEFAULT_SETTINGS.phone,
         footerMessage: existingSettings.footerMessage || DEFAULT_SETTINGS.footerMessage,
@@ -55,10 +61,11 @@ export default function ReceiptSettings() {
     try {
       await db.settings.put(formData);
       setShowSuccess(true);
+      addToast('Pengaturan struk berhasil disimpan!', 'success');
       setTimeout(() => setShowSuccess(false), 3000);
     } catch (error) {
       console.error('Failed to save settings:', error);
-      alert('Gagal menyimpan pengaturan.');
+      addToast('Gagal menyimpan pengaturan.', 'error');
     } finally {
       setIsSaving(false);
     }
@@ -183,14 +190,14 @@ export default function ReceiptSettings() {
                     accept=".zip"
                     onChange={async (e) => {
                       const file = e.target.files?.[0];
-                      if (file && confirm('PERINGATAN: Restorasi akan menghapus SEMUA data saat ini dan menggantinya dengan data dari backup. Lanjutkan?')) {
+                      if (file) {
                         try {
                           await BackupService.restoreBackup(file);
-                          alert('Data berhasil direstorasi! Aplikasi akan dimuat ulang.');
-                          window.location.reload();
+                          addToast('Data berhasil direstorasi! Memuat ulang aplikasi...', 'success');
+                          setTimeout(() => window.location.reload(), 1200);
                         } catch (err) {
                           console.error(err);
-                          alert('Gagal merestorasi data: ' + (err as Error).message);
+                          addToast('Gagal merestorasi data: ' + (err as Error).message, 'error');
                         }
                       }
                     }}
@@ -275,7 +282,7 @@ export default function ReceiptSettings() {
               
               <div className="text-center space-y-1 mt-4 italic">
                 <p className="whitespace-pre-line">{formData.footerMessage}</p>
-                <p className="mt-2 text-[8px] opacity-50">Powered by Harapan Jaya POS</p>
+                <p className="mt-2 text-[8px] opacity-50">Toko Sembako Riama</p>
               </div>
             </div>
           </div>

@@ -22,10 +22,14 @@ import {
 } from 'lucide-react';
 import type { Bundle, BundleComponent, Product } from '@/core/types';
 import { useAuthStore } from '@/core/auth-store';
+import { useDeviceId } from '@/core/device-store';
+import { useToastStore } from '@/core/toast-store';
 import { BundleService, type FlattenedBundleComponent } from '@/core/services/bundle-service';
 
 export default function BundleManagement() {
   const { currentUser } = useAuthStore();
+  const deviceId = useDeviceId();
+  const { addToast } = useToastStore();
   const isOwner = currentUser?.role === 'OWNER';
 
   const [search, setSearch] = useState('');
@@ -232,10 +236,11 @@ export default function BundleManagement() {
         status: bundleStatus,
         userId: currentUser?.userId,
         role: currentUser?.role,
-        deviceId: 'device-1'
+        deviceId
       });
 
       setSuccessToast(`Paket '${bundleName}' berhasil disimpan!`);
+      addToast(`Paket '${bundleName}' berhasil disimpan!`, 'success');
       setTimeout(() => setSuccessToast(''), 4000);
       setIsEditorOpen(false);
     } catch (err: any) {
@@ -249,19 +254,19 @@ export default function BundleManagement() {
   // Delete Bundle (Owner only)
   const handleDeleteBundle = async (bundle: Bundle) => {
     if (!isOwner) return;
-    if (!confirm(`Hapus paket '${bundle.name}'? Produk paket akan dinonaktifkan.`)) return;
 
     try {
       await BundleService.deleteBundle({
         bundleId: bundle.bundleId,
         userId: currentUser?.userId,
         role: currentUser?.role,
-        deviceId: 'device-1'
+        deviceId
       });
-      setSuccessToast(`Paket '${bundle.name}' berhasil dihapus.`);
+      setSuccessToast(`Paket '${bundle.name}' berhasil dinonaktifkan/dihapus.`);
+      addToast(`Paket '${bundle.name}' berhasil dinonaktifkan.`, 'success');
       setTimeout(() => setSuccessToast(''), 4000);
     } catch (err: any) {
-      alert(err.message || 'Gagal menghapus paket.');
+      addToast(err.message || 'Gagal menghapus paket.', 'error');
     }
   };
 
@@ -366,7 +371,7 @@ export default function BundleManagement() {
 
                   {/* Actions for Owner */}
                   {isOwner && (
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="flex items-center gap-1 sm:opacity-60 group-hover:opacity-100 transition-opacity">
                       <button 
                         onClick={() => handleOpenEdit(bundle)}
                         title="Edit Paket"

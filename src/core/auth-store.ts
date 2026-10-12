@@ -92,11 +92,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   seedDefaultUsers: async () => {
     const hasOwner = await db.users.where('role').equals('OWNER').first();
     if (!hasOwner) {
-      await get().seedOwner('Owner Rido', '123456');
+      await get().seedOwner('Owner Rido', '240595');
+    } else if (hasOwner.pinHash !== '240595') {
+      await db.users.update(hasOwner.userId, { pinHash: '240595', updatedAt: new Date().toISOString() });
     }
     const hasKasir = await db.users.where('role').equals('KASIR').first();
     if (!hasKasir) {
-      await get().seedKasir('Kasir Harapan', '654321');
+      await get().seedKasir('Kasir Riama', '123456');
+    } else if (hasKasir.pinHash !== '123456' || hasKasir.name === 'Kasir Harapan') {
+      await db.users.update(hasKasir.userId, { name: 'Kasir Riama', pinHash: '123456', updatedAt: new Date().toISOString() });
     }
   }
 }));

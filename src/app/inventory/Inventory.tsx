@@ -120,19 +120,20 @@ export default function Inventory() {
       await ProductService.bulkAdjustPrice(selectedIds, bulkAdjustment.percentage, bulkAdjustment.type);
       setIsBulkPriceOpen(false);
       setSelectedIds([]);
-      alert(`Berhasil menyesuaikan harga untuk ${selectedIds.length} produk.`);
+      addToast(`Berhasil menyesuaikan harga untuk ${selectedIds.length} produk.`, 'success');
     } catch (error) {
       console.error('Bulk adjustment failed:', error);
-      alert('Gagal melakukan penyesuaian harga massal.');
+      addToast('Gagal melakukan penyesuaian harga massal.', 'error');
     }
   };
 
   const handleExport = async () => {
     try {
       await ProductService.exportToCSV();
+      addToast('Berhasil mengekspor data produk ke CSV.', 'success');
     } catch (error) {
       console.error('Export failed:', error);
-      alert('Gagal mengekspor data.');
+      addToast('Gagal mengekspor data.', 'error');
     }
   };
 
@@ -146,9 +147,21 @@ export default function Inventory() {
     setIsModalOpen(true);
   };
 
+  const [deletingProductId, setDeletingProductId] = useState<string | null>(null);
+
   const handleDelete = async (productId: string) => {
-    if (confirm('Apakah Anda yakin ingin menghapus produk ini? History transaksi mungkin akan terpengaruh.')) {
-      await ProductService.deleteProduct(productId);
+    setDeletingProductId(productId);
+  };
+
+  const confirmDelete = async () => {
+    if (!deletingProductId) return;
+    try {
+      await ProductService.deleteProduct(deletingProductId);
+      addToast('Produk berhasil dihapus.', 'success');
+    } catch (err: any) {
+      addToast('Gagal menghapus produk: ' + err.message, 'error');
+    } finally {
+      setDeletingProductId(null);
     }
   };
 
@@ -369,12 +382,12 @@ export default function Inventory() {
                       </td>
                       <td className="px-6 py-4">
                         <p className="text-sm font-black text-slate-900 tabular-nums">
-                          Rp {product.normalPrice.toLocaleString()}
+                          Rp {(product.normalPrice ?? 0).toLocaleString()}
                         </p>
                         <div className="flex items-center gap-2">
                           {isOwner && (
                             <p className="text-[10px] text-emerald-600 font-black uppercase tracking-widest">
-                              WAC: Rp {costs?.find(c => c.productId === product.productId)?.hpp.toLocaleString() || 0}
+                              WAC: Rp {(costs?.find(c => c.productId === product.productId)?.hpp ?? product.hpp ?? 0).toLocaleString()}
                             </p>
                           )}
                           {isOwner && product.priceAlertThreshold && (
@@ -387,11 +400,11 @@ export default function Inventory() {
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-2">
-                          <span className={`text-sm font-black tabular-nums ${product.stock < product.minimumStock ? 'text-red-500' : 'text-slate-900'}`}>
-                            {product.stock.toLocaleString()}
+                          <span className={`text-sm font-black tabular-nums ${(product.stock ?? 0) < (product.minimumStock ?? 0) ? 'text-red-500' : 'text-slate-900'}`}>
+                            {(product.stock ?? 0).toLocaleString()}
                           </span>
                           <span className="text-[10px] text-slate-400 uppercase font-black tracking-widest">{product.baseUnit}</span>
-                          {product.stock < product.minimumStock && <AlertCircle size={14} className="text-red-500 animate-pulse" />}
+                          {(product.stock ?? 0) < (product.minimumStock ?? 0) && <AlertCircle size={14} className="text-red-500 animate-pulse" />}
                         </div>
                       </td>
                       <td className="px-6 py-4">
@@ -407,7 +420,7 @@ export default function Inventory() {
                         </button>
                       </td>
                       <td className="px-6 py-4 text-right">
-                        <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                        <div className="flex items-center justify-end gap-1 sm:opacity-60 group-hover:opacity-100 transition-all">
                           <button 
                             onClick={() => {
                               setAdjustmentProductId(product.productId);
@@ -534,6 +547,33 @@ export default function Inventory() {
           product={editingProduct} 
           onClose={() => setIsModalOpen(false)} 
         />
+      )}
+
+      {deletingProductId && (
+        <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl p-6 space-y-4">
+            <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Hapus Produk?</h3>
+            <p className="text-slate-600 text-xs font-medium">
+              Apakah Anda yakin ingin menghapus produk ini? Riwayat stok dan transaksi tetap tersimpan untuk keperluan audit.
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeletingProductId(null)}
+                className="px-4 py-2.5 text-slate-600 font-bold text-xs uppercase rounded-xl hover:bg-slate-100"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={confirmDelete}
+                className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-black text-xs uppercase rounded-xl shadow-md shadow-rose-200"
+              >
+                Hapus Produk
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {isBulkPriceOpen && (
