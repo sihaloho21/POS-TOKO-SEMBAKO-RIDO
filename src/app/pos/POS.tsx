@@ -32,9 +32,15 @@ import {
   AlertOctagon,
   Store,
   Clock,
-  Camera
+  Camera,
+  Zap,
+  Trophy,
+  Sparkles
 } from 'lucide-react';
 import { CameraBarcodeScanner } from '@/components/CameraBarcodeScanner';
+import { QuickSaleModal } from './QuickSaleModal';
+import { LoyaltyEngine } from '@/core/loyalty-engine';
+import { formatMultiUnitBreakdown, getProductAvailableUnits } from '@/core/utils/unit-helper';
 import { motion, AnimatePresence } from 'motion/react';
 import type { Product, TransactionItem, Customer, Transaction, Bundle } from '@/core/types';
 import { v4 as uuidv4 } from 'uuid';
@@ -116,6 +122,9 @@ export default function POS() {
   const [isCameraScannerOpen, setIsCameraScannerOpen] = useState(false);
   const [lastScannedProduct, setLastScannedProduct] = useState<{ name: string; price?: number; barcode: string } | null>(null);
 
+  // Quick Sale Modal
+  const [isQuickSaleOpen, setIsQuickSaleOpen] = useState(false);
+
   const [isHeldModalOpen, setIsHeldModalOpen] = useState(false);
 
   // Gajian Owner Approval Modal
@@ -157,6 +166,10 @@ export default function POS() {
       }
       if (e.key === 'F6') {
         e.preventDefault();
+        setIsQuickSaleOpen(prev => !prev);
+      }
+      if (e.key === 'F7') {
+        e.preventDefault();
         handleHold();
       }
       if (e.key === 'F8') {
@@ -166,6 +179,7 @@ export default function POS() {
       if (e.key === 'Escape') {
         setWeightProduct(null);
         setIsCameraScannerOpen(false);
+        setIsQuickSaleOpen(false);
         setIsPaymentModalOpen(false);
         setIsQuickAddProductOpen(false);
         setIsHeldModalOpen(false);
@@ -180,7 +194,8 @@ export default function POS() {
     () => db.products.filter(p => 
       p.name.toLowerCase().includes(search.toLowerCase()) || 
       p.barcode.includes(search) ||
-      !!(p.sku && p.sku.includes(search))
+      !!(p.sku && p.sku.includes(search)) ||
+      Boolean(p.conversionRules && p.conversionRules.some(r => r.barcode && r.barcode.includes(search)))
     ).toArray(),
     [search]
   );
@@ -222,6 +237,20 @@ export default function POS() {
 
   const subtotal = cart.reduce((acc, item) => acc + item.subtotal, 0);
 
+  // Loyalty Points Pay-with-Points (1 Pts = Rp 100 diskon)
+  const [loyaltyPointsToRedeem, setLoyaltyPointsToRedeem] = useState<number>(0);
+  const POINT_VALUE = 100;
+  const availableCustomerPoints = (!selectedCustomer?.isReseller && selectedCustomer?.loyaltyPoints) ? selectedCustomer.loyaltyPoints : 0;
+  const maxRedeemablePoints = Math.min(availableCustomerPoints, Math.floor(subtotal / POINT_VALUE));
+  const activeRedeemPoints = Math.min(loyaltyPointsToRedeem, maxRedeemablePoints);
+  const loyaltyDiscount = activeRedeemPoints * POINT_VALUE;
+  const payableTotal = Math.max(0, subtotal - loyaltyDiscount);
+
+  // Reset redeemed points when customer changes
+  useEffect(() => {
+    setLoyaltyPointsToRedeem(0);
+  }, [selectedCustomer?.customerId]);
+
   // Recalculate cart item prices when customer or transactionType (SALE <-> GAJIAN) changes
   useEffect(() => {
     if (cart.length === 0 || !products) return;
@@ -246,28 +275,31 @@ export default function POS() {
     );
   }, [selectedCustomer, transactionType]);
 
-  const addToCart = (product: Product, kg?: number) => {
-    if (product.productType === 'FISH' && kg === undefined) {
+  const addToCart = (product: Product, qtyOrKg?: number, preferredUnit?: string) => {
+    if (product.productType === 'FISH' && qtyOrKg === undefined) {
       setWeightProduct(product);
       return;
     }
+
+    const targetUnit = preferredUnit || product.baseUnit;
 
     const pricing = PricingEngine.calculateItemPrice({
       product,
       customer: selectedCustomer || undefined,
       transactionType,
-      unit: product.baseUnit
+      unit: targetUnit
     });
 
-    const quantity = kg || 1;
-    const existing = cart.find(item => item.productId === product.productId);
+    const quantity = qtyOrKg || 1;
+    // Distinguish cart items by productId AND unit (e.g. 1 BUNGKUS + 2 BATANG in the same cart)
+    const existing = cart.find(item => item.productId === product.productId && item.unit === targetUnit);
     
     if (existing) {
       const newTotalQty = product.productType === 'FISH'
         ? Number((existing.quantity + quantity).toFixed(2))
         : existing.quantity + quantity;
       setCart(cart.map(item => 
-        item.productId === product.productId 
+        (item.productId === product.productId && item.unit === targetUnit)
           ? { ...item, quantity: newTotalQty, subtotal: Math.round(newTotalQty * item.unitPrice) } 
           : item
       ));
@@ -277,7 +309,7 @@ export default function POS() {
         nameSnapshot: product.name,
         barcodeSnapshot: product.barcode,
         quantity: quantity,
-        unit: product.baseUnit,
+        unit: targetUnit,
         unitPrice: pricing.price,
         priceSource: pricing.priceSource,
         discount: 0,
@@ -295,9 +327,9 @@ export default function POS() {
     setWeightProduct(null);
   };
 
-  const updateQuantity = (productId: string, delta: number) => {
+  const updateQuantity = (productId: string, delta: number, unit?: string) => {
     setCart(cart.map(item => {
-      if (item.productId === productId) {
+      if (item.productId === productId && (!unit || item.unit === unit)) {
         const step = item.unit === 'KG' ? (delta > 0 ? 0.5 : -0.5) : delta;
         const newQty = Math.max(0, Number((item.quantity + step).toFixed(2)));
         if (newQty <= 0) return null;
@@ -305,6 +337,60 @@ export default function POS() {
       }
       return item;
     }).filter(Boolean) as TransactionItem[]);
+  };
+
+  const handleUnitChange = (productId: string, currentUnit: string, newUnit: string) => {
+    if (currentUnit === newUnit || !products) return;
+    const prod = products.find(p => p.productId === productId);
+    if (!prod) return;
+
+    const pricing = PricingEngine.calculateItemPrice({
+      product: prod,
+      customer: selectedCustomer || undefined,
+      transactionType,
+      unit: newUnit
+    });
+
+    setCart(prevCart => {
+      const currentItem = prevCart.find(i => i.productId === productId && i.unit === currentUnit);
+      if (!currentItem) return prevCart;
+
+      const existingNewUnitItem = prevCart.find(i => i.productId === productId && i.unit === newUnit);
+
+      if (existingNewUnitItem) {
+        // Merge quantities if item with target unit already in cart
+        return prevCart
+          .filter(i => !(i.productId === productId && i.unit === currentUnit))
+          .map(i => {
+            if (i.productId === productId && i.unit === newUnit) {
+              const combinedQty = i.quantity + currentItem.quantity;
+              return {
+                ...i,
+                quantity: combinedQty,
+                unitPrice: pricing.price,
+                netPrice: pricing.price,
+                subtotal: Math.round(combinedQty * pricing.price)
+              };
+            }
+            return i;
+          });
+      } else {
+        // Switch unit in-place
+        return prevCart.map(i => {
+          if (i.productId === productId && i.unit === currentUnit) {
+            return {
+              ...i,
+              unit: newUnit,
+              unitPrice: pricing.price,
+              netPrice: pricing.price,
+              priceSource: pricing.priceSource,
+              subtotal: Math.round(currentItem.quantity * pricing.price)
+            };
+          }
+          return i;
+        });
+      }
+    });
   };
 
   const handleHold = async () => {
@@ -348,7 +434,7 @@ export default function POS() {
   };
 
   // Open Checkout or Gajian Approval
-  const triggerCheckout = async () => {
+  const triggerCheckout = async (presetCash?: number) => {
     if (cart.length === 0 || !currentUser || isProcessing) return;
 
     // Store Status Check (Requirement 8)
@@ -381,7 +467,7 @@ export default function POS() {
       const activeDebt = activeReceivables.reduce((sum, r) => sum + (r.remainingAmount || 0), 0);
       const remainingLimit = (selectedCustomer.creditLimit || 0) - activeDebt;
 
-      const hasPermission = remainingLimit >= subtotal && (selectedCustomer.creditLimit || 0) > 0;
+      const hasPermission = remainingLimit >= payableTotal && (selectedCustomer.creditLimit || 0) > 0;
       if (!hasPermission) {
         // Requires Owner Approval
         setApprovalError('');
@@ -396,7 +482,7 @@ export default function POS() {
     }
 
     // Normal Sale Payment Modal
-    setCashTendered(subtotal);
+    setCashTendered(presetCash !== undefined ? presetCash : payableTotal);
     setIsPaymentModalOpen(true);
   };
 
@@ -422,7 +508,7 @@ export default function POS() {
         shiftId: currentShift.shiftId,
         customerId: selectedCustomer?.customerId,
         items: cart,
-        discount: 0,
+        discount: loyaltyDiscount,
         paymentMethodId: finalMethod,
         moneyStorageId: moneyStorageId,
         type: transactionType,
@@ -436,12 +522,32 @@ export default function POS() {
         PrintService.printReceipt(transaction);
       }
 
+      // Deduct redeemed points if used
+      if (activeRedeemPoints > 0 && selectedCustomer?.customerId) {
+        await LoyaltyEngine.recordAdjustmentEvent({
+          customerId: selectedCustomer.customerId,
+          type: 'REDEEM',
+          points: activeRedeemPoints,
+          reason: `Tukar Poin Diskon Belanja Nota #${transaction?.receiptNumber || transactionId}`
+        });
+      }
+
+      const pointsEarned = transaction?.loyaltyPointsEarned || 0;
+      let successMsg = `Transaksi ${transaction?.receiptNumber || ''} Berhasil!`;
+      if (activeRedeemPoints > 0) {
+        successMsg += ` (Tukar ${activeRedeemPoints} Pts = Diskon Rp ${loyaltyDiscount.toLocaleString()})`;
+      }
+      if (pointsEarned > 0) {
+        successMsg += ` (+${pointsEarned} Pts untuk ${selectedCustomer?.name || 'Member'})`;
+      }
+
       setCart([]);
       setSelectedCustomer(null);
+      setLoyaltyPointsToRedeem(0);
       setTransactionType('SALE');
       setIsPaymentModalOpen(false);
       setOverrideStockPrompt(null);
-      addToast(`Transaksi ${transaction?.receiptNumber || ''} Berhasil!`, 'success');
+      addToast(successMsg, 'success');
       setShowSuccess(true);
       setTimeout(() => setShowSuccess(false), 3000);
     } catch (error: any) {
@@ -482,10 +588,23 @@ export default function POS() {
     
     // Auto-add logic for barcode scanners
     if (val && products) {
+      // 1. Exact match on main barcode
       const exactMatch = products.find(p => p.barcode === val);
       if (exactMatch) {
         addToCart(exactMatch);
         setSearch(''); // Clear for next scan
+        return;
+      }
+
+      // 2. Exact match on pack unit barcode in conversionRules (e.g. barcode on cigarette pack)
+      for (const p of products) {
+        const matchedRule = p.conversionRules?.find(r => r.barcode === val);
+        if (matchedRule) {
+          addToCart(p, 1, matchedRule.toUnit);
+          addToast(`"${p.name}" (${matchedRule.toUnit}) otomatis ditambahkan!`, 'success');
+          setSearch('');
+          return;
+        }
       }
     }
   };
@@ -502,11 +621,92 @@ export default function POS() {
         addToast(`"${match.name}" ditambahkan ke keranjang!`, 'success');
       }
       setLastScannedProduct({ name: match.name, price: match.normalPrice, barcode: scannedCode });
-    } else {
-      addToast(`Barcode "${scannedCode}" tidak ditemukan. Silakan daftarkan produk.`, 'warning');
-      setNewProductBarcode(scannedCode);
-      setIsQuickAddProductOpen(true);
+      return;
     }
+
+    // Check if barcode belongs to a pack conversion rule
+    for (const p of products) {
+      const matchedRule = p.conversionRules?.find(r => r.barcode === scannedCode);
+      if (matchedRule) {
+        addToCart(p, 1, matchedRule.toUnit);
+        addToast(`"${p.name}" (${matchedRule.toUnit}) ditambahkan ke keranjang!`, 'success');
+        setLastScannedProduct({ 
+          name: `${p.name} (${matchedRule.toUnit})`, 
+          price: matchedRule.price || (p.normalPrice * matchedRule.factor), 
+          barcode: scannedCode 
+        });
+        return;
+      }
+    }
+
+    addToast(`Barcode "${scannedCode}" tidak ditemukan. Silakan daftarkan produk.`, 'warning');
+    setNewProductBarcode(scannedCode);
+    setIsQuickAddProductOpen(true);
+  };
+
+  // Quick Sale Item Handlers
+  const handleQuickSaleAddItem = (item: {
+    productId?: string;
+    name: string;
+    price: number;
+    quantity: number;
+    unit: string;
+    category?: string;
+  }) => {
+    // If it's a real catalog product, find and add through standard addToCart
+    if (item.productId && products) {
+      const match = products.find(p => p.productId === item.productId);
+      if (match) {
+        if (match.productType === 'FISH') {
+          setWeightProduct(match);
+          return;
+        }
+        addToCart(match, item.quantity);
+        return;
+      }
+    }
+
+    // Otherwise, create or increment custom item in cart
+    const existing = cart.find(c => c.nameSnapshot === item.name && c.unitPrice === item.price);
+    if (existing) {
+      const newTotalQty = existing.quantity + item.quantity;
+      setCart(cart.map(c => 
+        (c.nameSnapshot === item.name && c.unitPrice === item.price)
+          ? { ...c, quantity: newTotalQty, subtotal: Math.round(newTotalQty * c.unitPrice) }
+          : c
+      ));
+    } else {
+      const quickProdId = `quick-${uuidv4()}`;
+      const newItem: TransactionItem = {
+        productId: quickProdId,
+        nameSnapshot: item.name,
+        barcodeSnapshot: '',
+        quantity: item.quantity,
+        unit: item.unit,
+        unitPrice: item.price,
+        priceSource: 'NORMAL',
+        discount: 0,
+        netPrice: item.price,
+        subtotal: Math.round(item.price * item.quantity)
+      };
+      setCart(prev => [...prev, newItem]);
+    }
+
+    addToast(`"${item.name}" (${item.quantity} ${item.unit}) ditambahkan ke keranjang!`, 'success');
+  };
+
+  const handleQuickSaleAddAndCheckout = (item: {
+    productId?: string;
+    name: string;
+    price: number;
+    quantity: number;
+    unit: string;
+    category?: string;
+  }, cashTendered?: number) => {
+    handleQuickSaleAddItem(item);
+    setTimeout(() => {
+      triggerCheckout(cashTendered);
+    }, 150);
   };
 
   // Quick Add Product by Kasir
@@ -586,15 +786,15 @@ export default function POS() {
   };
 
   const quickCashOptions = [
-    subtotal,
-    Math.ceil(subtotal / 10000) * 10000,
-    Math.ceil(subtotal / 50000) * 50000,
+    payableTotal,
+    Math.ceil(payableTotal / 10000) * 10000,
+    Math.ceil(payableTotal / 50000) * 50000,
     100000,
     200000,
     500000
-  ].filter((v, idx, arr) => v >= subtotal && arr.indexOf(v) === idx);
+  ].filter((v, idx, arr) => v >= payableTotal && arr.indexOf(v) === idx);
 
-  const changeDue = Math.max(0, cashTendered - subtotal);
+  const changeDue = Math.max(0, cashTendered - payableTotal);
 
   return (
     <div className="flex flex-col h-full gap-3 overflow-hidden">
@@ -661,6 +861,17 @@ export default function POS() {
               >
                 <Camera size={15} />
                 <span>Scan Kamera (F3)</span>
+              </button>
+
+              {/* Quick Sale Button for High-Volume Checkout */}
+              <button
+                type="button"
+                onClick={() => setIsQuickSaleOpen(true)}
+                className="px-3.5 py-2 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 text-slate-950 font-black text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-sm shadow-amber-200 transition-all shrink-0 cursor-pointer"
+                title="Quick Sale: 1-Klik Item Favorit & Input Harga Bebas (F6)"
+              >
+                <Zap size={15} className="fill-current text-slate-950" />
+                <span>⚡ Quick Sale (F6)</span>
               </button>
 
               {/* Quick Add Product Button for Kasir */}
@@ -756,7 +967,7 @@ export default function POS() {
                       <div className="mt-auto pt-1 border-t border-slate-50 space-y-1">
                         <div className="flex justify-between items-center">
                           <span className="font-black text-blue-600 text-xs tabular-nums">
-                            Rp {product.normalPrice.toLocaleString()}
+                            Rp {product.normalPrice.toLocaleString()} <span className="text-[10px] text-slate-400 font-bold">/{product.baseUnit}</span>
                           </span>
                           {isBundle && (
                             <button
@@ -776,9 +987,16 @@ export default function POS() {
                               Tersedia: {availableBundles} paket
                             </span>
                           ) : (
-                            <span className="text-slate-400">
-                              Stok: {product.stock} {product.baseUnit}
-                            </span>
+                            <div className="space-y-0.5">
+                              <span className="text-slate-500 font-bold block truncate" title={`${product.stock} ${product.baseUnit}`}>
+                                Stok: {formatMultiUnitBreakdown(product.stock, product.baseUnit, product.conversionRules)}
+                              </span>
+                              {product.conversionRules && product.conversionRules.length > 0 && (
+                                <span className="text-[8px] bg-blue-50 text-blue-700 font-black px-1.5 py-0.5 rounded uppercase tracking-wider inline-block">
+                                  Multi-Satuan: {[product.baseUnit, ...product.conversionRules.map(r => r.toUnit)].join('/')}
+                                </span>
+                              )}
+                            </div>
                           )}
                         </div>
                       </div>
@@ -858,59 +1076,86 @@ export default function POS() {
                   <span className="text-[11px] text-slate-400 mt-1">Scan barcode atau pilih barang di kiri</span>
                 </div>
               ) : (
-                cart.map((item) => (
-                  <motion.div 
-                    layout
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.95 }}
-                    key={item.productId} 
-                    className="flex items-center gap-2.5 p-2.5 bg-slate-50 rounded-xl border border-slate-100 hover:border-blue-200 transition-colors"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <h4 className="text-xs font-bold text-slate-900 truncate uppercase">{item.nameSnapshot}</h4>
-                        {item.isBundle && (
-                          <span className="text-[8px] bg-indigo-100 text-indigo-700 font-black px-1 py-0.5 rounded uppercase shrink-0">
-                            PAKET
-                          </span>
+                cart.map((item) => {
+                  const prod = products?.find(p => p.productId === item.productId);
+                  const availableUnits = prod ? getProductAvailableUnits(prod) : [{ unit: item.unit, price: item.unitPrice, factor: 1 }];
+
+                  return (
+                    <motion.div 
+                      layout
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.95 }}
+                      key={`${item.productId}-${item.unit}`} 
+                      className="flex items-center gap-2.5 p-2.5 bg-slate-50 rounded-xl border border-slate-100 hover:border-blue-200 transition-colors"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <h4 className="text-xs font-bold text-slate-900 truncate uppercase">{item.nameSnapshot}</h4>
+                          {item.isBundle && (
+                            <span className="text-[8px] bg-indigo-100 text-indigo-700 font-black px-1 py-0.5 rounded uppercase shrink-0">
+                              PAKET
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <p className="text-[10px] text-slate-500 font-bold">
+                            Rp {item.unitPrice.toLocaleString()} / <span className="text-blue-700 font-black">{item.unit}</span>
+                          </p>
+                          {item.isBundle && (
+                            <button
+                              type="button"
+                              onClick={() => handleInspectBundle(item.productId)}
+                              className="text-[9px] text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-0.5 hover:underline"
+                            >
+                              <Eye size={10} /> Isi
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Multi-Unit Switcher for Retail Items (e.g. BUNGKUS vs BATANG) */}
+                        {availableUnits.length > 1 && (
+                          <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+                            <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider">Satuan:</span>
+                            {availableUnits.map(u => (
+                              <button
+                                key={u.unit}
+                                type="button"
+                                onClick={() => handleUnitChange(item.productId, item.unit, u.unit)}
+                                className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase transition-all cursor-pointer ${
+                                  item.unit === u.unit
+                                    ? 'bg-blue-600 text-white shadow-xs'
+                                    : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 hover:text-blue-600'
+                                }`}
+                                title={`Ganti satuan ke ${u.unit} (Rp ${u.price.toLocaleString()})`}
+                              >
+                                {u.unit}
+                              </button>
+                            ))}
+                          </div>
                         )}
                       </div>
-                      <div className="flex items-center gap-2">
-                        <p className="text-[10px] text-slate-500 font-bold">
-                          Rp {item.unitPrice.toLocaleString()} / {item.unit}
+
+                      <div className="flex items-center gap-1.5 bg-white rounded-lg border border-slate-200 p-1 shadow-sm">
+                        <button onClick={() => updateQuantity(item.productId, -1, item.unit)} className="p-0.5 text-slate-500 hover:text-blue-600 transition-colors cursor-pointer">
+                          <Minus size={13} />
+                        </button>
+                        <span className="text-xs font-black min-w-8 text-center tabular-nums px-0.5">
+                          {item.unit === 'KG' ? item.quantity.toFixed(2) : item.quantity}
+                        </span>
+                        <button onClick={() => updateQuantity(item.productId, 1, item.unit)} className="p-0.5 text-slate-500 hover:text-blue-600 transition-colors cursor-pointer">
+                          <Plus size={13} />
+                        </button>
+                      </div>
+
+                      <div className="text-right min-w-[75px]">
+                        <p className="text-xs font-black text-slate-900 tabular-nums">
+                          Rp {item.subtotal.toLocaleString()}
                         </p>
-                        {item.isBundle && (
-                          <button
-                            type="button"
-                            onClick={() => handleInspectBundle(item.productId)}
-                            className="text-[9px] text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-0.5 hover:underline"
-                          >
-                            <Eye size={10} /> Isi
-                          </button>
-                        )}
                       </div>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 bg-white rounded-lg border border-slate-200 p-1 shadow-sm">
-                      <button onClick={() => updateQuantity(item.productId, -1)} className="p-0.5 text-slate-500 hover:text-blue-600 transition-colors">
-                        <Minus size={13} />
-                      </button>
-                      <span className="text-xs font-black min-w-8 text-center tabular-nums px-0.5">
-                        {item.unit === 'KG' ? item.quantity.toFixed(2) : item.quantity}
-                      </span>
-                      <button onClick={() => updateQuantity(item.productId, 1)} className="p-0.5 text-slate-500 hover:text-blue-600 transition-colors">
-                        <Plus size={13} />
-                      </button>
-                    </div>
-
-                    <div className="text-right min-w-[75px]">
-                      <p className="text-xs font-black text-slate-900 tabular-nums">
-                        Rp {item.subtotal.toLocaleString()}
-                      </p>
-                    </div>
-                  </motion.div>
-                ))
+                    </motion.div>
+                  );
+                })
               )}
             </AnimatePresence>
           </div>
@@ -924,9 +1169,117 @@ export default function POS() {
               </div>
 
               {selectedCustomer && (
-                <div className="flex justify-between text-[11px] text-blue-400 font-bold">
-                  <span>Pelanggan:</span>
-                  <span>{selectedCustomer.name}</span>
+                <div className="p-2.5 rounded-xl bg-amber-500/15 border border-amber-500/30 text-xs my-1 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Trophy size={16} className="text-amber-400 shrink-0" />
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-bold text-white text-xs">{selectedCustomer.name}</span>
+                          {selectedCustomer.isReseller && (
+                            <span className="text-[9px] bg-amber-500/20 text-amber-300 px-1 rounded uppercase font-black">
+                              Reseller
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-slate-300">
+                          Saldo: <strong className="text-amber-400">{(selectedCustomer.loyaltyPoints || 0).toLocaleString()} Pts</strong>
+                          {!selectedCustomer.isReseller && (
+                            <span className="text-emerald-400 font-bold ml-1.5">
+                              • Estimasi Poin: +{LoyaltyEngine.calculatePointsForAmount(payableTotal, selectedCustomer.isReseller)} Pts
+                            </span>
+                          )}
+                        </p>
+                      </div>
+                    </div>
+
+                    {!selectedCustomer.isReseller && LoyaltyEngine.calculatePointsForAmount(payableTotal, selectedCustomer.isReseller) > 0 && (
+                      <span className="px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black uppercase tracking-wider animate-pulse shrink-0">
+                        +{LoyaltyEngine.calculatePointsForAmount(payableTotal, selectedCustomer.isReseller)} PTS
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Pay-with-Points (Redemption) Selector */}
+                  {!selectedCustomer.isReseller && maxRedeemablePoints >= 10 && (
+                    <div className="pt-2 border-t border-amber-500/20">
+                      <div className="flex items-center justify-between text-[11px] mb-1">
+                        <span className="text-amber-200 font-bold">Tukar Poin Diskon (1 Pts = Rp 100):</span>
+                        {activeRedeemPoints > 0 && (
+                          <span className="font-mono font-black text-emerald-400">-Rp {loyaltyDiscount.toLocaleString()}</span>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setLoyaltyPointsToRedeem(0)}
+                          className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                            activeRedeemPoints === 0 ? 'bg-slate-700 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                          }`}
+                        >
+                          Batal (0 Pts)
+                        </button>
+                        {[10, 20, 50].filter(pts => pts <= maxRedeemablePoints).map(pts => (
+                          <button
+                            key={pts}
+                            type="button"
+                            onClick={() => setLoyaltyPointsToRedeem(pts)}
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                              activeRedeemPoints === pts ? 'bg-amber-400 text-slate-950 font-black' : 'bg-slate-800 text-amber-300 hover:bg-slate-700'
+                            }`}
+                          >
+                            {pts} Pts (-Rp {(pts * 100).toLocaleString()})
+                          </button>
+                        ))}
+                        {maxRedeemablePoints >= 10 && (
+                          <button
+                            type="button"
+                            onClick={() => setLoyaltyPointsToRedeem(maxRedeemablePoints)}
+                            className={`px-2 py-0.5 rounded text-[10px] font-black transition-all cursor-pointer ${
+                              activeRedeemPoints === maxRedeemablePoints ? 'bg-emerald-400 text-slate-950 font-black' : 'bg-slate-800 text-emerald-300 hover:bg-slate-700'
+                            }`}
+                          >
+                            Max ({maxRedeemablePoints} Pts)
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Upselling Tier Nudge Banner */}
+                  {!selectedCustomer.isReseller && (
+                    (() => {
+                      const curPts = selectedCustomer.loyaltyPoints || 0;
+                      let targetPts = 50;
+                      let targetTierName = 'SILVER (Diskon 2%)';
+                      if (curPts >= 200) {
+                        targetPts = 500;
+                        targetTierName = 'PLATINUM (VIP Bebas Antre & Hadiah)';
+                      } else if (curPts >= 50) {
+                        targetPts = 200;
+                        targetTierName = 'GOLD (Diskon 5%)';
+                      }
+                      const earnedFromNow = Math.floor(payableTotal / 10000);
+                      const remainingPts = targetPts - (curPts + earnedFromNow);
+                      const remainingSpend = remainingPts * 10000;
+                      if (remainingPts > 0 && remainingSpend <= 100000) {
+                        return (
+                          <div className="p-2 rounded-xl bg-purple-500/20 border border-purple-400/30 text-[10px] text-purple-200 flex items-center gap-1.5">
+                            <Sparkles size={13} className="text-amber-400 shrink-0" />
+                            <span>💡 <strong>Nudge:</strong> Belanja Rp {remainingSpend.toLocaleString()} lagi untuk naik ke <strong>Member {targetTierName}</strong>!</span>
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()
+                  )}
+                </div>
+              )}
+
+              {loyaltyDiscount > 0 && (
+                <div className="flex justify-between text-[11px] font-bold text-emerald-400">
+                  <span>Diskon Poin ({activeRedeemPoints} Pts)</span>
+                  <span className="tabular-nums">-Rp {loyaltyDiscount.toLocaleString()}</span>
                 </div>
               )}
 
@@ -934,12 +1287,12 @@ export default function POS() {
                 <span className="text-slate-400 text-xs flex items-center gap-1.5">
                   TOTAL <span className="text-[9px] bg-slate-800 px-1 py-0.5 rounded">IDR</span>
                 </span>
-                <span className="text-blue-400 tabular-nums">Rp {subtotal.toLocaleString()}</span>
+                <span className="text-blue-400 tabular-nums">Rp {payableTotal.toLocaleString()}</span>
               </div>
             </div>
             
             <button
-              onClick={triggerCheckout}
+              onClick={() => triggerCheckout()}
               disabled={cart.length === 0 || isProcessing || !currentShift || isStoreClosedForCashier}
               className={`w-full py-3.5 rounded-xl font-black text-xs uppercase tracking-[0.15em] flex items-center justify-center gap-2 transition-all shadow-xl ${
                 cart.length === 0 || isProcessing || !currentShift || isStoreClosedForCashier
@@ -990,9 +1343,42 @@ export default function POS() {
             <div className="bg-blue-50 p-4 rounded-2xl mb-4 text-center border border-blue-100">
               <span className="text-[10px] font-black uppercase tracking-wider text-blue-500 block mb-1">Total Tagihan</span>
               <span className="text-3xl font-black text-blue-600 tabular-nums">
-                Rp {subtotal.toLocaleString()}
+                Rp {payableTotal.toLocaleString()}
               </span>
+              {loyaltyDiscount > 0 && (
+                <div className="mt-1 flex items-center justify-center gap-2 text-[11px] font-bold">
+                  <span className="text-slate-500 line-through">Rp {subtotal.toLocaleString()}</span>
+                  <span className="text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full font-black">
+                    Diskon Poin: -Rp {loyaltyDiscount.toLocaleString()}
+                  </span>
+                </div>
+              )}
             </div>
+
+            {/* Customer Loyalty Points in Checkout */}
+            {selectedCustomer && (
+              <div className="bg-gradient-to-r from-amber-50 to-yellow-50 border border-amber-200 p-3.5 rounded-2xl mb-4 text-xs">
+                <div className="flex items-center justify-between text-amber-950 font-bold mb-1.5">
+                  <span className="flex items-center gap-1.5">
+                    <Trophy size={15} className="text-amber-600" />
+                    Member: {selectedCustomer.name}
+                  </span>
+                  <span>Saldo: {(selectedCustomer.loyaltyPoints || 0).toLocaleString()} Pts</span>
+                </div>
+                {!selectedCustomer.isReseller ? (
+                  <div className="flex items-center justify-between pt-1.5 border-t border-amber-200/80 text-[11px]">
+                    <span className="text-slate-600 font-medium">Poin Diperoleh (1 Pts / Rp 10.000):</span>
+                    <span className="font-black text-emerald-600 tabular-nums">
+                      +{LoyaltyEngine.calculatePointsForAmount(payableTotal, selectedCustomer.isReseller)} Pts
+                    </span>
+                  </div>
+                ) : (
+                  <p className="text-[10px] text-amber-700 italic">
+                    * Akun Reseller menikmati harga grosir dan tidak mengumpulkan poin.
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* Payment Method Selector */}
             <div className="grid grid-cols-3 gap-2 mb-4">
@@ -1037,7 +1423,7 @@ export default function POS() {
                           : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                       }`}
                     >
-                      {opt === subtotal ? 'Uang Pas' : `Rp ${opt.toLocaleString()}`}
+                      {opt === payableTotal ? 'Uang Pas' : `Rp ${opt.toLocaleString()}`}
                     </button>
                   ))}
                 </div>
@@ -1061,7 +1447,7 @@ export default function POS() {
               </button>
               <button
                 onClick={() => executeFinalSale(paymentMethod)}
-                disabled={paymentMethod === 'CASH' && cashTendered < subtotal}
+                disabled={paymentMethod === 'CASH' && cashTendered < payableTotal}
                 className="flex-1 py-3 bg-blue-600 hover:bg-blue-500 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-blue-200 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none transition-all flex items-center justify-center gap-1.5"
               >
                 <CheckCircle size={16} />
@@ -1524,6 +1910,15 @@ export default function POS() {
           barcode: p.barcode,
           label: p.name.length > 16 ? p.name.slice(0, 16) + '...' : p.name
         })) || []}
+      />
+
+      {/* Quick Sale Modal (F6) */}
+      <QuickSaleModal
+        isOpen={isQuickSaleOpen}
+        onClose={() => setIsQuickSaleOpen(false)}
+        onAddItem={handleQuickSaleAddItem}
+        onAddAndCheckout={handleQuickSaleAddAndCheckout}
+        catalogProducts={products || []}
       />
     </div>
   );

@@ -77,9 +77,21 @@ export default function ShiftSummaryWidget({ onOpenShiftTab }: { onOpenShiftTab?
     let cash = 0;
     let nonCash = 0;
     let gajian = 0;
+    let cashReturns = 0;
 
     for (const tx of txs) {
       const amt = Number(tx.total || 0);
+      if (tx.type === 'RETURN') {
+        total -= amt;
+        if (tx.paymentMethodId === 'CASH') {
+          cashReturns += amt;
+          cash -= amt;
+        } else {
+          nonCash -= amt;
+        }
+        continue;
+      }
+
       total += amt;
       if (tx.paymentMethodId === 'CASH') {
         cash += amt;
@@ -97,7 +109,8 @@ export default function ShiftSummaryWidget({ onOpenShiftTab }: { onOpenShiftTab?
     return {
       count,
       totalSales: total,
-      cashSales: cash,
+      cashSales: Math.max(0, cash),
+      cashReturns,
       nonCashSales: nonCash,
       gajianSales: gajian,
       heldCount: held,

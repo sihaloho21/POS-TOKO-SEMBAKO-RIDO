@@ -97,4 +97,14 @@ export class IntegrityService {
       checks
     };
   }
+
+  static async reconcileDerivedBalances(): Promise<void> {
+    const products = await db.products.toArray();
+    for (const p of products) {
+      const derived = await StockService.getDerivedStock(p.productId);
+      if (Math.abs(derived - p.stock) > 0.001) {
+        await db.products.update(p.productId, { stock: derived });
+      }
+    }
+  }
 }

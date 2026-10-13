@@ -172,14 +172,22 @@ export class ShiftService {
     };
 
     let cashSales = 0;
+    let cashReturns = 0;
     for (const tx of transactions) {
       if (tx.type === 'GAJIAN') {
         paymentBreakdown.HUTANG = (paymentBreakdown.HUTANG || 0) + (tx.total || 0);
         continue;
       }
+      if (tx.type === 'RETURN') {
+        const method = (tx.paymentMethodId || 'CASH').toUpperCase();
+        if (method === 'CASH' && (tx.moneyStorageId || 'WARUNG') === 'WARUNG') {
+          cashReturns += (tx.total || 0);
+        }
+        continue;
+      }
       const method = (tx.paymentMethodId || 'CASH').toUpperCase();
       paymentBreakdown[method] = (paymentBreakdown[method] || 0) + (tx.total || 0);
-      if (method === 'CASH' && tx.moneyStorageId === 'WARUNG') {
+      if (method === 'CASH' && (tx.moneyStorageId || 'WARUNG') === 'WARUNG') {
         cashSales += (tx.total || 0);
       }
     }
@@ -191,7 +199,7 @@ export class ShiftService {
     
     let cashFromReceivables = 0;
     for (const p of shiftPayments) {
-      if ((p.paymentMethodId || 'CASH').toUpperCase() === 'CASH' && p.moneyStorageId === 'WARUNG') {
+      if ((p.paymentMethodId || 'CASH').toUpperCase() === 'CASH' && (p.moneyStorageId || 'WARUNG') === 'WARUNG') {
         cashFromReceivables += (p.amount || 0);
       }
     }
@@ -203,7 +211,7 @@ export class ShiftService {
     const cashOut = expenses.reduce((acc, e) => acc + (e.amount || 0), 0);
 
     const cashIn = shift.startingCash + cashSales + cashFromReceivables;
-    const expectedCash = shift.startingCash + cashSales + cashFromReceivables - cashOut;
+    const expectedCash = shift.startingCash + cashSales - cashReturns + cashFromReceivables - cashOut;
 
     return {
       shift,

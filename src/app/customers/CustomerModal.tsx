@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/core/database';
 import type { Customer } from '@/core/types';
-import { X, User, Phone, MapPin, CreditCard, Save, Loader2, Trash2 } from 'lucide-react';
+import { X, User, Phone, MapPin, CreditCard, Save, Loader2, Trash2, Trophy, Award } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { useToastStore } from '@/core/toast-store';
 
@@ -38,7 +38,7 @@ export function CustomerModal({ customer, onClose }: CustomerModalProps) {
       const unpaidReceivables = await db.receivables
         .where('customerId')
         .equals(customer.customerId)
-        .filter(r => r.status !== 'PAID' && (r.remainingBalance || 0) > 0)
+        .filter(r => r.status !== 'PAID' && (r.remainingAmount || 0) > 0)
         .count();
 
       if (unpaidReceivables > 0) {
@@ -208,6 +208,35 @@ export function CustomerModal({ customer, onClose }: CustomerModalProps) {
                   onChange={e => setFormData({ ...formData, defaultDueDateDays: Number(e.target.value) })}
                 />
               </div>
+            </div>
+          </div>
+
+          {/* Loyalty Points Section */}
+          <div className="p-6 bg-amber-500/10 border border-amber-500/20 rounded-3xl space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-amber-900">
+                <Trophy size={18} className="text-amber-500" />
+                <h4 className="text-xs font-black uppercase tracking-widest">Poin Loyalty Member</h4>
+              </div>
+              <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-200 text-amber-900">
+                1 Pts / Rp 10.000
+              </span>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest">
+                Saldo Poin Loyalty (Pts)
+              </label>
+              <input 
+                type="number"
+                min={0}
+                className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl font-black text-slate-900 outline-none focus:ring-2 focus:ring-amber-500 tabular-nums"
+                value={formData.loyaltyPoints ?? 0}
+                onChange={e => setFormData({ ...formData, loyaltyPoints: Math.max(0, Number(e.target.value)) })}
+              />
+              <p className="text-[10px] text-slate-500">
+                Poin otomatis terhitung dan ditambahkan dari total belanja kasir POS (1 poin per Rp 10.000).
+              </p>
             </div>
           </div>
         </div>

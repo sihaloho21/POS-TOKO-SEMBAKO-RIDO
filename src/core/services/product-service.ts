@@ -374,4 +374,262 @@ export class ProductService {
       });
     }
   }
+
+  /**
+   * Automatically converts a quantity from any unit (display or base) to the product's base unit.
+   * E.g.:
+   * - 2 BUNGKUS Magnum (baseUnit: BATANG, 1 BUNGKUS = 20 BATANG) -> 40 BATANG (factor: 20)
+   * - 5 BATANG -> 5 BATANG (factor: 1)
+   * Handles case-insensitive unit names and fallback cleanly.
+   */
+  static convertToBaseUnit(
+    product: Product,
+    quantity: number,
+    unit?: string
+  ): {
+    baseQty: number;
+    baseUnit: string;
+    factor: number;
+    unit: string;
+  } {
+    const rawUnit = unit?.trim() || product.baseUnit || 'PCS';
+    const baseUnit = product.baseUnit || 'PCS';
+
+    // 1. Direct match with baseUnit
+    if (rawUnit.toUpperCase() === baseUnit.toUpperCase()) {
+      return {
+        baseQty: quantity,
+        baseUnit,
+        factor: 1,
+        unit: baseUnit
+      };
+    }
+
+    // 2. Look for matching rule in conversionRules
+    const rules = product.conversionRules || [];
+    const directRule = rules.find(
+      r => r.toUnit.toUpperCase() === rawUnit.toUpperCase()
+    );
+
+    if (directRule && directRule.factor > 0) {
+      return {
+        baseQty: Number((quantity * directRule.factor).toFixed(4)),
+        baseUnit,
+        factor: directRule.factor,
+        unit: directRule.toUnit
+      };
+    }
+
+    // 3. Inverse rule fallback (if fromUnit was stored as the display unit)
+    const inverseRule = rules.find(
+      r => r.fromUnit?.toUpperCase() === rawUnit.toUpperCase() && r.toUnit.toUpperCase() === baseUnit.toUpperCase()
+    );
+
+    if (inverseRule && inverseRule.factor > 0) {
+      return {
+        baseQty: Number((quantity * inverseRule.factor).toFixed(4)),
+        baseUnit,
+        factor: inverseRule.factor,
+        unit: inverseRule.fromUnit
+      };
+    }
+
+    // 4. Fallback 1:1 if unit is unknown
+    return {
+      baseQty: quantity,
+      baseUnit,
+      factor: 1,
+      unit: rawUnit
+    };
+  }
+
+  /**
+   * Converts a quantity from base unit to a target display unit (e.g. 'BATANG' to 'BUNGKUS').
+   * E.g.:
+   * - 40 BATANG -> 2 BUNGKUS (factor: 20, remainder: 0 BATANG)
+   * - 45 BATANG -> 2.25 BUNGKUS (2 whole BUNGKUS, 5 remainder BATANG)
+   */
+  static convertFromBaseUnit(
+    product: Product,
+    baseQuantity: number,
+    targetUnit: string
+  ): {
+    displayQty: number;
+    wholeUnits: number;
+    remainderBaseQty: number;
+    targetUnit: string;
+    baseUnit: string;
+    factor: number;
+  } {
+    const baseUnit = product.baseUnit || 'PCS';
+    const cleanTarget = targetUnit.trim();
+
+    if (cleanTarget.toUpperCase() === baseUnit.toUpperCase()) {
+      return {
+        displayQty: baseQuantity,
+        wholeUnits: Math.floor(baseQuantity),
+        remainderBaseQty: 0,
+        targetUnit: baseUnit,
+        baseUnit,
+        factor: 1
+      };
+    }
+
+    const rules = product.conversionRules || [];
+    const rule = rules.find(r => r.toUnit.toUpperCase() === cleanTarget.toUpperCase());
+
+    if (rule && rule.factor > 0) {
+      const displayQty = Number((baseQuantity / rule.factor).toFixed(4));
+      const wholeUnits = Math.floor(baseQuantity / rule.factor);
+      const remainderBaseQty = Number((baseQuantity % rule.factor).toFixed(4));
+
+      return {
+        displayQty,
+        wholeUnits,
+        remainderBaseQty,
+        targetUnit: rule.toUnit,
+        baseUnit,
+        factor: rule.factor
+      };
+    }
+
+    return {
+      displayQty: baseQuantity,
+      wholeUnits: Math.floor(baseQuantity),
+      remainderBaseQty: 0,
+      targetUnit: cleanTarget,
+      baseUnit,
+      factor: 1
+    };
+  }
+
+  /**
+   * Universal unit converter between any two arbitrary units defined on a product
+   * (e.g., SLOP -> BUNGKUS, BUNGKUS -> BATANG, BATANG -> BUNGKUS).
+   */
+  static convertUnitQuantity(
+    product: Product,
+    quantity: number,
+    fromUnit: string,
+    toUnit: string
+  ): {
+    convertedQuantity: number;
+    baseQty: number;
+    fromUnit: string;
+    toUnit: string;
+    baseUnit: string;
+  } {
+    // 1. Convert source unit to base unit quantity
+    const { baseQty } = this.convertToBaseUnit(product, quantity, fromUnit);
+
+    // 2. Convert base quantity to destination unit
+    const { displayQty } = this.convertFromBaseUnit(product, baseQty, toUnit);
+
+    return {
+      convertedQuantity: displayQty,
+      baseQty,
+      fromUnit,
+      toUnit,
+      baseUnit: product.baseUnit || 'PCS'
+    };
+  }
+
+  /**
+   * Resolves base quantity for a product by ID or Product instance.
+   */
+  static async resolveBaseQuantity(
+    productIdOrProduct: string | Product,
+    quantity: number,
+    unit?: string
+  ): Promise<{
+    product: Product;
+    baseQty: number;
+    baseUnit: string;
+    factor: number;
+    unit: string;
+  }> {
+    let product: Product | undefined;
+    if (typeof productIdOrProduct === 'string') {
+      product = await db.products.get(productIdOrProduct);
+      if (!product) {
+        throw new Error(`Produk dengan ID ${productIdOrProduct} tidak ditemukan.`);
+      }
+    } else {
+      product = productIdOrProduct;
+    }
+
+    const conversion = this.convertToBaseUnit(product, quantity, unit);
+
+    return {
+      product,
+      ...conversion
+    };
+  }
+
+  /**
+   * Service layer function that automatically handles unit conversion between
+   * display units and base units (e.g., 'bungkus' -> 'batang'), then accurately
+   * decrements the inventory in the database and updates stock movements.
+   */
+  static async decrementInventory(params: {
+    productId: string;
+    quantity: number;
+    unit?: string;
+    movementType?: 'SALE_OUT' | 'DAMAGED_OUT' | 'LOST_OUT' | 'EXPIRED_OUT' | 'STOCK_OPNAME_OUT';
+    referenceId?: string;
+    transactionId?: string;
+    reason?: string;
+    userId?: string;
+    deviceId?: string;
+    segmentId?: 'WARUNG' | 'IKAN';
+  }): Promise<{
+    product: Product;
+    previousStock: number;
+    newStock: number;
+    deductedBaseQty: number;
+    baseUnit: string;
+    unitUsed: string;
+  }> {
+    const product = await db.products.get(params.productId);
+    if (!product) {
+      throw new Error(`Produk dengan ID ${params.productId} tidak ditemukan.`);
+    }
+
+    const previousStock = product.stock ?? 0;
+    const unitUsed = params.unit || product.baseUnit;
+
+    // Automatic unit conversion to smallest denominator (base unit)
+    const { baseQty, baseUnit } = this.convertToBaseUnit(
+      product,
+      Math.abs(params.quantity),
+      unitUsed
+    );
+
+    // Record stock movement using StockService gateway (derives and updates stock)
+    await StockService.recordMovement({
+      productId: product.productId,
+      movementType: params.movementType || 'SALE_OUT',
+      qty: Math.abs(params.quantity),
+      unit: unitUsed,
+      baseQty,
+      referenceId: params.referenceId || `dec_${uuidv4().substring(0, 8)}`,
+      transactionId: params.transactionId,
+      reason: params.reason || `Pengurangan stok otomatis (${params.quantity} ${unitUsed} -> ${baseQty} ${baseUnit})`,
+      userId: params.userId || 'SYSTEM',
+      deviceId: params.deviceId || 'LOCAL',
+      segmentId: params.segmentId || (product.productType === 'FISH' ? 'IKAN' : 'WARUNG')
+    });
+
+    const refreshedProduct = await db.products.get(params.productId);
+    const newStock = refreshedProduct?.stock ?? (previousStock - baseQty);
+
+    return {
+      product: refreshedProduct || product,
+      previousStock,
+      newStock,
+      deductedBaseQty: baseQty,
+      baseUnit,
+      unitUsed
+    };
+  }
 }

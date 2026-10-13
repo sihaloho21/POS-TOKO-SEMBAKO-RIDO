@@ -17,7 +17,11 @@ export interface UnitConversion {
   fromUnit: string;
   toUnit: string;
   factor: number; 
+  price?: number; // Harga jual khusus untuk satuan ini (misal: 1 BUNGKUS = Rp 24.000 walau base BATANG Rp 1.500)
+  barcode?: string; // Barcode khusus untuk kemasan satuan ini (misal barcode di bungkus rokok)
 }
+
+export type ConversionRule = UnitConversion;
 
 export interface Product {
   productId: string;
@@ -116,6 +120,7 @@ export interface TransactionItem {
   nameSnapshot: string;
   barcodeSnapshot: string;
   quantity: number; 
+  baseQty?: number;
   unit: string;
   unitPrice: number;
   priceSource: 'NORMAL' | 'RESELLER' | 'CUSTOMER_SPECIFIC';
@@ -174,7 +179,7 @@ export interface ReceivablePayment {
   receivableId: string;
   amount: number;
   paymentMethodId: string;
-  moneyStorageId: string;
+  moneyStorageId: 'WARUNG' | 'IKAN' | 'UANG_DIGITAL';
   userId: string;
   timestamp: string;
   paymentDate?: string;
@@ -422,4 +427,5 @@ export interface LoyaltyEvent {
   referenceId: string; // transactionId or redeemId
   referenceType: 'TRANSACTION' | 'REDEEM' | 'ADJUSTMENT';
   timestamp: string;
+  notes?: string;
 }

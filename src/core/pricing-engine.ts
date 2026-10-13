@@ -15,9 +15,13 @@ export class PricingEngine {
     // 1. Get Base Price for Unit
     let basePrice = product.normalPrice;
     if (unit !== product.baseUnit) {
-      const conversion = product.conversionRules.find(r => r.toUnit === unit);
+      const conversion = product.conversionRules?.find(r => r.toUnit === unit);
       if (conversion) {
-        basePrice = product.normalPrice * conversion.factor;
+        if (conversion.price !== undefined && conversion.price > 0) {
+          basePrice = conversion.price;
+        } else {
+          basePrice = product.normalPrice * conversion.factor;
+        }
       }
     }
 

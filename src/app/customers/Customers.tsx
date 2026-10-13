@@ -47,7 +47,7 @@ export default function Customers() {
       const unpaidReceivables = await db.receivables
         .where('customerId')
         .equals(customerId)
-        .filter(r => r.status !== 'PAID' && (r.remainingBalance || 0) > 0)
+        .filter(r => r.status !== 'PAID' && (r.remainingAmount || 0) > 0)
         .count();
 
       if (unpaidReceivables > 0) {

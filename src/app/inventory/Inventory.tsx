@@ -22,12 +22,16 @@ import {
   RefreshCw,
   Flame,
   Scale,
-  Camera
+  Camera,
+  X,
+  Layers
 } from 'lucide-react';
 import { CameraBarcodeScanner } from '@/components/CameraBarcodeScanner';
 import { useToastStore } from '@/core/toast-store';
 import type { Product, ProductCost } from '@/core/types';
 import { ProductService } from '@/core/services/product-service';
+import { formatMultiUnitBreakdown } from '@/core/utils/unit-helper';
+import { VisualUnitConversionHelper } from './VisualUnitConversionHelper';
 import { ProductModal } from './ProductModal';
 import { StockHistory } from './StockHistory';
 import { StockAdjustmentModal } from './StockAdjustmentModal';
@@ -63,6 +67,7 @@ export default function Inventory() {
   const [bulkAdjustment, setBulkAdjustment] = useState({ percentage: 5, type: 'INCREASE' as 'INCREASE' | 'DECREASE' });
   const [viewingHistoryId, setViewingHistoryId] = useState<string | null>(null);
   const [viewingQRProduct, setViewingQRProduct] = useState<Product | null>(null);
+  const [viewingConversionProduct, setViewingConversionProduct] = useState<Product | null>(null);
   const [isAdjustmentOpen, setIsAdjustmentOpen] = useState(false);
   const [adjustmentProductId, setAdjustmentProductId] = useState<string | undefined>(undefined);
   
@@ -71,7 +76,8 @@ export default function Inventory() {
       let collection = db.products.filter(p => 
         p.name.toLowerCase().includes(search.toLowerCase()) || 
         p.barcode.includes(search) || 
-        !!(p.sku && p.sku.includes(search))
+        !!(p.sku && p.sku.includes(search)) ||
+        Boolean(p.conversionRules && p.conversionRules.some(r => r.barcode && r.barcode.includes(search)))
       );
 
       if (filterType !== 'ALL') {
@@ -93,7 +99,11 @@ export default function Inventory() {
 
   const handleCameraScan = (scannedCode: string) => {
     if (!products) return;
-    const match = products.find(p => p.barcode === scannedCode || (p.sku && p.sku === scannedCode));
+    const match = products.find(p => 
+      p.barcode === scannedCode || 
+      (p.sku && p.sku === scannedCode) ||
+      (p.conversionRules && p.conversionRules.some(r => r.barcode === scannedCode))
+    );
     if (match) {
       setSearch(match.barcode || match.name);
       addToast(`Produk "${match.name}" ditemukan!`, 'success');
@@ -399,12 +409,25 @@ export default function Inventory() {
                         </div>
                       </td>
                       <td className="px-6 py-4">
-                        <div className="flex items-center gap-2">
-                          <span className={`text-sm font-black tabular-nums ${(product.stock ?? 0) < (product.minimumStock ?? 0) ? 'text-red-500' : 'text-slate-900'}`}>
-                            {(product.stock ?? 0).toLocaleString()}
-                          </span>
-                          <span className="text-[10px] text-slate-400 uppercase font-black tracking-widest">{product.baseUnit}</span>
-                          {(product.stock ?? 0) < (product.minimumStock ?? 0) && <AlertCircle size={14} className="text-red-500 animate-pulse" />}
+                        <div className="flex flex-col">
+                          <div className="flex items-center gap-2">
+                            <span className={`text-sm font-black tabular-nums ${(product.stock ?? 0) < (product.minimumStock ?? 0) ? 'text-red-500' : 'text-slate-900'}`}>
+                              {(product.stock ?? 0).toLocaleString()}
+                            </span>
+                            <span className="text-[10px] text-slate-400 uppercase font-black tracking-widest">{product.baseUnit}</span>
+                            {(product.stock ?? 0) < (product.minimumStock ?? 0) && <AlertCircle size={14} className="text-red-500 animate-pulse" />}
+                          </div>
+                          {product.conversionRules && product.conversionRules.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setViewingConversionProduct(product)}
+                              className="text-[9px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 hover:border-indigo-300 border border-indigo-100 px-2 py-0.5 rounded-md mt-1 w-fit shadow-2xs flex items-center gap-1.5 transition-all cursor-pointer text-left group/pill"
+                              title="Klik untuk melihat visual rantai konversi satuan (misal: 1 Slop = 10 Bungkus = 200 Batang)"
+                            >
+                              <span>📦 {formatMultiUnitBreakdown(product.stock ?? 0, product.baseUnit, product.conversionRules)}</span>
+                              <Layers size={10} className="text-indigo-400 group-hover/pill:text-indigo-700 shrink-0" />
+                            </button>
+                          )}
                         </div>
                       </td>
                       <td className="px-6 py-4">
@@ -421,6 +444,15 @@ export default function Inventory() {
                       </td>
                       <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end gap-1 sm:opacity-60 group-hover:opacity-100 transition-all">
+                          {product.conversionRules && product.conversionRules.length > 0 && (
+                            <button 
+                              onClick={() => setViewingConversionProduct(product)}
+                              className="p-2 text-slate-400 hover:text-indigo-600 transition-colors"
+                              title="Lihat Visual Rantai Konversi Satuan"
+                            >
+                              <Layers size={18} />
+                            </button>
+                          )}
                           <button 
                             onClick={() => {
                               setAdjustmentProductId(product.productId);
@@ -660,6 +692,42 @@ export default function Inventory() {
             // Live queries handle updates
           }}
         />
+      )}
+
+      {/* Visual Unit Conversion Helper Modal */}
+      {viewingConversionProduct && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white w-full max-w-xl rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/70">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-indigo-200">
+                  <Layers size={20} />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900 uppercase tracking-tight">
+                    {viewingConversionProduct.name}
+                  </h3>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                    Rantai Konversi Satuan & Kalkulator Multi-Unit
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setViewingConversionProduct(null)} 
+                className="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-6 overflow-y-auto custom-scrollbar space-y-4">
+              <VisualUnitConversionHelper
+                baseUnit={viewingConversionProduct.baseUnit}
+                basePrice={viewingConversionProduct.normalPrice}
+                conversionRules={viewingConversionProduct.conversionRules}
+              />
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Camera Barcode Scanner for Inventory Lookup */}

@@ -17,13 +17,16 @@ import {
   Layers, 
   ArrowRight,
   Info,
-  DollarSign
+  DollarSign,
+  AlertCircle
 } from 'lucide-react';
 
 interface ReturnItemState {
   productId: string;
   nameSnapshot: string;
   originalQty: number;
+  alreadyReturnedQty: number;
+  maxReturnableQty: number;
   quantityToReturn: number;
   unit: string;
   unitPrice: number;
@@ -52,6 +55,8 @@ export function QuickRefundModal({
 
   // Items to refund state
   const [returnItems, setReturnItems] = useState<ReturnItemState[]>([]);
+  const [linkedReceivable, setLinkedReceivable] = useState<any>(null);
+  const [isFullyRefunded, setIsFullyRefunded] = useState<boolean>(false);
   const [reasonCategory, setReasonCategory] = useState<string>('Barang Rusak / Cacat');
   const [customReason, setCustomReason] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
@@ -69,36 +74,81 @@ export function QuickRefundModal({
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [completedReturnTx, setCompletedReturnTx] = useState<Transaction | null>(null);
 
-  // Initialize modal state when opened
+  // Initialize modal state when opened, calculating already returned quantities and checking for open receivables
   useEffect(() => {
-    if (transaction && isOpen) {
-      const initialItems: ReturnItemState[] = transaction.items.map(item => ({
-        productId: item.productId,
-        nameSnapshot: item.nameSnapshot,
-        originalQty: item.quantity,
-        quantityToReturn: item.quantity,
-        unit: item.unit,
-        unitPrice: item.unitPrice,
-        subtotal: item.quantity * item.unitPrice,
-        restock: true, // Default to restock
-        isBundle: !!item.isBundle,
-        bundleComponentsSnapshot: item.bundleComponentsSnapshot,
-        selected: true // Select all by default for convenience
-      }));
+    let isCancelled = false;
 
-      setReturnItems(initialItems);
-      setRefundPaymentMethod(transaction.paymentMethodId || 'TUNAI');
-      setRefundStorageId(transaction.moneyStorageId || 'WARUNG');
-      setReasonCategory('Barang Rusak / Cacat');
-      setCustomReason('');
-      setNotes('');
-      setSupervisorPin('');
-      setIsPinVerified(isDirectlyAuthorized);
-      setVerifiedAuthorizerName(isDirectlyAuthorized ? (currentUser?.name || 'Owner') : '');
-      setPinError('');
-      setErrorMessage('');
-      setCompletedReturnTx(null);
+    if (transaction && isOpen) {
+      const loadContext = async () => {
+        // 1. Fetch past return transactions for cumulative limit check
+        const pastReturns = await db.transactions
+          .where('originalTransactionId')
+          .equals(transaction.transactionId)
+          .filter(tx => tx.type === 'RETURN')
+          .toArray();
+
+        const returnedQtyMap = new Map<string, number>();
+        for (const pr of pastReturns) {
+          for (const item of pr.items) {
+            const current = returnedQtyMap.get(item.productId) || 0;
+            returnedQtyMap.set(item.productId, current + (item.quantity || 0));
+          }
+        }
+
+        // 2. Fetch linked receivable if tempo / gajian
+        const rec = await db.receivables
+          .where('transactionId')
+          .equals(transaction.transactionId)
+          .first();
+
+        if (isCancelled) return;
+        setLinkedReceivable(rec || null);
+
+        let allExhausted = true;
+        const initialItems: ReturnItemState[] = transaction.items.map(item => {
+          const alreadyReturned = returnedQtyMap.get(item.productId) || 0;
+          const maxAvailable = Math.max(0, item.quantity - alreadyReturned);
+          if (maxAvailable > 0) allExhausted = false;
+
+          const defaultQty = maxAvailable > 0 ? (item.unit === 'KG' ? Math.min(1, maxAvailable) : Math.min(item.quantity, maxAvailable)) : 0;
+          return {
+            productId: item.productId,
+            nameSnapshot: item.nameSnapshot,
+            originalQty: item.quantity,
+            alreadyReturnedQty: alreadyReturned,
+            maxReturnableQty: maxAvailable,
+            quantityToReturn: defaultQty,
+            unit: item.unit,
+            unitPrice: item.unitPrice,
+            subtotal: defaultQty * item.unitPrice,
+            restock: true, // Default to restock
+            isBundle: !!item.isBundle,
+            bundleComponentsSnapshot: item.bundleComponentsSnapshot,
+            selected: maxAvailable > 0 // Only pre-select if returnable qty remains
+          };
+        });
+
+        setIsFullyRefunded(allExhausted);
+        setReturnItems(initialItems);
+        setRefundPaymentMethod(transaction.paymentMethodId || 'TUNAI');
+        setRefundStorageId(transaction.moneyStorageId || 'WARUNG');
+        setReasonCategory('Barang Rusak / Cacat');
+        setCustomReason('');
+        setNotes('');
+        setSupervisorPin('');
+        setIsPinVerified(isDirectlyAuthorized);
+        setVerifiedAuthorizerName(isDirectlyAuthorized ? (currentUser?.name || 'Owner') : '');
+        setPinError('');
+        setErrorMessage('');
+        setCompletedReturnTx(null);
+      };
+
+      loadContext();
     }
+
+    return () => {
+      isCancelled = true;
+    };
   }, [transaction, isOpen, isDirectlyAuthorized, currentUser]);
 
   if (!isOpen || !transaction) return null;
@@ -107,6 +157,7 @@ export function QuickRefundModal({
   const handleToggleSelect = (index: number) => {
     setReturnItems(prev => prev.map((item, i) => {
       if (i === index) {
+        if (item.maxReturnableQty <= 0) return item; // Cannot select items with zero returnable quantity
         return { ...item, selected: !item.selected };
       }
       return item;
@@ -115,17 +166,20 @@ export function QuickRefundModal({
 
   // Toggle Select All
   const handleToggleSelectAll = (select: boolean) => {
-    setReturnItems(prev => prev.map(item => ({ ...item, selected: select })));
+    setReturnItems(prev => prev.map(item => ({
+      ...item,
+      selected: select ? item.maxReturnableQty > 0 : false
+    })));
   };
 
   // Change return quantity
   const handleQtyChange = (index: number, newQty: number) => {
     setReturnItems(prev => prev.map((item, i) => {
       if (i === index) {
-        // Enforce bounds: min 1 (or 0.1 for KG), max originalQty
+        // Enforce bounds: min 1 (or 0.05 for KG), max maxReturnableQty
         const clampedQty = Math.max(
           item.unit === 'KG' ? 0.05 : 1,
-          Math.min(item.originalQty, newQty)
+          Math.min(item.maxReturnableQty, newQty)
         );
         return {
           ...item,
@@ -392,6 +446,35 @@ export function QuickRefundModal({
                 </div>
               </div>
 
+              {/* Fully Refunded Banner */}
+              {isFullyRefunded && (
+                <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-800 text-xs font-bold flex items-center gap-3">
+                  <AlertCircle size={20} className="shrink-0 text-amber-600" />
+                  <div>
+                    <p className="font-black uppercase tracking-tight">Transaksi Sudah Diretur Penuh (100%)</p>
+                    <p className="text-[11px] font-normal text-amber-700 mt-0.5">
+                      Semua item dalam nota transaksi ini sudah pernah diproses retur sebelumnya. Tidak ada sisa kuantitas barang yang dapat diretur kembali.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Linked Receivable (Gajian / Tempo) Banner */}
+              {linkedReceivable && linkedReceivable.remainingAmount > 0 && (
+                <div className="p-4 rounded-2xl bg-blue-50 border border-blue-200 text-blue-900 text-xs space-y-1.5">
+                  <div className="flex items-center gap-2 font-black uppercase tracking-tight text-blue-700">
+                    <ShieldCheck size={16} />
+                    <span>Transaksi Bon Tempo (Gajian) • Terkait Piutang</span>
+                  </div>
+                  <p className="text-[11px] text-blue-800 font-medium">
+                    Pelanggan masih memiliki sisa tagihan bon piutang sebesar <strong className="font-mono font-black text-blue-950">Rp {linkedReceivable.remainingAmount.toLocaleString()}</strong>.
+                  </p>
+                  <p className="text-[10px] text-blue-600 italic">
+                    * Logika Otomatis: Retur ini akan memotong sisa piutang terlebih dahulu sehingga toko tidak mengeluarkan uang tunai fisik untuk barang yang belum lunas.
+                  </p>
+                </div>
+              )}
+
               {/* Error Message banner */}
               {errorMessage && (
                 <div className="p-3 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold flex items-center gap-2">
@@ -410,8 +493,9 @@ export function QuickRefundModal({
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
+                      disabled={isFullyRefunded}
                       onClick={() => handleToggleSelectAll(true)}
-                      className="text-[11px] font-bold text-blue-600 hover:underline"
+                      className="text-[11px] font-bold text-blue-600 hover:underline disabled:opacity-40"
                     >
                       Pilih Semua
                     </button>
@@ -427,104 +511,122 @@ export function QuickRefundModal({
                 </div>
 
                 <div className="border border-slate-200 rounded-2xl divide-y divide-slate-100 overflow-hidden">
-                  {returnItems.map((item, idx) => (
-                    <div
-                      key={idx}
-                      className={`p-3.5 transition-colors ${
-                        item.selected ? 'bg-purple-50/30' : 'bg-white opacity-70'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-start gap-3">
-                          <input
-                            type="checkbox"
-                            checked={item.selected}
-                            onChange={() => handleToggleSelect(idx)}
-                            className="mt-1 w-4 h-4 rounded text-purple-600 focus:ring-purple-500 border-slate-300 cursor-pointer"
-                          />
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="font-bold text-slate-900 text-xs">
-                                {item.nameSnapshot}
+                  {returnItems.map((item, idx) => {
+                    const isExhausted = item.maxReturnableQty <= 0;
+                    return (
+                      <div
+                        key={idx}
+                        className={`p-3.5 transition-colors ${
+                          item.selected 
+                            ? 'bg-purple-50/30' 
+                            : isExhausted 
+                              ? 'bg-slate-50/60 opacity-60' 
+                              : 'bg-white opacity-75'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-start gap-3">
+                            <input
+                              type="checkbox"
+                              disabled={isExhausted}
+                              checked={item.selected}
+                              onChange={() => handleToggleSelect(idx)}
+                              className="mt-1 w-4 h-4 rounded text-purple-600 focus:ring-purple-500 border-slate-300 cursor-pointer disabled:cursor-not-allowed"
+                            />
+                            <div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-bold text-slate-900 text-xs">
+                                  {item.nameSnapshot}
+                                </span>
+                                {item.isBundle && (
+                                  <span className="px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 text-[9px] font-black uppercase flex items-center gap-1">
+                                    <Layers size={10} />
+                                    Paket Bundle
+                                  </span>
+                                )}
+                                {isExhausted && (
+                                  <span className="px-2 py-0.5 rounded-full bg-slate-200 text-slate-600 text-[9px] font-black uppercase">
+                                    Sudah Diretur Penuh
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-[11px] text-slate-500 block">
+                                Dibeli: {item.originalQty} {item.unit} @ Rp {item.unitPrice.toLocaleString()}
+                                {item.alreadyReturnedQty > 0 && (
+                                  <span className="text-purple-600 font-bold ml-1.5">
+                                    (Sudah retur: {item.alreadyReturnedQty} {item.unit} • Sisa: {item.maxReturnableQty} {item.unit})
+                                  </span>
+                                )}
                               </span>
                               {item.isBundle && (
-                                <span className="px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 text-[9px] font-black uppercase flex items-center gap-1">
-                                  <Layers size={10} />
-                                  Paket Bundle
-                                </span>
+                                <p className="text-[10px] text-indigo-700 font-medium mt-0.5">
+                                  * Retur paket wajib 1 paket utuh (semua item komponen dikembalikan).
+                                </p>
                               )}
                             </div>
-                            <span className="text-[11px] text-slate-500">
-                              Dibeli: {item.originalQty} {item.unit} @ Rp {item.unitPrice.toLocaleString()}
+                          </div>
+
+                          {/* Item Subtotal */}
+                          <div className="text-right">
+                            <span className="font-black text-slate-900 text-xs tabular-nums block">
+                              Rp {item.subtotal.toLocaleString()}
                             </span>
-                            {item.isBundle && (
-                              <p className="text-[10px] text-indigo-700 font-medium mt-0.5">
-                                * Retur paket wajib 1 paket utuh (semua item komponen dikembalikan).
-                              </p>
-                            )}
+                            <span className="text-[10px] text-slate-400 font-medium">
+                              Subtotal Retur
+                            </span>
                           </div>
                         </div>
 
-                        {/* Item Subtotal */}
-                        <div className="text-right">
-                          <span className="font-black text-slate-900 text-xs tabular-nums block">
-                            Rp {item.subtotal.toLocaleString()}
-                          </span>
-                          <span className="text-[10px] text-slate-400 font-medium">
-                            Subtotal Retur
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Controls when selected */}
-                      {item.selected && (
-                        <div className="mt-3 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3 text-xs">
-                          {/* Qty Controls */}
-                          <div className="flex items-center gap-2">
-                            <span className="text-[10px] font-bold text-slate-500 uppercase">
-                              Jumlah Retur:
-                            </span>
-                            <div className="flex items-center border border-slate-200 rounded-lg overflow-hidden bg-white shadow-sm">
-                              <button
-                                type="button"
-                                disabled={item.isBundle || item.quantityToReturn <= (item.unit === 'KG' ? 0.1 : 1)}
-                                onClick={() => handleQtyChange(idx, item.quantityToReturn - (item.unit === 'KG' ? 0.25 : 1))}
-                                className="px-2 py-1 bg-slate-50 hover:bg-slate-100 disabled:opacity-40 text-slate-600 font-black"
-                              >
-                                -
-                              </button>
-                              <span className="px-3 py-1 font-mono font-bold text-slate-800 text-xs min-w-[40px] text-center">
-                                {item.quantityToReturn} {item.unit}
+                        {/* Controls when selected */}
+                        {item.selected && !isExhausted && (
+                          <div className="mt-3 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3 text-xs">
+                            {/* Qty Controls */}
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] font-bold text-slate-500 uppercase">
+                                Jumlah Retur:
                               </span>
+                              <div className="flex items-center border border-slate-200 rounded-lg overflow-hidden bg-white shadow-sm">
+                                <button
+                                  type="button"
+                                  disabled={item.isBundle || item.quantityToReturn <= (item.unit === 'KG' ? 0.05 : 1)}
+                                  onClick={() => handleQtyChange(idx, item.quantityToReturn - (item.unit === 'KG' ? 0.25 : 1))}
+                                  className="px-2 py-1 bg-slate-50 hover:bg-slate-100 disabled:opacity-40 text-slate-600 font-black"
+                                >
+                                  -
+                                </button>
+                                <span className="px-3 py-1 font-mono font-bold text-slate-800 text-xs min-w-[40px] text-center">
+                                  {item.quantityToReturn} {item.unit}
+                                </span>
+                                <button
+                                  type="button"
+                                  disabled={item.isBundle || item.quantityToReturn >= item.maxReturnableQty}
+                                  onClick={() => handleQtyChange(idx, item.quantityToReturn + (item.unit === 'KG' ? 0.25 : 1))}
+                                  className="px-2 py-1 bg-slate-50 hover:bg-slate-100 disabled:opacity-40 text-slate-600 font-black"
+                                >
+                                  +
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Restock vs Damaged Toggle */}
+                            <div className="flex items-center gap-2">
                               <button
                                 type="button"
-                                disabled={item.isBundle || item.quantityToReturn >= item.originalQty}
-                                onClick={() => handleQtyChange(idx, item.quantityToReturn + (item.unit === 'KG' ? 0.25 : 1))}
-                                className="px-2 py-1 bg-slate-50 hover:bg-slate-100 disabled:opacity-40 text-slate-600 font-black"
+                                onClick={() => handleToggleRestock(idx)}
+                                className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all border ${
+                                  item.restock
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200 shadow-sm'
+                                    : 'bg-amber-50 text-amber-700 border-amber-200 shadow-sm'
+                                }`}
                               >
-                                +
+                                {item.restock ? '✓ Restock ke Gudang' : '✗ Rusak / Tidak Restock'}
                               </button>
                             </div>
                           </div>
-
-                          {/* Restock vs Damaged Toggle */}
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => handleToggleRestock(idx)}
-                              className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all border ${
-                                item.restock
-                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200 shadow-sm'
-                                  : 'bg-amber-50 text-amber-700 border-amber-200 shadow-sm'
-                              }`}
-                            >
-                              {item.restock ? '✓ Restock ke Gudang' : '✗ Rusak / Tidak Restock'}
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -655,7 +757,9 @@ export function QuickRefundModal({
               <div className="p-4 bg-slate-900 text-white rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4">
                 <div>
                   <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block">
-                    Total Dana Yang Dikembalikan (Refund):
+                    {linkedReceivable && linkedReceivable.remainingAmount > 0 
+                      ? 'Total Nilai Retur & Alokasi Pemotongan:' 
+                      : 'Total Dana Yang Dikembalikan (Refund):'}
                   </span>
                   <div className="flex items-baseline gap-2">
                     <span className="text-2xl font-black text-purple-400 tabular-nums">
@@ -665,6 +769,16 @@ export function QuickRefundModal({
                       ({selectedItems.length} barang terpilih)
                     </span>
                   </div>
+                  {linkedReceivable && linkedReceivable.remainingAmount > 0 && totalCalculatedRefund > 0 && (
+                    <div className="text-[11px] space-y-0.5 pt-1 text-slate-300">
+                      <p>
+                        • Potong Piutang Bon: <strong className="text-amber-400">Rp {Math.min(totalCalculatedRefund, linkedReceivable.remainingAmount).toLocaleString()}</strong>
+                      </p>
+                      <p>
+                        • Uang Keluar Fisik Kas: <strong className="text-emerald-400">Rp {Math.max(0, totalCalculatedRefund - linkedReceivable.remainingAmount).toLocaleString()}</strong>
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-2 w-full sm:w-auto">
@@ -678,7 +792,7 @@ export function QuickRefundModal({
                   <button
                     type="button"
                     onClick={handleProcessRefund}
-                    disabled={isSubmitting || selectedItems.length === 0 || (!isPinVerified && !isDirectlyAuthorized)}
+                    disabled={isSubmitting || selectedItems.length === 0 || isFullyRefunded || (!isPinVerified && !isDirectlyAuthorized)}
                     className="flex-1 sm:flex-none px-6 py-3 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 disabled:text-slate-600 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-purple-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer"
                   >
                     {isSubmitting ? (

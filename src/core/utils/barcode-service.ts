@@ -16,6 +16,12 @@ export class BarcodeService {
     return res === 10 ? 0 : res;
   }
 
+  static validateEAN13(code: string): boolean {
+    if (!/^\d{13}$/.test(code)) return false;
+    const checksum = this.calculateEAN13Checksum(code.slice(0, 12));
+    return Number(code[12]) === checksum;
+  }
+
   /**
    * Generates a new EAN-13 barcode for internal use
    * Format: 20 (Internal) + 10 digits (Product ID suffix or random) + Checksum

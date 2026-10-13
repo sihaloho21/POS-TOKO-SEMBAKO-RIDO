@@ -14,6 +14,7 @@ import { addDays } from 'date-fns';
 import { AuditEngine } from './audit-engine';
 import { LoyaltyEngine } from './loyalty-engine';
 import { StockService } from './services/stock-service';
+import { ProductService } from './services/product-service';
 import { BundleService } from './services/bundle-service';
 import { StoreStatusService } from './services/store-status-service';
 import { FinanceService } from './services/finance-service';
@@ -102,8 +103,8 @@ export class TransactionEngine {
       clientTimestamp: timestamp,
     };
 
-    // 1. Calculate Loyalty Points
-    if (params.type === 'SALE' && params.customerId) {
+    // 1. Calculate Loyalty Points based on transaction total
+    if ((params.type === 'SALE' || params.type === 'GAJIAN') && params.customerId) {
       transaction.loyaltyPointsEarned = await LoyaltyEngine.calculatePoints(transaction);
     }
 
@@ -151,15 +152,8 @@ export class TransactionEngine {
           }
         }
       } else {
-        // Physical product
-        let baseQty = item.quantity;
-        // Multi-unit conversion snapshot (PRD 9)
-        if (item.unit !== product.baseUnit) {
-          const conversion = product.conversionRules?.find(r => r.toUnit === item.unit);
-          if (conversion && conversion.factor > 0) {
-            baseQty = item.quantity * conversion.factor;
-          }
-        }
+        // Physical product: auto-convert display unit (e.g. BUNGKUS) to base unit (e.g. BATANG)
+        const { baseQty } = ProductService.convertToBaseUnit(product, item.quantity, item.unit);
 
         // Record Stock Movement via StockService (derives stock balance, never direct edit)
         await StockService.recordMovement({
@@ -309,13 +303,7 @@ export class TransactionEngine {
         const product = await db.products.get(item.productId);
         if (!product) continue;
 
-        let baseQty = item.quantity;
-        if (item.unit !== product.baseUnit) {
-          const conversion = product.conversionRules?.find(r => r.toUnit === item.unit);
-          if (conversion && conversion.factor > 0) {
-            baseQty = item.quantity * conversion.factor;
-          }
-        }
+        const { baseQty } = ProductService.convertToBaseUnit(product, item.quantity, item.unit);
 
         const reversalType = params.actionType === 'VOID' ? 'VOID_REVERSAL_IN' : 'SALE_RETURN_IN';
         await StockService.recordMovement({
@@ -370,7 +358,7 @@ export class TransactionEngine {
               const refundPaidFinance: FinanceEvent = {
                 financeEventId: uuidv4(),
                 amount: payment.amount,
-                storageId: payment.moneyStorageId || transaction.moneyStorageId || 'WARUNG',
+                storageId: (payment.moneyStorageId as 'WARUNG' | 'IKAN' | 'UANG_DIGITAL') || transaction.moneyStorageId || 'WARUNG',
                 direction: 'OUT',
                 referenceId: receivable.receivableId,
                 referenceType: params.actionType === 'VOID' ? 'VOID' : 'RETURN',
@@ -485,10 +473,44 @@ export class TransactionEngine {
       throw new Error('Nominal pengembalian dana harus lebih besar dari Rp 0.');
     }
 
+    // 0. Cumulative Return Validation (Prevent returning more than remaining unreturned quantity)
+    const pastReturns = await db.transactions
+      .where('originalTransactionId')
+      .equals(originalTx.transactionId)
+      .filter(tx => tx.type === 'RETURN')
+      .toArray();
+
+    const alreadyReturnedMap = new Map<string, number>();
+    for (const pr of pastReturns) {
+      for (const item of pr.items) {
+        const current = alreadyReturnedMap.get(item.productId) || 0;
+        alreadyReturnedMap.set(item.productId, current + (item.quantity || 0));
+      }
+    }
+
+    for (const retItem of params.itemsToReturn) {
+      const origItem = originalTx.items.find(i => i.productId === retItem.productId);
+      if (origItem) {
+        const alreadyReturned = alreadyReturnedMap.get(retItem.productId) || 0;
+        const maxAvailable = Math.max(0, origItem.quantity - alreadyReturned);
+        if (retItem.quantity > maxAvailable + 0.001) {
+          throw new Error(
+            `Kuantitas retur untuk "${retItem.nameSnapshot}" (${retItem.quantity}) melebihi sisa yang dapat diretur (${maxAvailable} ${retItem.unit}).`
+          );
+        }
+      }
+    }
+
     const timestamp = new Date().toISOString();
     const returnTxId = uuidv4();
     const shortCode = Date.now().toString().slice(-4);
     const returnReceiptNumber = `RET-${originalTx.receiptNumber.replace(/^INV-/, '')}-${shortCode}`;
+
+    // Resolve active shift for on-duty cashier
+    const activeShift = await db.shifts
+      .filter(s => s.status === 'OPEN' && (!params.staffId || s.userId === params.staffId))
+      .first();
+    const returnShiftId = activeShift ? activeShift.shiftId : originalTx.shiftId;
 
     // 1. Process Stock Movements
     for (const item of params.itemsToReturn) {
@@ -536,13 +558,9 @@ export class TransactionEngine {
         }
       } else {
         const product = await db.products.get(item.productId);
-        let baseQty = item.quantity;
-        if (product && item.unit !== product.baseUnit) {
-          const conversion = product.conversionRules?.find(r => r.toUnit === item.unit);
-          if (conversion && conversion.factor > 0) {
-            baseQty = item.quantity * conversion.factor;
-          }
-        }
+        const baseQty = product 
+          ? ProductService.convertToBaseUnit(product, item.quantity, item.unit).baseQty 
+          : item.quantity;
 
         const segmentId = originalTx.moneyStorageId === 'IKAN' ? 'IKAN' : 'WARUNG';
         if (item.restock) {
@@ -581,21 +599,52 @@ export class TransactionEngine {
       }
     }
 
-    // 2. Finance Outflow
-    const refundFinance: FinanceEvent = {
-      financeEventId: uuidv4(),
-      amount: params.refundAmount,
-      storageId: params.refundStorageId,
-      direction: 'OUT',
-      referenceId: returnTxId,
-      referenceType: 'RETURN',
-      description: `Pengembalian Uang (Quick Refund) Nota #${returnReceiptNumber} dari #${originalTx.receiptNumber} (${params.refundPaymentMethod}) • ${params.reason}`,
-      userId: params.staffId,
-      deviceId: originalTx.deviceId,
-      timestamp
-    };
-    await db.financeEvents.add(refundFinance);
-    await this.addToQueue('financeEvents', refundFinance.financeEventId, 'CREATE', refundFinance);
+    // 2. Finance Outflow & Receivable (Piutang) Deduction
+    let deductedFromReceivable = 0;
+    let actualCashRefund = params.refundAmount;
+
+    // Check if original transaction had an open/partial receivable (Gajian tempo)
+    const linkedReceivable = await db.receivables
+      .where('transactionId')
+      .equals(originalTx.transactionId)
+      .first();
+
+    if (linkedReceivable && linkedReceivable.remainingAmount > 0) {
+      // Deduct from remaining unpaid balance first so store does not leak physical cash
+      deductedFromReceivable = Math.min(params.refundAmount, linkedReceivable.remainingAmount);
+      actualCashRefund = params.refundAmount - deductedFromReceivable;
+
+      const newRemaining = Math.max(0, linkedReceivable.remainingAmount - deductedFromReceivable);
+      const newStatus = newRemaining === 0 ? 'PAID' : 'PARTIAL';
+
+      await db.receivables.update(linkedReceivable.receivableId, {
+        remainingAmount: newRemaining,
+        status: newStatus
+      });
+      await this.addToQueue('receivables', linkedReceivable.receivableId, 'UPDATE', {
+        ...linkedReceivable,
+        remainingAmount: newRemaining,
+        status: newStatus
+      });
+    }
+
+    // Only record physical money-out if cash actually left the drawer
+    if (actualCashRefund > 0) {
+      const refundFinance: FinanceEvent = {
+        financeEventId: uuidv4(),
+        amount: actualCashRefund,
+        storageId: params.refundStorageId,
+        direction: 'OUT',
+        referenceId: returnTxId,
+        referenceType: 'RETURN',
+        description: `Pengembalian Uang (Quick Refund) Nota #${returnReceiptNumber} dari #${originalTx.receiptNumber} (${params.refundPaymentMethod}) • ${params.reason}${deductedFromReceivable > 0 ? ` [Potong Piutang: Rp ${deductedFromReceivable.toLocaleString()}]` : ''}`,
+        userId: params.staffId,
+        deviceId: originalTx.deviceId,
+        timestamp
+      };
+      await db.financeEvents.add(refundFinance);
+      await this.addToQueue('financeEvents', refundFinance.financeEventId, 'CREATE', refundFinance);
+    }
 
     // 3. Proportional Loyalty Reversal
     if (originalTx.loyaltyPointsEarned > 0 && originalTx.customerId) {
@@ -634,7 +683,7 @@ export class TransactionEngine {
       customerId: originalTx.customerId,
       cashierId: params.staffId,
       deviceId: originalTx.deviceId,
-      shiftId: originalTx.shiftId,
+      shiftId: returnShiftId,
       items: returnItems,
       subtotal: params.refundAmount,
       discount: 0,

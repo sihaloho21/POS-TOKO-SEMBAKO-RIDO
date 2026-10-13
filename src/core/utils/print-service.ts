@@ -156,6 +156,14 @@ export class PrintService {
             <span>${transaction.type === 'RETURN' ? '-Rp ' : 'Rp '}${transaction.total.toLocaleString()}</span>
           </div>
 
+          ${transaction.loyaltyPointsEarned > 0 ? `
+            <div class="dashed"></div>
+            <div class="flex-between bold" style="font-size: 0.9em;">
+              <span>POIN LOYALTY DIDAPAT:</span>
+              <span>+${transaction.loyaltyPointsEarned} PTS</span>
+            </div>
+          ` : ''}
+
           <div class="dashed"></div>
 
           <div class="center footer">

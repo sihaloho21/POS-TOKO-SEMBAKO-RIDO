@@ -4,6 +4,7 @@ import { ProductService } from '@/core/services/product-service';
 import { CostingEngine, type WacSourceEvent } from '@/core/costing-engine';
 import { Save, Package, Barcode, Trash2, CheckCircle, XCircle, Lock, History, AlertTriangle, ShieldCheck, X, Camera, Plus, Scale } from 'lucide-react';
 import { CameraBarcodeScanner } from '@/components/CameraBarcodeScanner';
+import { VisualUnitConversionHelper } from './VisualUnitConversionHelper';
 import { useAuthStore } from '@/core/auth-store';
 import { useToastStore } from '@/core/toast-store';
 import { db } from '@/core/database';
@@ -59,6 +60,8 @@ export function ProductForm({ product, initialProductType, initialBaseUnit, onSa
   // Multi-Unit Conversion Rule Input State
   const [newRuleUnit, setNewRuleUnit] = useState('');
   const [newRuleFactor, setNewRuleFactor] = useState('');
+  const [newRulePrice, setNewRulePrice] = useState('');
+  const [newRuleBarcode, setNewRuleBarcode] = useState('');
 
   // Cost Adjustment Modal State
   const [isCostModalOpen, setIsCostModalOpen] = useState(false);
@@ -141,7 +144,16 @@ export function ProductForm({ product, initialProductType, initialBaseUnit, onSa
       addToast(`Satuan ${unit} sudah terdaftar.`, 'warning');
       return;
     }
-    const updatedRules: ConversionRule[] = [...existingRules, { fromUnit: baseUnit, toUnit: unit, factor }];
+    const parsedPrice = newRulePrice ? Number(newRulePrice) : undefined;
+    const parsedBarcode = newRuleBarcode.trim() || undefined;
+    const newRule: ConversionRule = {
+      fromUnit: baseUnit,
+      toUnit: unit,
+      factor,
+      ...(parsedPrice && parsedPrice > 0 ? { price: parsedPrice } : {}),
+      ...(parsedBarcode ? { barcode: parsedBarcode } : {})
+    };
+    const updatedRules: ConversionRule[] = [...existingRules, newRule];
     const updatedSaleUnits = Array.from(new Set([baseUnit, ...updatedRules.map(r => r.toUnit)]));
     setFormData({
       ...formData,
@@ -150,6 +162,8 @@ export function ProductForm({ product, initialProductType, initialBaseUnit, onSa
     });
     setNewRuleUnit('');
     setNewRuleFactor('');
+    setNewRulePrice('');
+    setNewRuleBarcode('');
   };
 
   const handleRemoveConversionRule = (toUnit: string) => {
@@ -234,14 +248,20 @@ export function ProductForm({ product, initialProductType, initialBaseUnit, onSa
           </div>
 
           <div className="space-y-2">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Satuan Dasar (Base Unit)</label>
+            <div className="flex items-center justify-between">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Satuan Dasar (Base Unit)</label>
+              <span className="text-[9px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md">Satuan Paling Kecil</span>
+            </div>
             <input
               required
               className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-bold text-slate-900 uppercase shadow-sm"
               value={formData.baseUnit ?? 'PCS'}
               onChange={(e) => setFormData({ ...formData, baseUnit: e.target.value.toUpperCase() })}
-              placeholder="Contoh: PCS, KG, BUNGKUS, LITER"
+              placeholder="Contoh: BATANG, PCS, GRAM, BUTIR"
             />
+            <p className="text-[11px] text-slate-500 font-medium leading-relaxed">
+              💡 <strong>Wajib masukkan satuan terkecil</strong> (misal rokok: <span className="font-bold text-slate-700">BATANG</span>). Satuan lebih besar seperti <span className="font-bold text-slate-700">BUNGKUS</span> atau <span className="font-bold text-slate-700">SLOP</span> didaftarkan di bagian <em>"Satuan Tambahan / Grosir (Multi-Satuan)"</em> di bawah.
+            </p>
           </div>
 
           {/* SKU Field */}
@@ -421,56 +441,138 @@ export function ProductForm({ product, initialProductType, initialBaseUnit, onSa
               </div>
             </div>
 
-            <div className="flex flex-wrap gap-2 items-center">
-              <input
-                type="text"
-                placeholder="Nama Satuan (misal: DUS, PACK, RENCENG)"
-                value={newRuleUnit}
-                onChange={(e) => setNewRuleUnit(e.target.value.toUpperCase())}
-                className="flex-1 min-w-[160px] px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-900 uppercase outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs font-bold text-slate-500">=</span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 pt-1">
+              <div>
+                <label className="text-[9px] font-black text-slate-500 uppercase tracking-wider block mb-1">Nama Satuan Turunan</label>
+                <input
+                  type="text"
+                  placeholder="Misal: BUNGKUS, DUS"
+                  value={newRuleUnit}
+                  onChange={(e) => setNewRuleUnit(e.target.value.toUpperCase())}
+                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-900 uppercase outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-[9px] font-black text-slate-500 uppercase tracking-wider block mb-1">
+                  Isi (per 1 Satuan = ... {formData.baseUnit || 'PCS'})
+                </label>
                 <input
                   type="number"
                   step="any"
                   min="0.01"
-                  placeholder="Isi / Faktor"
+                  placeholder="Contoh: 20"
                   value={newRuleFactor}
                   onChange={(e) => setNewRuleFactor(e.target.value)}
-                  className="w-28 px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-black text-slate-900 tabular-nums outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-black text-slate-900 tabular-nums outline-none focus:ring-2 focus:ring-blue-500"
                 />
-                <span className="text-[10px] font-black text-slate-500 uppercase">{formData.baseUnit || 'PCS'}</span>
               </div>
-              <button
-                type="button"
-                onClick={handleAddConversionRule}
-                className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1 transition-all"
-              >
-                <Plus size={14} />
-                Tambah Satuan
-              </button>
+
+              <div>
+                <label className="text-[9px] font-black text-slate-500 uppercase tracking-wider block mb-1">
+                  Harga Jual Satuan (Opsional Rp)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  placeholder={
+                    newRuleFactor && formData.normalPrice
+                      ? `Auto: Rp ${(formData.normalPrice * Number(newRuleFactor)).toLocaleString()}`
+                      : 'Contoh: 24000'
+                  }
+                  value={newRulePrice}
+                  onChange={(e) => setNewRulePrice(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-black text-blue-600 tabular-nums outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-[9px] font-black text-slate-500 uppercase tracking-wider block mb-1">
+                  Barcode Kemasan (Opsional)
+                </label>
+                <div className="flex gap-1.5">
+                  <input
+                    type="text"
+                    placeholder="Barcode bungkus/dus"
+                    value={newRuleBarcode}
+                    onChange={(e) => setNewRuleBarcode(e.target.value)}
+                    className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddConversionRule}
+                    className="px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1 transition-all shrink-0 cursor-pointer"
+                    title="Tambah Satuan Jual"
+                  >
+                    <Plus size={14} />
+                    Tambah
+                  </button>
+                </div>
+              </div>
             </div>
 
             {formData.conversionRules && formData.conversionRules.length > 0 && (
-              <div className="flex flex-wrap gap-2 pt-1">
-                {formData.conversionRules.map((rule) => (
-                  <div
-                    key={rule.toUnit}
-                    className="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 shadow-xs"
-                  >
-                    <span>1 {rule.toUnit} = <strong>{rule.factor}</strong> {formData.baseUnit || 'PCS'}</span>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveConversionRule(rule.toUnit)}
-                      className="text-slate-400 hover:text-rose-600 transition-colors"
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  </div>
-                ))}
+              <div className="flex flex-col gap-2 pt-2 border-t border-slate-200/60">
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Satuan Jual Terdaftar:</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {formData.conversionRules.map((rule) => {
+                    const effectivePrice = rule.price && rule.price > 0 ? rule.price : (formData.normalPrice || 0) * rule.factor;
+                    return (
+                      <div
+                        key={rule.toUnit}
+                        className="flex items-center justify-between p-2.5 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 shadow-xs"
+                      >
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-black text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded text-[10px] uppercase">
+                              1 {rule.toUnit}
+                            </span>
+                            <span className="text-slate-500 text-[11px] font-bold">
+                              = <strong>{rule.factor}</strong> {formData.baseUnit || 'PCS'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 text-[10px]">
+                            <span className="font-black text-emerald-600">
+                              Rp {effectivePrice.toLocaleString()}
+                              {rule.price && rule.price > 0 && <span className="text-[8px] bg-emerald-100 text-emerald-800 px-1 rounded ml-1 font-bold">HARGA KHUSUS</span>}
+                            </span>
+                            {rule.barcode && (
+                              <span className="text-slate-400 font-mono text-[9px]">
+                                🏷️ {rule.barcode}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveConversionRule(rule.toUnit)}
+                          className="p-1 text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
+                          title="Hapus Satuan"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
+
+            {/* Visual Unit Conversion Helper & Chain Formula */}
+            <VisualUnitConversionHelper
+              baseUnit={formData.baseUnit || 'PCS'}
+              basePrice={formData.normalPrice || 0}
+              conversionRules={formData.conversionRules || []}
+              draftRule={
+                newRuleUnit.trim() && Number(newRuleFactor) > 0
+                  ? {
+                      unit: newRuleUnit.trim().toUpperCase(),
+                      factor: Number(newRuleFactor),
+                      price: newRulePrice ? Number(newRulePrice) : undefined
+                    }
+                  : undefined
+              }
+            />
           </div>
 
           {/* Price Alert Threshold */}
