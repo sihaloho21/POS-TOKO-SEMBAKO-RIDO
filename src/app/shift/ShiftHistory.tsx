@@ -21,14 +21,17 @@ import {
 } from 'lucide-react';
 import { format, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
 import ShiftReport from './ShiftReport';
+import { CashDiscrepancyAuditModal } from './CashDiscrepancyAuditModal';
 
 export default function ShiftHistory({ onNavigate }: { onNavigate?: (tab: string) => void } = {}) {
   const [search, setSearch] = useState('');
+  const [filterDiscrepancyOnly, setFilterDiscrepancyOnly] = useState(false);
   const [dateRange, setDateRange] = useState<{ start: string; end: string }>({
     start: '',
     end: ''
   });
   const [selectedShiftId, setViewingShiftId] = useState<string | null>(null);
+  const [auditingShiftId, setAuditingShiftId] = useState<string | null>(null);
 
   const shifts = useLiveQuery(async () => {
     let all = await db.shifts.toArray();
@@ -55,12 +58,14 @@ export default function ShiftHistory({ onNavigate }: { onNavigate?: (tab: string
         matchesDate = isWithinInterval(shiftDate, { start, end });
       }
 
+      const matchesDiscrepancy = !filterDiscrepancyOnly || Boolean(s.actualCash !== undefined && s.expectedCash !== undefined && s.actualCash !== s.expectedCash);
+
       // Add resolved name to the object for UI usage
       (s as any).cashierName = cashierName;
 
-      return matchesSearch && matchesDate;
+      return matchesSearch && matchesDate && matchesDiscrepancy;
     });
-  }, [search, dateRange]);
+  }, [search, dateRange, filterDiscrepancyOnly]);
 
   const totalHistoricalRevenue = shifts?.reduce((acc, s) => acc + (s.totalSales || 0), 0) || 0;
   const totalShiftCount = shifts?.length || 0;
@@ -171,11 +176,26 @@ export default function ShiftHistory({ onNavigate }: { onNavigate?: (tab: string
               onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
             />
           </div>
-          {(dateRange.start || dateRange.end || search) && (
+
+          <button
+            type="button"
+            onClick={() => setFilterDiscrepancyOnly(!filterDiscrepancyOnly)}
+            className={`px-3 py-1.5 rounded-2xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 transition-all ${
+              filterDiscrepancyOnly
+                ? 'bg-rose-600 text-white shadow-md shadow-rose-200'
+                : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200'
+            }`}
+          >
+            <AlertTriangle size={13} className={filterDiscrepancyOnly ? 'text-white' : 'text-rose-500'} />
+            <span>Ada Selisih Kas</span>
+          </button>
+
+          {(dateRange.start || dateRange.end || search || filterDiscrepancyOnly) && (
             <button 
               onClick={() => {
                 setSearch('');
                 setDateRange({ start: '', end: '' });
+                setFilterDiscrepancyOnly(false);
               }}
               className="p-2.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
               title="Reset Filters"
@@ -247,15 +267,40 @@ export default function ShiftHistory({ onNavigate }: { onNavigate?: (tab: string
                             {s.actualCash === s.expectedCash ? 'Balanced' : `Selisih: Rp ${( (s.actualCash || 0) - (s.expectedCash || 0) ).toLocaleString()}`}
                           </p>
                           {s.actualCash !== s.expectedCash && (
-                            <span className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded mt-0.5 ${
-                              s.discrepancyApprovalStatus === 'APPROVED'
-                                ? 'bg-emerald-100 text-emerald-700'
-                                : s.discrepancyApprovalStatus === 'INVESTIGATION_REQUESTED'
-                                ? 'bg-rose-100 text-rose-700'
-                                : 'bg-amber-100 text-amber-800'
-                            }`}>
-                              {s.discrepancyApprovalStatus === 'APPROVED' ? '✓ Disetujui' : s.discrepancyApprovalStatus === 'INVESTIGATION_REQUESTED' ? '🔍 Investigasi' : '⏳ Pending'}
-                            </span>
+                            <div className="flex flex-col items-end gap-1 mt-1">
+                              <span className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded ${
+                                s.discrepancyApprovalStatus === 'CHARGED_TO_CASHIER'
+                                  ? 'bg-purple-100 text-purple-800'
+                                  : s.discrepancyApprovalStatus === 'STORE_EXPENSE'
+                                  ? 'bg-slate-200 text-slate-700'
+                                  : s.discrepancyApprovalStatus === 'APPROVED'
+                                  ? 'bg-emerald-100 text-emerald-700'
+                                  : s.discrepancyApprovalStatus === 'INVESTIGATION_REQUESTED'
+                                  ? 'bg-rose-100 text-rose-700'
+                                  : 'bg-amber-100 text-amber-800'
+                              }`}>
+                                {s.discrepancyApprovalStatus === 'CHARGED_TO_CASHIER'
+                                  ? '✓ Dibebankan ke Kasir'
+                                  : s.discrepancyApprovalStatus === 'STORE_EXPENSE'
+                                  ? '✓ Beban Toko'
+                                  : s.discrepancyApprovalStatus === 'APPROVED'
+                                  ? '✓ Disetujui'
+                                  : s.discrepancyApprovalStatus === 'INVESTIGATION_REQUESTED'
+                                  ? '🔍 Investigasi'
+                                  : '⏳ Pending Tindakan'}
+                              </span>
+
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setAuditingShiftId(s.shiftId);
+                                }}
+                                className="px-2 py-0.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 rounded-md text-[9px] font-black uppercase tracking-wider flex items-center gap-1 transition-all"
+                              >
+                                <AlertTriangle size={10} /> Periksa Selisih
+                              </button>
+                            </div>
                           )}
                         </div>
                       ) : (
@@ -272,13 +317,25 @@ export default function ShiftHistory({ onNavigate }: { onNavigate?: (tab: string
                     </td>
 
                     <td className="py-4 px-6 text-center">
-                      <button 
-                        onClick={() => setViewingShiftId(s.shiftId)}
-                        className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all"
-                        title="Lihat Detail Laporan"
-                      >
-                        <ChevronRight size={20} />
-                      </button>
+                      <div className="flex items-center justify-center gap-1">
+                        {s.actualCash !== undefined && s.expectedCash !== undefined && s.actualCash !== s.expectedCash && (
+                          <button
+                            type="button"
+                            onClick={() => setAuditingShiftId(s.shiftId)}
+                            className="p-2 text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-xl transition-all"
+                            title="Audit Selisih Kas Laci"
+                          >
+                            <AlertTriangle size={18} />
+                          </button>
+                        )}
+                        <button 
+                          onClick={() => setViewingShiftId(s.shiftId)}
+                          className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all"
+                          title="Lihat Detail Laporan"
+                        >
+                          <ChevronRight size={20} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -310,6 +367,14 @@ export default function ShiftHistory({ onNavigate }: { onNavigate?: (tab: string
             <ShiftReport shiftId={selectedShiftId} />
           </div>
         </div>
+      )}
+
+      {/* Owner Cash Discrepancy Audit Modal */}
+      {auditingShiftId && (
+        <CashDiscrepancyAuditModal
+          shiftId={auditingShiftId}
+          onClose={() => setAuditingShiftId(null)}
+        />
       )}
     </div>
   );

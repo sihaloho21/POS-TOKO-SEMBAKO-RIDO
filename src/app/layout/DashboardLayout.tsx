@@ -38,6 +38,8 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { motion, AnimatePresence } from 'motion/react';
 import { ShiftService } from '@/core/services/shift-service';
 import { StoreStatusService } from '@/core/services/store-status-service';
+import { StaffDebtService } from '@/core/services/staff-debt-service';
+import { isPast, parseISO } from 'date-fns';
 import { useDeviceId } from '@/core/device-store';
 import ClockInModal from '@/app/shift/ClockInModal';
 import ClockOutModal from '@/app/shift/ClockOutModal';
@@ -159,6 +161,19 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
     0
   );
 
+  const overdueKasbonCount = useLiveQuery(
+    async () => {
+      try {
+        const debts = await StaffDebtService.getStaffDebts();
+        return debts.filter(d => d.remainingAmount > 0 && isPast(parseISO(d.dueDate))).length;
+      } catch {
+        return 0;
+      }
+    },
+    [],
+    0
+  );
+
   const totalConflictsAndApprovals = (conflictCount || 0) + (pendingDiscrepanciesCount || 0);
 
   // Quick navigation listener from browser notifications
@@ -193,7 +208,7 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
     { id: 'suppliers', label: 'Suppliers', icon: <Truck size={18} />, disabled: !isOwner },
     { id: 'purchases', label: 'Purchases', icon: <ShoppingBag size={18} />, disabled: !isOwner },
     { id: 'supplier-return', label: 'Supplier Return', icon: <Archive size={18} />, disabled: !isOwner },
-    { id: 'receivables', label: 'Receivables', icon: <CreditCard size={18} />, disabled: !isOwner },
+    { id: 'receivables', label: 'Receivables & Kasbon', icon: <CreditCard size={18} />, badge: overdueKasbonCount > 0 ? overdueKasbonCount : undefined, disabled: !isOwner },
     { id: 'finance', label: 'Finance', icon: <TrendingUp size={18} />, disabled: !isOwner },
     { id: 'audit', label: 'Audit Log', icon: <ShieldCheck size={18} />, disabled: !isOwner },
     { id: 'conflicts', label: 'Conflicts & Approvals', icon: <AlertTriangle size={18} />, badge: totalConflictsAndApprovals, disabled: !isOwner },

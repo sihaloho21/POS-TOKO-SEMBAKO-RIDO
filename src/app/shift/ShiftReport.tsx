@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/core/database';
 import { CashierShift, Transaction } from '@/core/types';
@@ -16,15 +16,19 @@ import {
   AlertTriangle,
   CheckCircle,
   ShieldCheck,
-  Smartphone
+  Smartphone,
+  Calculator,
+  UserMinus
 } from 'lucide-react';
 import { format } from 'date-fns';
+import { CashDiscrepancyAuditModal } from './CashDiscrepancyAuditModal';
 
 interface ShiftReportProps {
   shiftId: string;
 }
 
 export default function ShiftReport({ shiftId }: ShiftReportProps) {
+  const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
   const shift = useLiveQuery(() => db.shifts.get(shiftId), [shiftId]);
   
   const transactions = useLiveQuery(async () => {
@@ -191,27 +195,59 @@ export default function ShiftReport({ shiftId }: ShiftReportProps) {
           </div>
         </div>
 
-        {/* Discrepancy Reason & Owner Approval Details */}
-        {shift.discrepancyReason && (
-          <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-black uppercase tracking-wider text-amber-900 flex items-center gap-1.5">
-                <AlertTriangle size={14} className="text-amber-600" />
-                Alasan Selisih Kasir:
-              </span>
-              {shift.discrepancyApprovedBy && (
-                <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded flex items-center gap-1">
-                  <ShieldCheck size={12} />
-                  Disetujui Owner: {shift.discrepancyApprovedBy}
+        {/* Discrepancy Reason & Owner Resolution Details */}
+        {(shift.discrepancyReason || (discrepancy !== undefined && discrepancy !== 0)) && (
+          <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-black uppercase tracking-wider text-amber-900 flex items-center gap-1.5">
+                  <AlertTriangle size={14} className="text-amber-600" />
+                  Alasan & Status Rekonsiliasi Selisih:
                 </span>
-              )}
+                <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${
+                  shift.discrepancyApprovalStatus === 'CHARGED_TO_CASHIER'
+                    ? 'bg-purple-100 text-purple-800'
+                    : shift.discrepancyApprovalStatus === 'STORE_EXPENSE'
+                    ? 'bg-slate-200 text-slate-700'
+                    : shift.discrepancyApprovalStatus === 'APPROVED'
+                    ? 'bg-emerald-100 text-emerald-800'
+                    : 'bg-amber-200 text-amber-900'
+                }`}>
+                  {shift.discrepancyApprovalStatus === 'CHARGED_TO_CASHIER'
+                    ? '✓ Dibebankan ke Kasir'
+                    : shift.discrepancyApprovalStatus === 'STORE_EXPENSE'
+                    ? '✓ Beban Toko'
+                    : shift.discrepancyApprovalStatus === 'APPROVED'
+                    ? '✓ Disetujui'
+                    : '⏳ Menunggu Tindakan Owner'}
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsAuditModalOpen(true)}
+                className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-sm flex items-center gap-1.5 self-start sm:self-auto transition-all"
+              >
+                <AlertTriangle size={13} />
+                <span>Audit Selisih Laci</span>
+              </button>
             </div>
-            <p className="text-xs font-semibold text-amber-950 italic">
-              "{shift.discrepancyReason}"
-            </p>
+
+            {shift.discrepancyReason && (
+              <p className="text-xs font-semibold text-amber-950 italic">
+                "{shift.discrepancyReason}"
+              </p>
+            )}
+
+            {shift.discrepancyResolutionNotes && (
+              <p className="text-[11px] text-slate-700 font-medium">
+                Catatan Owner ({shift.discrepancyResolvedBy || 'Owner'}): "{shift.discrepancyResolutionNotes}"
+              </p>
+            )}
+
             {shift.reconciliationEventId && (
               <p className="text-[10px] text-slate-500 font-mono">
-                Event Rekonsiliasi: {shift.reconciliationEventId} (Tidak mengubah ledger transaksi langsung)
+                Event Rekonsiliasi: {shift.reconciliationEventId}
               </p>
             )}
           </div>
@@ -273,6 +309,13 @@ export default function ShiftReport({ shiftId }: ShiftReportProps) {
           </div>
         )}
       </div>
+
+      {isAuditModalOpen && (
+        <CashDiscrepancyAuditModal
+          shiftId={shiftId}
+          onClose={() => setIsAuditModalOpen(false)}
+        />
+      )}
     </div>
   );
 }

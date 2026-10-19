@@ -355,9 +355,14 @@ export interface CashierShift {
   actualCash?: number;
   discrepancy?: number;
   discrepancyReason?: string;
-  discrepancyApprovalStatus?: 'PENDING' | 'APPROVED' | 'INVESTIGATION_REQUESTED';
+  discrepancyApprovalStatus?: 'PENDING' | 'APPROVED' | 'INVESTIGATION_REQUESTED' | 'CHARGED_TO_CASHIER' | 'STORE_EXPENSE';
   discrepancyApprovedBy?: string;
   discrepancyApprovedAt?: string;
+  discrepancyResolvedBy?: string;
+  discrepancyResolvedAt?: string;
+  discrepancyResolutionNotes?: string;
+  staffReceivableId?: string;
+  cashDenominations?: Record<string, number>;
   investigationNotes?: string;
   investigationRequestedBy?: string;
   investigationRequestedAt?: string;

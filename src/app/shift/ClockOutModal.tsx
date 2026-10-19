@@ -21,10 +21,12 @@ import {
   MinusCircle,
   PlusCircle,
   Clock,
-  Smartphone
+  Smartphone,
+  Calculator
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
+import { CashDenominationCounter } from './CashDenominationCounter';
 
 interface ClockOutModalProps {
   isOpen: boolean;
@@ -46,6 +48,8 @@ export default function ClockOutModal({ isOpen, shiftId, onClose, onSuccess }: C
   const [threshold, setThreshold] = useState<number>(25000);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string>('');
+  const [showDenominations, setShowDenominations] = useState<boolean>(false);
+  const [cashDenominations, setCashDenominations] = useState<Record<string, number>>({});
 
   // Fetch target shift
   const targetShift = useLiveQuery(async () => {
@@ -137,7 +141,8 @@ export default function ClockOutModal({ isOpen, shiftId, onClose, onSuccess }: C
         ownerPinApproval: ownerPin.trim(),
         approvedByOwner: approvedOwnerName,
         endNotes: endNotes.trim(),
-        currentDeviceId: deviceId
+        currentDeviceId: deviceId,
+        cashDenominations: Object.keys(cashDenominations).length > 0 ? cashDenominations : undefined
       });
 
       addToast('Shift berhasil ditutup dan kas direkonsiliasi!', 'success');
@@ -273,9 +278,19 @@ export default function ClockOutModal({ isOpen, shiftId, onClose, onSuccess }: C
               </div>
 
               <div className="w-full sm:w-60">
-                <label className="text-[10px] font-black uppercase tracking-wider text-slate-700 block mb-1">
-                  Input Uang Fisik Aktual (Laci) *
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-700 block">
+                    Input Uang Fisik (Laci) *
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowDenominations(!showDenominations)}
+                    className="text-[10px] font-black uppercase text-indigo-600 hover:text-indigo-800 flex items-center gap-1 transition-colors"
+                  >
+                    <Calculator size={11} />
+                    {showDenominations ? 'Tutup Hitung' : 'Hitung Pecahan'}
+                  </button>
+                </div>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-slate-400 text-sm">Rp</span>
                   <input
@@ -289,6 +304,19 @@ export default function ClockOutModal({ isOpen, shiftId, onClose, onSuccess }: C
                 </div>
               </div>
             </div>
+
+            {/* Cash Denomination Calculator (Collapsible) */}
+            {showDenominations && (
+              <div className="pt-2">
+                <CashDenominationCounter
+                  counts={cashDenominations}
+                  onChange={(counts, total) => {
+                    setCashDenominations(counts);
+                    setActualCashInput(total.toString());
+                  }}
+                />
+              </div>
+            )}
 
             {/* Live Discrepancy Preview */}
             <div className={`p-4 rounded-xl border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 ${

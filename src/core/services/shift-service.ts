@@ -1,5 +1,5 @@
 import { db } from '../database';
-import type { CashierShift, FinanceEvent, BusinessConflict } from '../types';
+import type { CashierShift, FinanceEvent, BusinessConflict, Receivable, Customer } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { AuditEngine } from '../audit-engine';
 import { StoreStatusService } from './store-status-service';
@@ -242,6 +242,7 @@ export class ShiftService {
     endNotes?: string;
     notes?: string;
     currentDeviceId?: string;
+    cashDenominations?: Record<string, number>;
   }): Promise<CashierShift> {
     const shift = await db.shifts.get(params.shiftId);
     if (!shift || shift.status === 'CLOSED') {
@@ -324,6 +325,7 @@ export class ShiftService {
       discrepancyApprovalStatus: discrepancy === 0 ? undefined : (params.approvedByOwner ? 'APPROVED' : 'PENDING'),
       discrepancyApprovedBy: params.approvedByOwner,
       discrepancyApprovedAt: params.approvedByOwner ? endTimestamp : undefined,
+      cashDenominations: params.cashDenominations,
       reconciliationEventId,
       endNotes: endNotes || shift.endNotes,
       notes: combinedNotes
@@ -545,6 +547,261 @@ export class ShiftService {
         investigationNotes: params.investigationNotes,
         requestedBy: params.ownerName,
         timestamp
+      }
+    });
+
+    await db.syncQueue.add({
+      entityType: 'shifts',
+      entityId: params.shiftId,
+      action: 'UPDATE',
+      payload: updatedShift,
+      status: 'PENDING',
+      retryCount: 0,
+      createdAt: timestamp
+    });
+
+    return updatedShift;
+  }
+
+  /**
+   * Resolves an unresolved cash discrepancy by charging it to the cashier as a staff debt / receivable.
+   * Owner-confirmed policy: "Bebankan ke kasir atau catat piutang kasir".
+   */
+  static async resolveDiscrepancyToStaffReceivable(params: {
+    shiftId: string;
+    ownerUserId: string;
+    ownerPin: string;
+    dueDate?: string;
+    notes?: string;
+  }): Promise<{ shift: CashierShift; receivable: Receivable }> {
+    const shift = await db.shifts.get(params.shiftId);
+    if (!shift) throw new Error('Shift tidak ditemukan.');
+
+    const ownerUser = await db.users
+      .filter(u => u.role === 'OWNER' && (u.pinHash === params.ownerPin || (u as any).pin === params.ownerPin))
+      .first();
+    if (!ownerUser) {
+      throw new Error('PIN Owner tidak valid atau bukan akun Owner.');
+    }
+
+    const cashierUser = await db.users.get(shift.userId);
+    const cashierName = cashierUser?.name || shift.userId;
+
+    const discrepancy = shift.discrepancy || 0;
+    const amountToCharge = Math.abs(discrepancy);
+    if (amountToCharge <= 0) {
+      throw new Error('Tidak ada selisih kas minus untuk dibebankan ke kasir.');
+    }
+
+    const timestamp = new Date().toISOString();
+
+    // Find or create customer entity for this staff member
+    let staffCustomer = await db.customers
+      .filter(c => Boolean(c.name.toLowerCase() === `kasir - ${cashierName}`.toLowerCase() || (c.notes && c.notes.includes(shift.userId))))
+      .first();
+
+    if (!staffCustomer) {
+      const customerId = uuidv4();
+      staffCustomer = {
+        customerId,
+        name: `Kasir - ${cashierName}`,
+        phone: (cashierUser as any)?.phone || '',
+        notes: `Akun Piutang Karyawan / Kasir: ${cashierName} (ID: ${shift.userId})`,
+        isReseller: false,
+        creditLimit: 10000000,
+        defaultDueDateDays: 30,
+        loyaltyPoints: 0,
+        status: 'ACTIVE',
+        createdAt: timestamp,
+        updatedAt: timestamp
+      };
+      await db.customers.add(staffCustomer);
+      await db.syncQueue.add({
+        entityType: 'customers',
+        entityId: customerId,
+        action: 'CREATE',
+        payload: staffCustomer,
+        status: 'PENDING',
+        retryCount: 0,
+        createdAt: timestamp
+      });
+    }
+
+    // Default due date: +30 days or specified
+    let targetDueDate = params.dueDate;
+    if (!targetDueDate) {
+      const d = new Date();
+      d.setDate(d.getDate() + 30);
+      targetDueDate = d.toISOString().split('T')[0];
+    }
+
+    // Create Receivable record
+    const receivableId = uuidv4();
+    const staffReceivable: Receivable = {
+      receivableId,
+      transactionId: `SHIFT-${shift.shiftId.slice(-8).toUpperCase()}`,
+      customerId: staffCustomer.customerId,
+      totalAmount: amountToCharge,
+      paidAmount: 0,
+      remainingAmount: amountToCharge,
+      dueDate: targetDueDate,
+      status: 'OPEN',
+      createdAt: timestamp
+    };
+
+    await db.receivables.add(staffReceivable);
+    await db.syncQueue.add({
+      entityType: 'receivables',
+      entityId: receivableId,
+      action: 'CREATE',
+      payload: staffReceivable,
+      status: 'PENDING',
+      retryCount: 0,
+      createdAt: timestamp
+    });
+
+    const resolutionNotes = params.notes?.trim() || `Dibebankan ke kasir ${cashierName} atas selisih kas shift senilai Rp ${amountToCharge.toLocaleString()}`;
+
+    const updatedShift: CashierShift = {
+      ...shift,
+      discrepancyApprovalStatus: 'CHARGED_TO_CASHIER',
+      discrepancyResolvedBy: ownerUser.name,
+      discrepancyResolvedAt: timestamp,
+      discrepancyResolutionNotes: resolutionNotes,
+      staffReceivableId: receivableId,
+      endNotes: shift.endNotes 
+        ? `${shift.endNotes} | Tanggungan Kasir: Rp ${amountToCharge.toLocaleString()} (${resolutionNotes})` 
+        : `Tanggungan Kasir: Rp ${amountToCharge.toLocaleString()} (${resolutionNotes})`
+    };
+
+    await db.shifts.put(updatedShift);
+
+    // Resolve any corresponding conflict
+    const conflict = await db.conflicts
+      .where('entityId')
+      .equals(params.shiftId)
+      .first();
+
+    if (conflict) {
+      await db.conflicts.update(conflict.conflictId, {
+        status: 'RESOLVED',
+        resolvedBy: ownerUser.name,
+        resolvedAt: timestamp,
+        details: {
+          ...conflict.details,
+          resolution: 'CHARGED_TO_CASHIER',
+          receivableId,
+          resolutionNotes
+        }
+      });
+    }
+
+    // Add notification
+    await db.notifications.add({
+      notificationId: uuidv4(),
+      severity: 'WARNING',
+      referenceId: params.shiftId,
+      message: `Selisih kas shift ${shift.shiftId.slice(-6).toUpperCase()} (Rp ${amountToCharge.toLocaleString()}) telah dibebankan sebagai piutang kasir kepada ${cashierName}.`,
+      isRead: false,
+      createdAt: timestamp
+    });
+
+    await AuditEngine.log({
+      userId: params.ownerUserId,
+      role: 'OWNER',
+      deviceId: 'system',
+      action: 'SHIFT_DISCREPANCY_CHARGED_TO_CASHIER',
+      module: 'SHIFT_RECONCILIATION',
+      referenceId: params.shiftId,
+      after: {
+        shiftId: params.shiftId,
+        cashierId: shift.userId,
+        amount: amountToCharge,
+        receivableId,
+        resolvedBy: ownerUser.name,
+        timestamp,
+        notes: resolutionNotes
+      }
+    });
+
+    await db.syncQueue.add({
+      entityType: 'shifts',
+      entityId: params.shiftId,
+      action: 'UPDATE',
+      payload: updatedShift,
+      status: 'PENDING',
+      retryCount: 0,
+      createdAt: timestamp
+    });
+
+    return { shift: updatedShift, receivable: staffReceivable };
+  }
+
+  /**
+   * Resolves a shift discrepancy by accepting it as a store operational expense/allowance (e.g., small coin rounding).
+   */
+  static async resolveDiscrepancyToStoreExpense(params: {
+    shiftId: string;
+    ownerUserId: string;
+    ownerPin: string;
+    notes?: string;
+  }): Promise<CashierShift> {
+    const shift = await db.shifts.get(params.shiftId);
+    if (!shift) throw new Error('Shift tidak ditemukan.');
+
+    const ownerUser = await db.users
+      .filter(u => u.role === 'OWNER' && (u.pinHash === params.ownerPin || (u as any).pin === params.ownerPin))
+      .first();
+    if (!ownerUser) {
+      throw new Error('PIN Owner tidak valid atau bukan akun Owner.');
+    }
+
+    const timestamp = new Date().toISOString();
+    const resolutionNotes = params.notes?.trim() || 'Disetujui sebagai beban toleransi operasional / pembulatan toko';
+
+    const updatedShift: CashierShift = {
+      ...shift,
+      discrepancyApprovalStatus: 'STORE_EXPENSE',
+      discrepancyResolvedBy: ownerUser.name,
+      discrepancyResolvedAt: timestamp,
+      discrepancyResolutionNotes: resolutionNotes,
+      endNotes: shift.endNotes 
+        ? `${shift.endNotes} | Beban Toko: ${resolutionNotes}` 
+        : `Beban Toko: ${resolutionNotes}`
+    };
+
+    await db.shifts.put(updatedShift);
+
+    const conflict = await db.conflicts
+      .where('entityId')
+      .equals(params.shiftId)
+      .first();
+
+    if (conflict) {
+      await db.conflicts.update(conflict.conflictId, {
+        status: 'RESOLVED',
+        resolvedBy: ownerUser.name,
+        resolvedAt: timestamp,
+        details: {
+          ...conflict.details,
+          resolution: 'STORE_EXPENSE',
+          resolutionNotes
+        }
+      });
+    }
+
+    await AuditEngine.log({
+      userId: params.ownerUserId,
+      role: 'OWNER',
+      deviceId: 'system',
+      action: 'SHIFT_DISCREPANCY_STORE_EXPENSE',
+      module: 'SHIFT_RECONCILIATION',
+      referenceId: params.shiftId,
+      after: {
+        shiftId: params.shiftId,
+        resolvedBy: ownerUser.name,
+        timestamp,
+        notes: resolutionNotes
       }
     });
 

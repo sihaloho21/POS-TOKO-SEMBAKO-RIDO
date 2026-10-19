@@ -10,6 +10,7 @@ import { AuditEngine } from '@/core/audit-engine';
 import { ShiftService } from '@/core/services/shift-service';
 import type { Receivable, Customer, Transaction, ReceivablePayment } from '@/core/types';
 import { RecordPaymentModal } from './RecordPaymentModal';
+import { StaffDebtManager } from './StaffDebtManager';
 import { format, differenceInDays, isPast, parseISO } from 'date-fns';
 import {
   CreditCard,
@@ -36,7 +37,7 @@ import {
   Edit3
 } from 'lucide-react';
 
-type ViewMode = 'INVOICES' | 'CUSTOMERS' | 'PAYMENTS';
+type ViewMode = 'INVOICES' | 'CUSTOMERS' | 'PAYMENTS' | 'KASBON_KASIR';
 type StatusFilter = 'ALL' | 'ACTIVE' | 'OPEN' | 'PARTIAL' | 'OVERDUE' | 'PAID';
 
 export default function Receivables() {
@@ -48,6 +49,14 @@ export default function Receivables() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ACTIVE');
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
+
+  useEffect(() => {
+    const handleOpenKasbon = () => {
+      setViewMode('KASBON_KASIR');
+    };
+    window.addEventListener('open_kasbon_tab', handleOpenKasbon);
+    return () => window.removeEventListener('open_kasbon_tab', handleOpenKasbon);
+  }, []);
 
   // Modal states
   const [selectedReceivable, setSelectedReceivable] = useState<Receivable | null>(null);
@@ -91,6 +100,16 @@ export default function Receivables() {
     users?.forEach(u => map.set(u.userId, u.name));
     return map;
   }, [users]);
+
+  const activeStaffKasbonCount = useMemo(() => {
+    if (!receivables || !customers) return 0;
+    const staffCustomerIds = new Set(
+      customers
+        .filter(c => c.name.toLowerCase().startsWith('kasir') || c.notes?.includes('Karyawan') || c.notes?.includes('Kasbon'))
+        .map(c => c.customerId)
+    );
+    return receivables.filter(r => r.remainingAmount > 0 && (staffCustomerIds.has(r.customerId) || r.transactionId.startsWith('SHIFT-') || r.transactionId.startsWith('KASBON-'))).length;
+  }, [receivables, customers]);
 
   // Auto-detect and sync overdue receivables in background
   useEffect(() => {
@@ -467,11 +486,45 @@ export default function Receivables() {
               <History size={15} />
               <span>Riwayat Cicilan</span>
             </button>
+            <button
+              onClick={() => setViewMode('KASBON_KASIR')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
+                viewMode === 'KASBON_KASIR'
+                  ? 'bg-rose-600 text-white shadow-md shadow-rose-200'
+                  : 'text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              <Wallet size={15} />
+              <span>Kasbon Kasir</span>
+              {activeStaffKasbonCount > 0 && (
+                <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-black ${
+                  viewMode === 'KASBON_KASIR' ? 'bg-white text-rose-700' : 'bg-rose-100 text-rose-700'
+                }`}>
+                  {activeStaffKasbonCount}
+                </span>
+              )}
+            </button>
           </div>
         </div>
       </div>
 
-      {/* KPI Summary Cards */}
+      {viewMode === 'KASBON_KASIR' ? (
+        <StaffDebtManager
+          onOpenPaymentModal={(receivable) => {
+            const enriched: any = {
+              ...receivable,
+              effectiveStatus: receivable.status,
+              customerName: customers?.find(c => c.customerId === receivable.customerId)?.name || 'Kasir',
+              customerPhone: '',
+              receiptNumber: receivable.transactionId
+            };
+            setSelectedReceivable(enriched);
+            setIsPaymentModalOpen(true);
+          }}
+        />
+      ) : (
+        <>
+          {/* KPI Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm relative overflow-hidden">
           <div className="flex justify-between items-start mb-2">
@@ -1019,6 +1072,8 @@ export default function Receivables() {
           </div>
         )}
       </div>
+        </>
+      )}
 
       {/* MODAL 1: REUSABLE RECORD PAYMENT MODAL */}
       <RecordPaymentModal

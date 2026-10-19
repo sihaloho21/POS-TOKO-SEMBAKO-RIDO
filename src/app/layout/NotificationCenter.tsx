@@ -31,7 +31,11 @@ export function NotificationCenter({ onClose, onNavigate }: { onClose: () => voi
 
   const handleClickItem = async (n: any) => {
     await db.notifications.update(n.notificationId, { isRead: true });
-    if (n.message.toLowerCase().includes('selisih') || n.message.toLowerCase().includes('shift')) {
+    if (n.message.toLowerCase().includes('kasbon') || n.message.toLowerCase().includes('tunggakan')) {
+      window.dispatchEvent(new CustomEvent('open_kasbon_tab'));
+      if (onNavigate) onNavigate('receivables');
+      onClose();
+    } else if (n.message.toLowerCase().includes('selisih') || n.message.toLowerCase().includes('shift')) {
       window.dispatchEvent(new CustomEvent('quick_navigate_approval', { detail: { subTab: 'approvals', shiftId: n.referenceId } }));
       if (onNavigate) onNavigate('conflicts');
       onClose();
