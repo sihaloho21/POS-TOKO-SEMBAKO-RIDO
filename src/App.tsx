@@ -44,6 +44,9 @@ export default function App() {
     // Start background sync
     SyncEngine.start();
 
+    // Ensure baseline products and stock movements are valid
+    ProductService.ensureBaselineProductsAndStock(currentUser?.userId).catch(err => console.warn('Baseline products init error:', err));
+
     // Ensure minimal fish products and suppliers
     FishService.ensureMinimalFishProducts(currentUser?.userId).catch(err => console.warn('Fish products init error:', err));
     FishService.ensureFishSuppliers(currentUser?.userId).catch(err => console.warn('Fish suppliers init error:', err));

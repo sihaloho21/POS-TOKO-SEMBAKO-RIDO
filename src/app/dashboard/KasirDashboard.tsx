@@ -35,6 +35,7 @@ import { format, formatDistanceToNow } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
 import { useDeviceId } from '@/core/device-store';
 import ClockOutModal from '@/app/shift/ClockOutModal';
+import { OutstandingDebtWidget } from './OutstandingDebtWidget';
 
 interface KasirDashboardProps {
   onNavigate?: (tab: string) => void;
@@ -123,6 +124,10 @@ export default function KasirDashboard({ onNavigate }: KasirDashboardProps) {
 
   const nonCashSales = completedTxs
     .filter(tx => tx.paymentMethodId !== 'CASH')
+    .reduce((acc, tx) => acc + tx.total, 0);
+
+  const shiftGajianSales = completedTxs
+    .filter(tx => tx.type === 'GAJIAN')
     .reduce((acc, tx) => acc + tx.total, 0);
 
   const startingCash = currentShift?.startingCash || 0;
@@ -382,53 +387,65 @@ export default function KasirDashboard({ onNavigate }: KasirDashboardProps) {
             )}
 
             {currentShift ? (
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5 mb-6">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
                 {/* Total Transactions */}
-                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-100">
                   <div className="flex items-center justify-between text-slate-400 mb-2">
                     <span className="text-[10px] font-black uppercase tracking-wider">Transaksi</span>
                     <Receipt size={16} className="text-blue-500" />
                   </div>
-                  <span className="text-2xl font-black text-slate-900 tabular-nums block">
+                  <span className="text-xl font-black text-slate-900 tabular-nums block">
                     {totalCompletedCount}
                   </span>
-                  <span className="text-[10px] font-bold text-slate-400 mt-1 block">Struk Berhasil</span>
+                  <span className="text-[10px] font-bold text-slate-400 mt-0.5 block">Struk Berhasil</span>
                 </div>
 
                 {/* Total Penjualan */}
-                <div className="p-4 bg-blue-50/60 rounded-2xl border border-blue-100">
+                <div className="p-3.5 bg-blue-50/60 rounded-2xl border border-blue-100">
                   <div className="flex items-center justify-between text-blue-600 mb-2">
                     <span className="text-[10px] font-black uppercase tracking-wider">Total Omzet</span>
                     <TrendingUp size={16} />
                   </div>
-                  <span className="text-xl font-black text-blue-700 tabular-nums block truncate">
+                  <span className="text-lg font-black text-blue-700 tabular-nums block truncate">
                     Rp {totalSalesVolume.toLocaleString()}
                   </span>
-                  <span className="text-[10px] font-bold text-blue-500 mt-1 block">Penjualan Shift</span>
+                  <span className="text-[10px] font-bold text-blue-500 mt-0.5 block">Penjualan Shift</span>
                 </div>
 
                 {/* Penjualan Tunai */}
-                <div className="p-4 bg-emerald-50/60 rounded-2xl border border-emerald-100">
+                <div className="p-3.5 bg-emerald-50/60 rounded-2xl border border-emerald-100">
                   <div className="flex items-center justify-between text-emerald-600 mb-2">
                     <span className="text-[10px] font-black uppercase tracking-wider">Tunai Masuk</span>
                     <Banknote size={16} />
                   </div>
-                  <span className="text-xl font-black text-emerald-700 tabular-nums block truncate">
+                  <span className="text-lg font-black text-emerald-700 tabular-nums block truncate">
                     Rp {cashSales.toLocaleString()}
                   </span>
-                  <span className="text-[10px] font-bold text-emerald-500 mt-1 block">Uang Fisik Kas</span>
+                  <span className="text-[10px] font-bold text-emerald-500 mt-0.5 block">Uang Fisik Kas</span>
                 </div>
 
                 {/* Non-Tunai */}
-                <div className="p-4 bg-purple-50/60 rounded-2xl border border-purple-100">
+                <div className="p-3.5 bg-purple-50/60 rounded-2xl border border-purple-100">
                   <div className="flex items-center justify-between text-purple-600 mb-2">
                     <span className="text-[10px] font-black uppercase tracking-wider">Non-Tunai</span>
                     <QrCode size={16} />
                   </div>
-                  <span className="text-xl font-black text-purple-700 tabular-nums block truncate">
+                  <span className="text-lg font-black text-purple-700 tabular-nums block truncate">
                     Rp {nonCashSales.toLocaleString()}
                   </span>
-                  <span className="text-[10px] font-bold text-purple-500 mt-1 block">QRIS / Transfer</span>
+                  <span className="text-[10px] font-bold text-purple-500 mt-0.5 block">QRIS / Transfer</span>
+                </div>
+
+                {/* Piutang / Tempo Shift */}
+                <div className="p-3.5 bg-amber-50/70 rounded-2xl border border-amber-200/80">
+                  <div className="flex items-center justify-between text-amber-600 mb-2">
+                    <span className="text-[10px] font-black uppercase tracking-wider">Tempo (Gajian)</span>
+                    <CreditCard size={16} />
+                  </div>
+                  <span className="text-lg font-black text-amber-800 tabular-nums block truncate">
+                    Rp {shiftGajianSales.toLocaleString()}
+                  </span>
+                  <span className="text-[10px] font-bold text-amber-600 mt-0.5 block">Piutang Shift Ini</span>
                 </div>
               </div>
             ) : (
@@ -481,8 +498,15 @@ export default function KasirDashboard({ onNavigate }: KasirDashboardProps) {
           )}
         </div>
 
-        {/* Right Col: Quick Actions & Shift Shortcut */}
+        {/* Right Col: Outstanding Debt Widget & Quick Actions */}
         <div className="space-y-4">
+          {/* Total Outstanding Debt Widget for Kasir Visibility */}
+          <OutstandingDebtWidget 
+            onNavigate={onNavigate} 
+            role="KASIR" 
+            shiftCreditSales={shiftGajianSales} 
+          />
+
           {/* Quick Actions Card */}
           <div className="bg-white rounded-3xl border border-slate-200 p-5 shadow-sm space-y-3">
             <h3 className="font-black text-slate-900 text-xs uppercase tracking-wider text-slate-400">

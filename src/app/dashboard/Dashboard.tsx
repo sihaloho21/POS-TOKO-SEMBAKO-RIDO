@@ -12,6 +12,7 @@ import { LowStockBanner } from './LowStockBanner';
 import { SalesTrendChart } from './SalesTrendChart';
 import { InventoryProjectionsWidget } from './InventoryProjectionsWidget';
 import { VisualAnalyticsSection } from './VisualAnalyticsSection';
+import { OutstandingDebtWidget } from './OutstandingDebtWidget';
 import { useToastStore } from '@/core/toast-store';
 import { IntegrityService } from '@/core/services/integrity-service';
 
@@ -82,7 +83,7 @@ export default function Dashboard({ onTabChange }: { onTabChange: (tab: string) 
         onAction={() => onTabChange('inventory')} 
       />
 
-      <SummaryCards />
+      <SummaryCards onTabChange={onTabChange} />
 
       <VisualAnalyticsSection transactions={transactions || []} />
 
@@ -152,6 +153,9 @@ export default function Dashboard({ onTabChange }: { onTabChange: (tab: string) 
             ))}
           </div>
         </div>
+
+        {/* 3rd Column: Total Outstanding Debt & Credit Exposure Widget */}
+        <OutstandingDebtWidget onNavigate={onTabChange} role="OWNER" />
       </div>
     </div>
   );

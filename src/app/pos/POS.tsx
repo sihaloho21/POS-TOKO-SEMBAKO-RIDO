@@ -47,6 +47,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { ShiftService } from '@/core/services/shift-service';
 import { StoreStatusService } from '@/core/services/store-status-service';
 import { StockService } from '@/core/services/stock-service';
+import { ProductService } from '@/core/services/product-service';
 import { useDeviceId } from '@/core/device-store';
 import { PrintService } from '@/core/utils/print-service';
 import { useToastStore } from '@/core/toast-store';
@@ -223,6 +224,13 @@ export default function POS() {
     return () => { isMounted = false; };
   }, [products]);
 
+  // Ensure stock movements and baseline items are healthy on POS initialization
+  useEffect(() => {
+    ProductService.ensureBaselineProductsAndStock(currentUser?.userId).catch(err =>
+      console.warn('POS stock ensure baseline error:', err)
+    );
+  }, [currentUser?.userId]);
+
   const handleInspectBundle = async (bundleId: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     const bundle = await db.bundles.get(bundleId);
@@ -237,14 +245,45 @@ export default function POS() {
 
   const subtotal = cart.reduce((acc, item) => acc + item.subtotal, 0);
 
-  // Loyalty Points Pay-with-Points (1 Pts = Rp 100 diskon)
+  // Dynamic Loyalty & Member Tier Configuration
+  const loyaltyConfig = useLiveQuery(() => db.settings.get('loyalty'));
+  const [customerLoyaltyStats, setCustomerLoyaltyStats] = useState<any>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    if (selectedCustomer?.customerId) {
+      LoyaltyEngine.getCustomerStats(selectedCustomer.customerId).then(stats => {
+        if (isMounted) setCustomerLoyaltyStats(stats);
+      });
+    } else {
+      setCustomerLoyaltyStats(null);
+    }
+    return () => { isMounted = false; };
+  }, [selectedCustomer?.customerId, selectedCustomer?.loyaltyPoints, loyaltyConfig]);
+
+  const POINT_VALUE = loyaltyConfig?.pointRedemptionValue || 100;
+  const MIN_REDEEM_PTS = loyaltyConfig?.minRedemptionPoints || 50;
+  const isLoyaltyEnabled = loyaltyConfig?.isEnabled ?? true;
+  const excludeReseller = loyaltyConfig?.excludeReseller ?? true;
+
+  // Member Tier Discount (Non-reseller retail only)
+  const memberTierDiscountPercent = (isLoyaltyEnabled && !selectedCustomer?.isReseller && customerLoyaltyStats?.tierDiscountPercent) 
+    ? customerLoyaltyStats.tierDiscountPercent 
+    : 0;
+  const memberTierDiscountAmount = Math.round((subtotal * memberTierDiscountPercent) / 100);
+  const subtotalAfterTierDiscount = Math.max(0, subtotal - memberTierDiscountAmount);
+
   const [loyaltyPointsToRedeem, setLoyaltyPointsToRedeem] = useState<number>(0);
-  const POINT_VALUE = 100;
-  const availableCustomerPoints = (!selectedCustomer?.isReseller && selectedCustomer?.loyaltyPoints) ? selectedCustomer.loyaltyPoints : 0;
-  const maxRedeemablePoints = Math.min(availableCustomerPoints, Math.floor(subtotal / POINT_VALUE));
+  const availableCustomerPoints = (isLoyaltyEnabled && !(excludeReseller && selectedCustomer?.isReseller) && selectedCustomer?.loyaltyPoints) 
+    ? selectedCustomer.loyaltyPoints 
+    : 0;
+  const maxRedeemablePoints = availableCustomerPoints >= MIN_REDEEM_PTS
+    ? Math.min(availableCustomerPoints, Math.floor(subtotalAfterTierDiscount / POINT_VALUE))
+    : 0;
   const activeRedeemPoints = Math.min(loyaltyPointsToRedeem, maxRedeemablePoints);
   const loyaltyDiscount = activeRedeemPoints * POINT_VALUE;
-  const payableTotal = Math.max(0, subtotal - loyaltyDiscount);
+  const totalCartDiscount = memberTierDiscountAmount + loyaltyDiscount;
+  const payableTotal = Math.max(0, subtotalAfterTierDiscount - loyaltyDiscount);
 
   // Reset redeemed points when customer changes
   useEffect(() => {
@@ -508,7 +547,7 @@ export default function POS() {
         shiftId: currentShift.shiftId,
         customerId: selectedCustomer?.customerId,
         items: cart,
-        discount: loyaltyDiscount,
+        discount: totalCartDiscount,
         paymentMethodId: finalMethod,
         moneyStorageId: moneyStorageId,
         type: transactionType,
@@ -534,6 +573,9 @@ export default function POS() {
 
       const pointsEarned = transaction?.loyaltyPointsEarned || 0;
       let successMsg = `Transaksi ${transaction?.receiptNumber || ''} Berhasil!`;
+      if (memberTierDiscountAmount > 0) {
+        successMsg += ` (Diskon Member ${customerLoyaltyStats?.tier || ''} ${memberTierDiscountPercent}%: -Rp ${memberTierDiscountAmount.toLocaleString()})`;
+      }
       if (activeRedeemPoints > 0) {
         successMsg += ` (Tukar ${activeRedeemPoints} Pts = Diskon Rp ${loyaltyDiscount.toLocaleString()})`;
       }
@@ -551,12 +593,12 @@ export default function POS() {
       setShowSuccess(true);
       setTimeout(() => setShowSuccess(false), 3000);
     } catch (error: any) {
-      console.error('Checkout failed:', error);
       const errMsg = error?.message || 'Gagal memproses transaksi.';
       const isShortage = errMsg.toLowerCase().includes('stok') || 
                          errMsg.toLowerCase().includes('mencukupi') || 
                          errMsg.toLowerCase().includes('shortage');
       if (isShortage) {
+        console.warn('Checkout stock shortage detected:', errMsg);
         setOverrideStockPrompt({
           message: errMsg,
           method: finalMethod
@@ -564,6 +606,7 @@ export default function POS() {
         setOverrideOwnerPin('');
         setOverridePinError('');
       } else {
+        console.error('Checkout failed:', error);
         addToast(errMsg, 'error');
       }
     } finally {
@@ -581,6 +624,69 @@ export default function POS() {
     const method = overrideStockPrompt.method;
     setOverrideStockPrompt(null);
     executeFinalSale(method, true);
+  };
+
+  const handleQuickRestockFromModal = async () => {
+    if (!overrideStockPrompt) return;
+    setIsProcessing(true);
+    try {
+      const nowStr = new Date().toISOString();
+      for (const item of cart) {
+        const prod = await db.products.get(item.productId);
+        if (!prod) continue;
+        if (prod.productType === 'BUNDLE') {
+          const bundle = await db.bundles.get(item.productId);
+          if (bundle) {
+            for (const comp of bundle.components) {
+              const compId = comp.componentProductId || comp.productId;
+              if (compId) {
+                const compProd = await db.products.get(compId);
+                await StockService.recordMovement({
+                  productId: compId,
+                  movementType: 'ADJUSTMENT_IN',
+                  qty: 100,
+                  unit: compProd?.baseUnit || 'PCS',
+                  baseQty: 100,
+                  referenceId: `restock_b_${uuidv4().slice(0, 6)}`,
+                  segmentId: compProd?.productType === 'FISH' ? 'IKAN' : 'WARUNG',
+                  reason: `Restock Cepat Kasir POS untuk Komponen Paket ${prod.name}`,
+                  costSnapshot: compProd?.hpp || 10000,
+                  userId: currentUser?.userId || 'SYSTEM',
+                  deviceId: 'LOCAL',
+                  timestamp: nowStr
+                });
+                await StockService.reconcileProductStock(compId);
+              }
+            }
+          }
+        } else {
+          await StockService.recordMovement({
+            productId: item.productId,
+            movementType: 'ADJUSTMENT_IN',
+            qty: 100,
+            unit: item.unit || prod.baseUnit,
+            baseQty: 100,
+            referenceId: `restock_pos_${uuidv4().slice(0, 6)}`,
+            segmentId: prod.productType === 'FISH' ? 'IKAN' : 'WARUNG',
+            reason: `Restock Cepat Kasir POS: ${prod.name}`,
+            costSnapshot: prod.hpp || 10000,
+            userId: currentUser?.userId || 'SYSTEM',
+            deviceId: 'LOCAL',
+            timestamp: nowStr
+          });
+          await StockService.reconcileProductStock(item.productId);
+        }
+      }
+      addToast('Stok berhasil dipulihkan (+100)! Memproses transaksi...', 'success');
+      const method = overrideStockPrompt.method;
+      setOverrideStockPrompt(null);
+      await executeFinalSale(method, false);
+    } catch (err: any) {
+      console.warn('Restock failed:', err);
+      addToast(err?.message || 'Gagal menambah stok', 'error');
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const handleSearchChange = (val: string) => {
@@ -1184,27 +1290,32 @@ export default function POS() {
                         </div>
                         <p className="text-[10px] text-slate-300">
                           Saldo: <strong className="text-amber-400">{(selectedCustomer.loyaltyPoints || 0).toLocaleString()} Pts</strong>
+                          {customerLoyaltyStats && (
+                            <span className="text-blue-300 font-bold ml-1.5">
+                              • Tier {customerLoyaltyStats.tier} {memberTierDiscountPercent > 0 ? `(Diskon ${memberTierDiscountPercent}%)` : ''}
+                            </span>
+                          )}
                           {!selectedCustomer.isReseller && (
                             <span className="text-emerald-400 font-bold ml-1.5">
-                              • Estimasi Poin: +{LoyaltyEngine.calculatePointsForAmount(payableTotal, selectedCustomer.isReseller)} Pts
+                              • Poin Baru: +{LoyaltyEngine.calculatePointsForAmount(payableTotal, selectedCustomer.isReseller, loyaltyConfig?.pointsPerAmount || 10000, excludeReseller)} Pts
                             </span>
                           )}
                         </p>
                       </div>
                     </div>
 
-                    {!selectedCustomer.isReseller && LoyaltyEngine.calculatePointsForAmount(payableTotal, selectedCustomer.isReseller) > 0 && (
+                    {!selectedCustomer.isReseller && LoyaltyEngine.calculatePointsForAmount(payableTotal, selectedCustomer.isReseller, loyaltyConfig?.pointsPerAmount || 10000, excludeReseller) > 0 && (
                       <span className="px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black uppercase tracking-wider animate-pulse shrink-0">
-                        +{LoyaltyEngine.calculatePointsForAmount(payableTotal, selectedCustomer.isReseller)} PTS
+                        +{LoyaltyEngine.calculatePointsForAmount(payableTotal, selectedCustomer.isReseller, loyaltyConfig?.pointsPerAmount || 10000, excludeReseller)} PTS
                       </span>
                     )}
                   </div>
 
                   {/* Pay-with-Points (Redemption) Selector */}
-                  {!selectedCustomer.isReseller && maxRedeemablePoints >= 10 && (
+                  {!selectedCustomer.isReseller && maxRedeemablePoints >= MIN_REDEEM_PTS && (
                     <div className="pt-2 border-t border-amber-500/20">
                       <div className="flex items-center justify-between text-[11px] mb-1">
-                        <span className="text-amber-200 font-bold">Tukar Poin Diskon (1 Pts = Rp 100):</span>
+                        <span className="text-amber-200 font-bold">Tukar Poin Diskon (1 Pts = Rp {POINT_VALUE}):</span>
                         {activeRedeemPoints > 0 && (
                           <span className="font-mono font-black text-emerald-400">-Rp {loyaltyDiscount.toLocaleString()}</span>
                         )}
@@ -1219,19 +1330,21 @@ export default function POS() {
                         >
                           Batal (0 Pts)
                         </button>
-                        {[10, 20, 50].filter(pts => pts <= maxRedeemablePoints).map(pts => (
-                          <button
-                            key={pts}
-                            type="button"
-                            onClick={() => setLoyaltyPointsToRedeem(pts)}
-                            className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
-                              activeRedeemPoints === pts ? 'bg-amber-400 text-slate-950 font-black' : 'bg-slate-800 text-amber-300 hover:bg-slate-700'
-                            }`}
-                          >
-                            {pts} Pts (-Rp {(pts * 100).toLocaleString()})
-                          </button>
-                        ))}
-                        {maxRedeemablePoints >= 10 && (
+                        {Array.from(new Set([MIN_REDEEM_PTS, MIN_REDEEM_PTS * 2, MIN_REDEEM_PTS * 4]))
+                          .filter(pts => pts > 0 && pts <= maxRedeemablePoints)
+                          .map(pts => (
+                            <button
+                              key={pts}
+                              type="button"
+                              onClick={() => setLoyaltyPointsToRedeem(pts)}
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                                activeRedeemPoints === pts ? 'bg-amber-400 text-slate-950 font-black' : 'bg-slate-800 text-amber-300 hover:bg-slate-700'
+                              }`}
+                            >
+                              {pts} Pts (-Rp {(pts * POINT_VALUE).toLocaleString()})
+                            </button>
+                          ))}
+                        {maxRedeemablePoints >= MIN_REDEEM_PTS && (
                           <button
                             type="button"
                             onClick={() => setLoyaltyPointsToRedeem(maxRedeemablePoints)}
@@ -1247,32 +1360,19 @@ export default function POS() {
                   )}
 
                   {/* Upselling Tier Nudge Banner */}
-                  {!selectedCustomer.isReseller && (
-                    (() => {
-                      const curPts = selectedCustomer.loyaltyPoints || 0;
-                      let targetPts = 50;
-                      let targetTierName = 'SILVER (Diskon 2%)';
-                      if (curPts >= 200) {
-                        targetPts = 500;
-                        targetTierName = 'PLATINUM (VIP Bebas Antre & Hadiah)';
-                      } else if (curPts >= 50) {
-                        targetPts = 200;
-                        targetTierName = 'GOLD (Diskon 5%)';
-                      }
-                      const earnedFromNow = Math.floor(payableTotal / 10000);
-                      const remainingPts = targetPts - (curPts + earnedFromNow);
-                      const remainingSpend = remainingPts * 10000;
-                      if (remainingPts > 0 && remainingSpend <= 100000) {
-                        return (
-                          <div className="p-2 rounded-xl bg-purple-500/20 border border-purple-400/30 text-[10px] text-purple-200 flex items-center gap-1.5">
-                            <Sparkles size={13} className="text-amber-400 shrink-0" />
-                            <span>💡 <strong>Nudge:</strong> Belanja Rp {remainingSpend.toLocaleString()} lagi untuk naik ke <strong>Member {targetTierName}</strong>!</span>
-                          </div>
-                        );
-                      }
-                      return null;
-                    })()
+                  {!selectedCustomer.isReseller && customerLoyaltyStats?.nextTier && customerLoyaltyStats.spendToNextTier > 0 && customerLoyaltyStats.spendToNextTier <= 250000 && (
+                    <div className="p-2 rounded-xl bg-purple-500/20 border border-purple-400/30 text-[10px] text-purple-200 flex items-center gap-1.5">
+                      <Sparkles size={13} className="text-amber-400 shrink-0" />
+                      <span>💡 <strong>Nudge:</strong> Belanja Rp {customerLoyaltyStats.spendToNextTier.toLocaleString()} lagi untuk naik ke <strong>Tier {customerLoyaltyStats.nextTier}</strong>!</span>
+                    </div>
                   )}
+                </div>
+              )}
+
+              {memberTierDiscountAmount > 0 && (
+                <div className="flex justify-between text-[11px] font-bold text-blue-400">
+                  <span>Diskon Member Tier {customerLoyaltyStats?.tier || ''} ({memberTierDiscountPercent}%)</span>
+                  <span className="tabular-nums">-Rp {memberTierDiscountAmount.toLocaleString()}</span>
                 </div>
               )}
 
@@ -1345,12 +1445,19 @@ export default function POS() {
               <span className="text-3xl font-black text-blue-600 tabular-nums">
                 Rp {payableTotal.toLocaleString()}
               </span>
-              {loyaltyDiscount > 0 && (
-                <div className="mt-1 flex items-center justify-center gap-2 text-[11px] font-bold">
+              {(memberTierDiscountAmount > 0 || loyaltyDiscount > 0) && (
+                <div className="mt-1 flex flex-wrap items-center justify-center gap-1.5 text-[11px] font-bold">
                   <span className="text-slate-500 line-through">Rp {subtotal.toLocaleString()}</span>
-                  <span className="text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full font-black">
-                    Diskon Poin: -Rp {loyaltyDiscount.toLocaleString()}
-                  </span>
+                  {memberTierDiscountAmount > 0 && (
+                    <span className="text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full font-black">
+                      Diskon {customerLoyaltyStats?.tier || 'Member'} ({memberTierDiscountPercent}%): -Rp {memberTierDiscountAmount.toLocaleString()}
+                    </span>
+                  )}
+                  {loyaltyDiscount > 0 && (
+                    <span className="text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full font-black">
+                      Diskon Poin: -Rp {loyaltyDiscount.toLocaleString()}
+                    </span>
+                  )}
                 </div>
               )}
             </div>
@@ -1361,15 +1468,15 @@ export default function POS() {
                 <div className="flex items-center justify-between text-amber-950 font-bold mb-1.5">
                   <span className="flex items-center gap-1.5">
                     <Trophy size={15} className="text-amber-600" />
-                    Member: {selectedCustomer.name}
+                    Member: {selectedCustomer.name} {customerLoyaltyStats && `(Tier ${customerLoyaltyStats.tier})`}
                   </span>
                   <span>Saldo: {(selectedCustomer.loyaltyPoints || 0).toLocaleString()} Pts</span>
                 </div>
                 {!selectedCustomer.isReseller ? (
                   <div className="flex items-center justify-between pt-1.5 border-t border-amber-200/80 text-[11px]">
-                    <span className="text-slate-600 font-medium">Poin Diperoleh (1 Pts / Rp 10.000):</span>
+                    <span className="text-slate-600 font-medium">Poin Diperoleh dari Belanja Ini:</span>
                     <span className="font-black text-emerald-600 tabular-nums">
-                      +{LoyaltyEngine.calculatePointsForAmount(payableTotal, selectedCustomer.isReseller)} Pts
+                      +{LoyaltyEngine.calculatePointsForAmount(payableTotal, selectedCustomer.isReseller, loyaltyConfig?.pointsPerAmount || 10000, excludeReseller)} Pts
                     </span>
                   </div>
                 ) : (
@@ -1773,32 +1880,44 @@ export default function POS() {
               )}
             </div>
 
-            <div className="flex gap-2">
+            <div className="space-y-2">
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setOverrideStockPrompt(null)}
+                  className="flex-1 py-3 font-bold text-xs uppercase tracking-wider text-slate-500 hover:bg-slate-100 rounded-xl"
+                >
+                  Batal
+                </button>
+                {currentUser?.role === 'KASIR' ? (
+                  <button
+                    disabled={isProcessing || !overrideOwnerPin}
+                    onClick={handleKasirStockOverride}
+                    className="flex-1 py-3 bg-amber-600 hover:bg-amber-500 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-amber-200 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    <ShieldCheck size={16} />
+                    <span>Verifikasi & Proses</span>
+                  </button>
+                ) : (
+                  <button
+                    disabled={isProcessing}
+                    onClick={() => executeFinalSale(overrideStockPrompt.method, true)}
+                    className="flex-1 py-3 bg-amber-600 hover:bg-amber-500 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-amber-200 transition-all flex items-center justify-center gap-2"
+                  >
+                    <ShieldCheck size={16} />
+                    <span>Izinkan & Proses</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Quick Restock Option */}
               <button
-                onClick={() => setOverrideStockPrompt(null)}
-                className="flex-1 py-3 font-bold text-xs uppercase tracking-wider text-slate-500 hover:bg-slate-100 rounded-xl"
+                disabled={isProcessing}
+                onClick={handleQuickRestockFromModal}
+                className="w-full py-2.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 font-black text-xs uppercase tracking-wider rounded-xl transition-all flex items-center justify-center gap-1.5"
               >
-                Batal
+                <Plus size={15} />
+                <span>Restock Cepat (+100 Unit) & Selesaikan</span>
               </button>
-              {currentUser?.role === 'KASIR' ? (
-                <button
-                  disabled={isProcessing || !overrideOwnerPin}
-                  onClick={handleKasirStockOverride}
-                  className="flex-1 py-3 bg-amber-600 hover:bg-amber-500 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-amber-200 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-                >
-                  <ShieldCheck size={16} />
-                  <span>Verifikasi & Proses</span>
-                </button>
-              ) : (
-                <button
-                  disabled={isProcessing}
-                  onClick={() => executeFinalSale(overrideStockPrompt.method, true)}
-                  className="flex-1 py-3 bg-amber-600 hover:bg-amber-500 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-amber-200 transition-all flex items-center justify-center gap-2"
-                >
-                  <ShieldCheck size={16} />
-                  <span>Izinkan & Proses</span>
-                </button>
-              )}
             </div>
           </div>
         </div>

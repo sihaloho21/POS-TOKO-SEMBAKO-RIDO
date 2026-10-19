@@ -429,3 +429,28 @@ export interface LoyaltyEvent {
   timestamp: string;
   notes?: string;
 }
+
+export type MemberTierColorScheme = 'BRONZE' | 'SILVER' | 'GOLD' | 'PLATINUM' | 'EMERALD' | 'BLUE' | 'ROSE';
+
+export interface MemberTierConfig {
+  id: string;
+  name: string;
+  minThreshold: number; // Minimal akumulasi poin atau belanja rupiah
+  discountPercent: number; // Diskon belanja (%)
+  colorScheme: MemberTierColorScheme;
+  perks: string[];
+}
+
+export interface LoyaltySettingsConfig {
+  id: 'loyalty';
+  isEnabled: boolean;
+  pointsPerAmount: number; // Misal Rp 10.000 per 1 poin
+  pointRedemptionValue: number; // Misal 1 poin = Rp 100
+  minRedemptionPoints: number; // Misal minimal 50 poin untuk redeem
+  qualificationBasis: 'LIFETIME_POINTS' | 'LIFETIME_SPEND';
+  excludeReseller: boolean;
+  tiers: MemberTierConfig[];
+  updatedAt: string;
+  updatedBy?: string;
+}
+

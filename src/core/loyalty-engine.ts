@@ -1,40 +1,57 @@
 import { db } from './database';
-import type { LoyaltyEvent, Transaction, Customer } from './types';
+import type { LoyaltyEvent, Transaction, Customer, MemberTierConfig } from './types';
 import { v4 as uuidv4 } from 'uuid';
+import { LoyaltySettingsService, DEFAULT_LOYALTY_SETTINGS } from './services/loyalty-settings-service';
 
 export interface CustomerLoyaltyStats {
   currentPoints: number;
   totalEarned: number;
   totalRedeemed: number;
-  tier: 'BRONZE' | 'SILVER' | 'GOLD' | 'PLATINUM';
+  totalSpend: number;
+  tier: string;
+  tierId: string;
+  tierDiscountPercent: number;
+  tierColorScheme: string;
   nextTier: string | null;
   pointsToNextTier: number;
+  spendToNextTier: number;
   progressPercent: number;
   tierPerks: string[];
+  pointRedemptionValue: number;
+  pointsRupiahValue: number;
+  qualificationBasis: 'LIFETIME_POINTS' | 'LIFETIME_SPEND';
 }
 
 export class LoyaltyEngine {
-  static readonly POINTS_PER_AMOUNT = 10000; // 1 Poin per Rp 10.000 total belanja
-
   /**
-   * Calculate loyalty points based on transaction total.
-   * Reseller accounts are excluded from loyalty program (PRD 37).
+   * Calculate loyalty points based on transaction total and dynamic settings.
    */
   static async calculatePoints(transaction: Transaction): Promise<number> {
     if (!transaction.customerId) return 0;
-    const customer = await db.customers.get(transaction.customerId);
-    if (!customer || customer.isReseller) return 0;
+    const settings = await LoyaltySettingsService.getSettings();
+    if (!settings.isEnabled) return 0;
 
-    // Calculate points strictly based on transaction total
-    return Math.floor(Math.max(0, transaction.total) / this.POINTS_PER_AMOUNT);
+    const customer = await db.customers.get(transaction.customerId);
+    if (!customer) return 0;
+    if (settings.excludeReseller && customer.isReseller) return 0;
+
+    const pointsRatio = Math.max(1, settings.pointsPerAmount);
+    return Math.floor(Math.max(0, transaction.total) / pointsRatio);
   }
 
   /**
    * Calculate potential loyalty points preview from an amount directly.
    */
-  static calculatePointsForAmount(amount: number, isReseller: boolean = false): number {
-    if (isReseller || amount <= 0) return 0;
-    return Math.floor(amount / this.POINTS_PER_AMOUNT);
+  static calculatePointsForAmount(
+    amount: number,
+    isReseller: boolean = false,
+    pointsPerAmount: number = DEFAULT_LOYALTY_SETTINGS.pointsPerAmount,
+    excludeReseller: boolean = true
+  ): number {
+    if (excludeReseller && isReseller) return 0;
+    if (amount <= 0) return 0;
+    const ratio = Math.max(1, pointsPerAmount);
+    return Math.floor(amount / ratio);
   }
 
   /**
@@ -131,7 +148,7 @@ export class LoyaltyEngine {
   }
 
   /**
-   * Record manual adjustment or point redemption by authorized staff.
+   * Record manual adjustment or point redemption by authorized staff or POS.
    */
   static async recordAdjustmentEvent(params: {
     customerId: string;
@@ -198,11 +215,15 @@ export class LoyaltyEngine {
   }
 
   /**
-   * Get comprehensive customer loyalty statistics and tier level.
+   * Get comprehensive customer loyalty statistics and tier level evaluated against dynamic settings.
    */
   static async getCustomerStats(customerId: string): Promise<CustomerLoyaltyStats> {
-    const customer = await db.customers.get(customerId);
-    const events = await db.loyaltyEvents.where('customerId').equals(customerId).toArray();
+    const [customer, events, settings, transactions] = await Promise.all([
+      db.customers.get(customerId),
+      db.loyaltyEvents.where('customerId').equals(customerId).toArray(),
+      LoyaltySettingsService.getSettings(),
+      db.transactions.where('customerId').equals(customerId).toArray()
+    ]);
 
     const currentPoints = customer?.loyaltyPoints || 0;
     let totalEarned = 0;
@@ -216,42 +237,96 @@ export class LoyaltyEngine {
       }
     }
 
-    // Determine tier
-    let tier: 'BRONZE' | 'SILVER' | 'GOLD' | 'PLATINUM' = 'BRONZE';
-    let nextTier: string | null = 'SILVER';
-    let pointsToNextTier = 50 - currentPoints;
-    let progressPercent = Math.min(100, Math.round((currentPoints / 50) * 100));
-    let tierPerks = ['Akses Promo Sembako Reguler', 'Kupon Belanja Bulanan'];
+    // Total spend in completed sales
+    const totalSpend = transactions
+      .filter(tx => tx.status === 'COMPLETED' && tx.type !== 'RETURN')
+      .reduce((sum, tx) => sum + (tx.total || 0), 0);
 
-    if (currentPoints >= 500) {
-      tier = 'PLATINUM';
-      nextTier = null;
-      pointsToNextTier = 0;
-      progressPercent = 100;
-      tierPerks = ['VIP Bebas Antri Prioritas', 'Harga Grosir Khusus', 'Hadiah Sembako Tahunan', 'Layanan Pesan Antar Bebas Biaya'];
-    } else if (currentPoints >= 200) {
-      tier = 'GOLD';
-      nextTier = 'PLATINUM (500 Pts)';
-      pointsToNextTier = 500 - currentPoints;
-      progressPercent = Math.min(100, Math.round(((currentPoints - 200) / 300) * 100));
-      tierPerks = ['Diskon Member 5% Terpilih', 'Prioritas Pemesanan Stok', 'Bonus Dobel Poin Hari Tertentu'];
-    } else if (currentPoints >= 50) {
-      tier = 'SILVER';
-      nextTier = 'GOLD (200 Pts)';
-      pointsToNextTier = 200 - currentPoints;
-      progressPercent = Math.min(100, Math.round(((currentPoints - 50) / 150) * 100));
-      tierPerks = ['Diskon Member 2%', 'Bonus Poin Produk Sponsor'];
+    // Score for tier qualification
+    const qualificationScore = settings.qualificationBasis === 'LIFETIME_SPEND'
+      ? totalSpend
+      : Math.max(totalEarned, currentPoints);
+
+    // Sort tiers by minThreshold ascending
+    const sortedTiers = [...(settings.tiers || [])].sort((a, b) => a.minThreshold - b.minThreshold);
+
+    // Find current tier
+    let activeTier: MemberTierConfig = sortedTiers[0] || {
+      id: 'tier-default',
+      name: 'MEMBER',
+      minThreshold: 0,
+      discountPercent: 0,
+      colorScheme: 'BRONZE',
+      perks: ['Akses Promo Sembako']
+    };
+    let nextTierConfig: MemberTierConfig | null = null;
+
+    for (let i = 0; i < sortedTiers.length; i++) {
+      if (qualificationScore >= sortedTiers[i].minThreshold) {
+        activeTier = sortedTiers[i];
+        nextTierConfig = sortedTiers[i + 1] || null;
+      } else {
+        if (!nextTierConfig) nextTierConfig = sortedTiers[i];
+        break;
+      }
     }
+
+    let pointsToNextTier = 0;
+    let spendToNextTier = 0;
+    let progressPercent = 100;
+
+    if (nextTierConfig) {
+      const currentTierThreshold = activeTier.minThreshold;
+      const nextThreshold = nextTierConfig.minThreshold;
+      const span = Math.max(1, nextThreshold - currentTierThreshold);
+      const progressAmount = Math.max(0, qualificationScore - currentTierThreshold);
+
+      progressPercent = Math.min(100, Math.max(0, Math.round((progressAmount / span) * 100)));
+
+      if (settings.qualificationBasis === 'LIFETIME_SPEND') {
+        spendToNextTier = Math.max(0, nextThreshold - qualificationScore);
+        pointsToNextTier = Math.ceil(spendToNextTier / Math.max(1, settings.pointsPerAmount));
+      } else {
+        pointsToNextTier = Math.max(0, nextThreshold - qualificationScore);
+        spendToNextTier = pointsToNextTier * Math.max(1, settings.pointsPerAmount);
+      }
+    }
+
+    const pointsRupiahValue = currentPoints * settings.pointRedemptionValue;
 
     return {
       currentPoints,
       totalEarned,
       totalRedeemed,
-      tier,
-      nextTier,
-      pointsToNextTier: Math.max(0, pointsToNextTier),
-      progressPercent: Math.max(0, Math.min(100, progressPercent)),
-      tierPerks
+      totalSpend,
+      tier: activeTier.name,
+      tierId: activeTier.id,
+      tierDiscountPercent: activeTier.discountPercent || 0,
+      tierColorScheme: activeTier.colorScheme || 'BRONZE',
+      nextTier: nextTierConfig ? `${nextTierConfig.name} (${settings.qualificationBasis === 'LIFETIME_SPEND' ? `Rp ${nextTierConfig.minThreshold.toLocaleString()}` : `${nextTierConfig.minThreshold} Pts`})` : null,
+      pointsToNextTier,
+      spendToNextTier,
+      progressPercent,
+      tierPerks: activeTier.perks || [],
+      pointRedemptionValue: settings.pointRedemptionValue,
+      pointsRupiahValue,
+      qualificationBasis: settings.qualificationBasis
+    };
+  }
+
+  /**
+   * Determine member tier discount applicable for customer during POS sale
+   */
+  static async getCustomerTierDiscount(customerId: string): Promise<{
+    tierName: string;
+    discountPercent: number;
+    colorScheme: string;
+  }> {
+    const stats = await this.getCustomerStats(customerId);
+    return {
+      tierName: stats.tier,
+      discountPercent: stats.tierDiscountPercent,
+      colorScheme: stats.tierColorScheme
     };
   }
 }

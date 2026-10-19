@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { db } from '@/core/database';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { 
@@ -13,18 +13,149 @@ import {
   ShoppingBag,
   Edit,
   Trash2,
-  AlertTriangle
+  AlertTriangle,
+  Award,
+  User,
+  Sparkles
 } from 'lucide-react';
 import { LoyaltyHistory } from './LoyaltyHistory';
 import { RecentActivity } from './RecentActivity';
 import { CustomerBalance } from './CustomerBalance';
 import { CustomerModal } from './CustomerModal';
+import { CustomerProfileModal } from './CustomerProfileModal';
+import { LoyaltyEngine, CustomerLoyaltyStats } from '@/core/loyalty-engine';
 import type { Customer } from '@/core/types';
 import { useToastStore } from '@/core/toast-store';
+
+const TIER_BADGE_STYLE: Record<string, { badge: string; bar: string; text: string }> = {
+  BRONZE: {
+    badge: 'bg-amber-100 text-amber-900 border-amber-300',
+    bar: 'bg-amber-600',
+    text: 'text-amber-700'
+  },
+  SILVER: {
+    badge: 'bg-slate-200 text-slate-800 border-slate-300',
+    bar: 'bg-slate-500',
+    text: 'text-slate-700'
+  },
+  GOLD: {
+    badge: 'bg-yellow-100 text-yellow-900 border-yellow-400',
+    bar: 'bg-amber-500',
+    text: 'text-amber-800'
+  },
+  PLATINUM: {
+    badge: 'bg-purple-100 text-purple-900 border-purple-300',
+    bar: 'bg-purple-600',
+    text: 'text-purple-700'
+  },
+  EMERALD: {
+    badge: 'bg-emerald-100 text-emerald-900 border-emerald-300',
+    bar: 'bg-emerald-600',
+    text: 'text-emerald-700'
+  },
+  BLUE: {
+    badge: 'bg-blue-100 text-blue-900 border-blue-300',
+    bar: 'bg-blue-600',
+    text: 'text-blue-700'
+  },
+  ROSE: {
+    badge: 'bg-rose-100 text-rose-900 border-rose-300',
+    bar: 'bg-rose-600',
+    text: 'text-rose-700'
+  }
+};
+
+function CustomerTierCell({ 
+  customerId, 
+  points, 
+  isReseller,
+  onClick 
+}: { 
+  customerId: string; 
+  points: number; 
+  isReseller?: boolean;
+  onClick?: () => void;
+}) {
+  const [stats, setStats] = useState<CustomerLoyaltyStats | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    LoyaltyEngine.getCustomerStats(customerId).then(s => {
+      if (active) setStats(s);
+    });
+    return () => { active = false; };
+  }, [customerId, points]);
+
+  if (!stats) {
+    return (
+      <div className="flex items-center gap-2">
+        <Trophy size={16} className="text-amber-500" />
+        <span className="text-sm font-black text-slate-900 tabular-nums">
+          {(points || 0).toLocaleString()} <span className="text-[10px] text-slate-400 uppercase tracking-widest">Pts</span>
+        </span>
+      </div>
+    );
+  }
+
+  const style = (stats.tierColorScheme && TIER_BADGE_STYLE[stats.tierColorScheme]) || TIER_BADGE_STYLE.BRONZE;
+
+  return (
+    <div 
+      onClick={onClick} 
+      className="space-y-1.5 cursor-pointer group/tier select-none py-1"
+      title="Klik untuk melihat profil & detail tier"
+    >
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider border shadow-xs ${style.badge}`}>
+          <Award size={11} />
+          <span>Tier {stats.tier}</span>
+        </span>
+
+        {stats.tierDiscountPercent > 0 && (
+          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200">
+            <Sparkles size={9} />
+            -{stats.tierDiscountPercent}%
+          </span>
+        )}
+
+        <span className="text-xs font-black text-slate-900 tabular-nums ml-auto">
+          {(points || 0).toLocaleString()} <span className="text-[9px] text-slate-400 uppercase font-bold">Pts</span>
+        </span>
+      </div>
+
+      {/* Progress Bar to Next Tier */}
+      <div className="space-y-1">
+        <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+          <div 
+            className={`h-full rounded-full transition-all duration-500 ${style.bar}`}
+            style={{ width: `${Math.min(100, Math.max(4, stats.progressPercent))}%` }}
+          />
+        </div>
+        <div className="flex justify-between items-center text-[10px] text-slate-400 font-medium">
+          {stats.nextTier ? (
+            <>
+              <span className="truncate max-w-[130px] font-semibold text-slate-500">
+                {stats.progressPercent}% ke {stats.nextTier.split(' ')[0]}
+              </span>
+              <span className="font-bold text-slate-500 shrink-0">
+                {stats.qualificationBasis === 'LIFETIME_SPEND' 
+                  ? `-Rp ${Math.round(stats.spendToNextTier / 1000)}k` 
+                  : `-${stats.pointsToNextTier} Pts`}
+              </span>
+            </>
+          ) : (
+            <span className="text-amber-600 font-bold">Level Tertinggi</span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function Customers() {
   const { addToast } = useToastStore();
   const [search, setSearch] = useState('');
+  const [viewingProfileCustomerId, setViewingProfileCustomerId] = useState<string | null>(null);
   const [viewingLoyaltyId, setViewingLoyaltyId] = useState<string | null>(null);
   const [viewingActivityId, setViewingActivityId] = useState<string | null>(null);
   const [viewingBalanceId, setViewingBalanceId] = useState<string | null>(null);
@@ -121,7 +252,7 @@ export default function Customers() {
               <tr className="bg-slate-50/50 text-slate-400 text-[10px] uppercase tracking-widest font-black border-b border-slate-100">
                 <th className="px-6 py-4">Nama Pelanggan</th>
                 <th className="px-6 py-4">Kontak</th>
-                <th className="px-6 py-4">Total Poin</th>
+                <th className="px-6 py-4 min-w-[220px]">Member Tier & Loyalitas</th>
                 <th className="px-6 py-4">Status</th>
                 <th className="px-6 py-4 text-right">Aksi</th>
               </tr>
@@ -141,13 +272,23 @@ export default function Customers() {
                   <React.Fragment key={customer.customerId}>
                     <tr className={`hover:bg-slate-50/50 transition-colors group ${viewingLoyaltyId === customer.customerId ? 'bg-slate-50' : ''}`}>
                       <td className="px-6 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center font-black shadow-sm">
-                            {customer.name[0]}
+                        <div 
+                          onClick={() => setViewingProfileCustomerId(customer.customerId)}
+                          className="flex items-center gap-3 cursor-pointer group/name select-none"
+                          title="Klik untuk membuka profil pelanggan"
+                        >
+                          <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center font-black shadow-sm group-hover/name:bg-blue-600 group-hover/name:text-white transition-all">
+                            {customer.name[0]?.toUpperCase()}
                           </div>
                           <div>
-                            <p className="text-sm font-bold text-slate-900 uppercase tracking-tight">{customer.name}</p>
-                            {customer.isReseller && <span className="text-[10px] font-black text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded uppercase tracking-widest">Reseller</span>}
+                            <p className="text-sm font-bold text-slate-900 group-hover/name:text-blue-600 transition-colors uppercase tracking-tight flex items-center gap-1.5">
+                              <span>{customer.name}</span>
+                            </p>
+                            {customer.isReseller && (
+                              <span className="text-[10px] font-black text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded uppercase tracking-widest border border-amber-200/60 inline-block mt-0.5">
+                                Reseller
+                              </span>
+                            )}
                           </div>
                         </div>
                       </td>
@@ -158,10 +299,12 @@ export default function Customers() {
                         </div>
                       </td>
                       <td className="px-6 py-4">
-                        <div className="flex items-center gap-2">
-                          <Trophy size={16} className="text-amber-500" />
-                          <span className="text-sm font-black text-slate-900 tabular-nums">{(customer.loyaltyPoints || 0).toLocaleString()} <span className="text-[10px] text-slate-400 uppercase tracking-widest">Pts</span></span>
-                        </div>
+                        <CustomerTierCell 
+                          customerId={customer.customerId} 
+                          points={customer.loyaltyPoints || 0}
+                          isReseller={customer.isReseller}
+                          onClick={() => setViewingProfileCustomerId(customer.customerId)}
+                        />
                       </td>
                       <td className="px-6 py-4">
                         <span className={`text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest border ${customer.status === 'ACTIVE' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-red-50 text-red-600 border-red-100'}`}>
@@ -170,6 +313,13 @@ export default function Customers() {
                       </td>
                       <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end gap-1 sm:opacity-70 group-hover:opacity-100 transition-all">
+                          <button 
+                            onClick={() => setViewingProfileCustomerId(customer.customerId)}
+                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                            title="Lihat Profil & Kartu Member"
+                          >
+                            <User size={18} />
+                          </button>
                           <button 
                             onClick={() => {
                               setViewingBalanceId(viewingBalanceId === customer.customerId ? null : customer.customerId);
@@ -257,6 +407,36 @@ export default function Customers() {
           </table>
         </div>
       </div>
+      {viewingProfileCustomerId && (
+        <CustomerProfileModal 
+          customerId={viewingProfileCustomerId}
+          onClose={() => setViewingProfileCustomerId(null)}
+          onEditCustomer={(cust) => {
+            setViewingProfileCustomerId(null);
+            setEditingCustomer(cust);
+            setIsModalOpen(true);
+          }}
+          onOpenLoyaltyHistory={(id) => {
+            setViewingProfileCustomerId(null);
+            setViewingLoyaltyId(id);
+            setViewingActivityId(null);
+            setViewingBalanceId(null);
+          }}
+          onOpenShoppingHistory={(id) => {
+            setViewingProfileCustomerId(null);
+            setViewingActivityId(id);
+            setViewingLoyaltyId(null);
+            setViewingBalanceId(null);
+          }}
+          onOpenReceivables={(id) => {
+            setViewingProfileCustomerId(null);
+            setViewingBalanceId(id);
+            setViewingLoyaltyId(null);
+            setViewingActivityId(null);
+          }}
+        />
+      )}
+
       {isModalOpen && (
         <CustomerModal 
           customer={editingCustomer}

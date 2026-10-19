@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import ReceiptSettings from './ReceiptSettings';
 import PaymentMethods from './PaymentMethods';
-import { Printer, CreditCard } from 'lucide-react';
+import LoyaltySettings from './LoyaltySettings';
+import { Printer, CreditCard, Trophy } from 'lucide-react';
 
 export default function Settings() {
-  const [activeTab, setActiveTab] = useState<'RECEIPT' | 'PAYMENT'>('RECEIPT');
+  const [activeTab, setActiveTab] = useState<'RECEIPT' | 'PAYMENT' | 'LOYALTY'>('RECEIPT');
 
   return (
     <div className="space-y-8">
@@ -38,10 +39,31 @@ export default function Settings() {
             <div className="absolute bottom-0 left-0 right-0 h-1 bg-blue-600 rounded-t-full" />
           )}
         </button>
+
+        <button 
+          onClick={() => setActiveTab('LOYALTY')}
+          className={`pb-4 px-2 font-black text-xs uppercase tracking-widest transition-all relative ${
+            activeTab === 'LOYALTY' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <Trophy size={16} />
+            Loyalty & Membership
+          </div>
+          {activeTab === 'LOYALTY' && (
+            <div className="absolute bottom-0 left-0 right-0 h-1 bg-blue-600 rounded-t-full" />
+          )}
+        </button>
       </div>
 
       <div>
-        {activeTab === 'RECEIPT' ? <ReceiptSettings /> : <PaymentMethods />}
+        {activeTab === 'RECEIPT' ? (
+          <ReceiptSettings />
+        ) : activeTab === 'PAYMENT' ? (
+          <PaymentMethods />
+        ) : (
+          <LoyaltySettings />
+        )}
       </div>
     </div>
   );

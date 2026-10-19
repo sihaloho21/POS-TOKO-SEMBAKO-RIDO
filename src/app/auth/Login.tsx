@@ -5,6 +5,7 @@ import { db } from '@/core/database';
 import { Keypad } from '@/components/Keypad';
 import { LogIn, Lock, ShieldCheck, UserCheck } from 'lucide-react';
 import type { Product } from '@/core/types';
+import { ProductService } from '@/core/services/product-service';
 import { FishService } from '@/core/services/fish-service';
 import { StoreStatusService } from '@/core/services/store-status-service';
 
@@ -47,41 +48,8 @@ export default function Login() {
           ]);
         }
 
-        // Ensure sembako baseline exists
-        const hasP1 = await db.products.get('p1');
-        if (!hasP1) {
-          const nowStr = new Date().toISOString();
-          const p1: Product = { 
-            productId: 'p1', sku: 'B-PANDAN-5K', barcode: '888001', name: 'Beras Pandan Wangi 5kg', 
-            categoryId: 'SEMBAKO', productType: 'SEMBAKO', baseUnit: 'PCS', saleUnits: ['PCS', 'DUS'],
-            conversionRules: [{ fromUnit: 'PCS', toUnit: 'DUS', factor: 4 }],
-            normalPrice: 85000, hpp: 78000, stock: 100, minimumStock: 10, targetStock: 50,
-            status: 'ACTIVE', createdAt: nowStr, updatedAt: nowStr 
-          };
-          await db.products.put(p1);
-          await db.productCosts.put({ productId: 'p1', hpp: 78000, updatedAt: nowStr });
-          await db.stockMovements.add({
-            stockMovementId: 'sm_init_p1',
-            productId: 'p1',
-            referenceId: 'init_p1',
-            transactionId: 'init_p1',
-            movementType: 'OPENING_BALANCE',
-            qty: 100,
-            unit: 'PCS',
-            baseQty: 100,
-            segmentId: 'WARUNG',
-            clientTimestamp: nowStr,
-            serverTimestamp: null,
-            deviceId: 'LOCAL',
-            userId: 'SYSTEM',
-            reason: 'Stok Awal Sistem (OPENING_BALANCE)',
-            costSnapshot: 78000,
-            createdAt: nowStr,
-            quantity: 100,
-            type: 'IN',
-            timestamp: nowStr
-          });
-        }
+        // Ensure sembako baseline exists and stock movements are verified/repaired
+        await ProductService.ensureBaselineProductsAndStock().catch(e => console.warn('Baseline products init error:', e));
 
         // Ensure mandatory fish products and suppliers (Nila, Mas, Gurame, Lele, Patin & Cikande, Rau)
         await FishService.ensureMinimalFishProducts().catch(e => console.warn('Fish products init error:', e));

@@ -1,17 +1,103 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/core/database';
-import type { Customer } from '@/core/types';
-import { X, User, Phone, MapPin, CreditCard, Save, Loader2, Trash2, Trophy, Award } from 'lucide-react';
+import { useLiveQuery } from 'dexie-react-hooks';
+import type { Customer, LoyaltySettingsConfig } from '@/core/types';
+import { 
+  X, 
+  User, 
+  Phone, 
+  MapPin, 
+  CreditCard, 
+  Save, 
+  Loader2, 
+  Trash2, 
+  Trophy, 
+  Award, 
+  Sparkles, 
+  CheckCircle2, 
+  ShieldCheck, 
+  Coins 
+} from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { useToastStore } from '@/core/toast-store';
+import { LoyaltyEngine, CustomerLoyaltyStats } from '@/core/loyalty-engine';
 
 interface CustomerModalProps {
   customer?: Customer;
   onClose: () => void;
 }
 
+const TIER_THEME: Record<string, {
+  badge: string;
+  bg: string;
+  border: string;
+  text: string;
+  bar: string;
+  accent: string;
+}> = {
+  BRONZE: {
+    badge: 'bg-amber-100 text-amber-900 border-amber-300',
+    bg: 'from-amber-700 via-amber-800 to-amber-950',
+    border: 'border-amber-600/40',
+    text: 'text-amber-100',
+    bar: 'bg-gradient-to-r from-amber-400 to-amber-200',
+    accent: 'text-amber-400'
+  },
+  SILVER: {
+    badge: 'bg-slate-100 text-slate-800 border-slate-300',
+    bg: 'from-slate-500 via-slate-600 to-slate-800',
+    border: 'border-slate-300/40',
+    text: 'text-slate-100',
+    bar: 'bg-gradient-to-r from-slate-200 to-white',
+    accent: 'text-slate-200'
+  },
+  GOLD: {
+    badge: 'bg-amber-100 text-amber-900 border-yellow-400',
+    bg: 'from-amber-400 via-yellow-500 to-yellow-700',
+    border: 'border-yellow-300/60',
+    text: 'text-yellow-950',
+    bar: 'bg-gradient-to-r from-yellow-200 to-white',
+    accent: 'text-yellow-200'
+  },
+  PLATINUM: {
+    badge: 'bg-purple-100 text-purple-900 border-purple-300',
+    bg: 'from-purple-700 via-indigo-800 to-slate-900',
+    border: 'border-purple-400/40',
+    text: 'text-purple-100',
+    bar: 'bg-gradient-to-r from-purple-300 to-indigo-200',
+    accent: 'text-purple-300'
+  },
+  EMERALD: {
+    badge: 'bg-emerald-100 text-emerald-900 border-emerald-300',
+    bg: 'from-emerald-600 via-teal-700 to-emerald-950',
+    border: 'border-emerald-400/40',
+    text: 'text-emerald-100',
+    bar: 'bg-gradient-to-r from-emerald-300 to-teal-100',
+    accent: 'text-emerald-300'
+  },
+  BLUE: {
+    badge: 'bg-blue-100 text-blue-900 border-blue-300',
+    bg: 'from-blue-600 via-indigo-700 to-blue-950',
+    border: 'border-blue-400/40',
+    text: 'text-blue-100',
+    bar: 'bg-gradient-to-r from-sky-300 to-blue-200',
+    accent: 'text-sky-300'
+  },
+  ROSE: {
+    badge: 'bg-rose-100 text-rose-900 border-rose-300',
+    bg: 'from-rose-600 via-pink-700 to-rose-950',
+    border: 'border-rose-400/40',
+    text: 'text-rose-100',
+    bar: 'bg-gradient-to-r from-rose-300 to-pink-200',
+    accent: 'text-rose-300'
+  }
+};
+
 export function CustomerModal({ customer, onClose }: CustomerModalProps) {
   const { addToast } = useToastStore();
+  const loyaltyConfig = useLiveQuery(() => db.settings.get('loyalty')) as LoyaltySettingsConfig | undefined;
+  const [stats, setStats] = useState<CustomerLoyaltyStats | null>(null);
+
   const [formData, setFormData] = useState<Partial<Customer>>({
     name: '',
     phone: '',
@@ -28,6 +114,9 @@ export function CustomerModal({ customer, onClose }: CustomerModalProps) {
   useEffect(() => {
     if (customer) {
       setFormData(customer);
+      if (customer.customerId) {
+        LoyaltyEngine.getCustomerStats(customer.customerId).then(setStats);
+      }
     }
   }, [customer]);
 
@@ -211,32 +300,114 @@ export function CustomerModal({ customer, onClose }: CustomerModalProps) {
             </div>
           </div>
 
-          {/* Loyalty Points Section */}
-          <div className="p-6 bg-amber-500/10 border border-amber-500/20 rounded-3xl space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-amber-900">
-                <Trophy size={18} className="text-amber-500" />
-                <h4 className="text-xs font-black uppercase tracking-widest">Poin Loyalty Member</h4>
-              </div>
-              <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-200 text-amber-900">
-                1 Pts / Rp 10.000
-              </span>
-            </div>
+          {/* Loyalty Points & Member Tier Section */}
+          <div className="space-y-4">
+            {stats && (
+              <div className={`p-5 rounded-3xl bg-gradient-to-br ${
+                stats.tierColorScheme && TIER_THEME[stats.tierColorScheme] 
+                  ? TIER_THEME[stats.tierColorScheme].bg 
+                  : TIER_THEME.BRONZE.bg
+              } text-white shadow-lg border border-white/10 space-y-4`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="px-3 py-1 rounded-xl bg-white/20 backdrop-blur-md text-xs font-black uppercase tracking-wider flex items-center gap-1.5 border border-white/20">
+                      <Award size={14} className={
+                        stats.tierColorScheme && TIER_THEME[stats.tierColorScheme]
+                          ? TIER_THEME[stats.tierColorScheme].accent
+                          : 'text-amber-300'
+                      } />
+                      <span>Member Tier {stats.tier}</span>
+                    </span>
 
-            <div className="space-y-2">
-              <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest">
-                Saldo Poin Loyalty (Pts)
-              </label>
-              <input 
-                type="number"
-                min={0}
-                className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl font-black text-slate-900 outline-none focus:ring-2 focus:ring-amber-500 tabular-nums"
-                value={formData.loyaltyPoints ?? 0}
-                onChange={e => setFormData({ ...formData, loyaltyPoints: Math.max(0, Number(e.target.value)) })}
-              />
-              <p className="text-[10px] text-slate-500">
-                Poin otomatis terhitung dan ditambahkan dari total belanja kasir POS (1 poin per Rp 10.000).
-              </p>
+                    {stats.tierDiscountPercent > 0 && (
+                      <span className="px-2.5 py-1 rounded-xl bg-emerald-500/90 text-white text-[10px] font-black uppercase tracking-wider flex items-center gap-1 shadow-sm">
+                        <Sparkles size={11} />
+                        Diskon {stats.tierDiscountPercent}%
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="text-right">
+                    <span className="text-[10px] font-bold uppercase opacity-80 block">Saldo Poin</span>
+                    <span className="text-lg font-black tabular-nums">
+                      {(formData.loyaltyPoints ?? 0).toLocaleString()} <span className="text-xs opacity-75">PTS</span>
+                    </span>
+                  </div>
+                </div>
+
+                {/* Progress to Next Tier */}
+                <div className="space-y-1.5 pt-2 border-t border-white/20">
+                  <div className="flex justify-between text-xs font-bold">
+                    <span>
+                      {stats.nextTier ? (
+                        <>Menuju <strong className="underline underline-offset-2">{stats.nextTier}</strong></>
+                      ) : (
+                        <span className="flex items-center gap-1">
+                          <ShieldCheck size={14} className="text-amber-300" />
+                          Tier Tertinggi Tercapai
+                        </span>
+                      )}
+                    </span>
+                    <span className="bg-black/25 px-2 py-0.5 rounded-lg text-[11px] font-black">
+                      {stats.progressPercent}%
+                    </span>
+                  </div>
+
+                  <div className="w-full bg-black/30 h-2.5 rounded-full overflow-hidden p-0.5">
+                    <div 
+                      className={`h-full rounded-full transition-all duration-500 ${
+                        stats.tierColorScheme && TIER_THEME[stats.tierColorScheme]
+                          ? TIER_THEME[stats.tierColorScheme].bar
+                          : 'bg-white'
+                      }`}
+                      style={{ width: `${Math.min(100, Math.max(3, stats.progressPercent))}%` }}
+                    />
+                  </div>
+
+                  {stats.nextTier ? (
+                    <p className="text-[11px] opacity-90 font-medium">
+                      {stats.qualificationBasis === 'LIFETIME_SPEND' ? (
+                        <>Butuh belanja <strong>Rp {stats.spendToNextTier.toLocaleString()}</strong> lagi untuk naik level.</>
+                      ) : (
+                        <>Butuh <strong>{stats.pointsToNextTier.toLocaleString()} Pts</strong> lagi (setara belanja ~Rp {stats.spendToNextTier.toLocaleString()}) untuk naik tier.</>
+                      )}
+                    </p>
+                  ) : (
+                    <p className="text-[11px] opacity-80">
+                      Pelanggan telah mencapai tingkat loyalitas tertinggi dengan keuntungan belanja maksimal.
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="p-6 bg-amber-500/10 border border-amber-500/20 rounded-3xl space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-amber-900">
+                  <Trophy size={18} className="text-amber-500" />
+                  <h4 className="text-xs font-black uppercase tracking-widest">Penyesuaian Saldo Poin</h4>
+                </div>
+                <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-200 text-amber-900">
+                  1 Pts / Rp {(loyaltyConfig?.pointsPerAmount || 10000).toLocaleString()}
+                </span>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest">
+                  Saldo Poin Loyalty (Pts)
+                </label>
+                <input 
+                  type="number"
+                  min={0}
+                  className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl font-black text-slate-900 outline-none focus:ring-2 focus:ring-amber-500 tabular-nums"
+                  value={formData.loyaltyPoints ?? 0}
+                  onChange={e => setFormData({ ...formData, loyaltyPoints: Math.max(0, Number(e.target.value)) })}
+                />
+                <div className="flex items-center justify-between text-[10px] text-slate-500 pt-1">
+                  <span>Nilai Tukar: <strong>Rp {((formData.loyaltyPoints ?? 0) * (loyaltyConfig?.pointRedemptionValue || 100)).toLocaleString()}</strong> (Rp {loyaltyConfig?.pointRedemptionValue || 100}/Pts)</span>
+                  <span>Otomatis dihitung saat transaksi POS</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>

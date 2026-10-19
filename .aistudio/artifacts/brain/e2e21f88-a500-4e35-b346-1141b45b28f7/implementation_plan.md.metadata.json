@@ -1,0 +1,6 @@
+{
+  "summary": "Product Requirements Document (PRD) & Implementation Plan untuk Konfigurasi Loyalty Point, Member Tier, dan Aturan Poin Pts pada menu Pengaturan (Settings). Meliputi rasio perolehan poin per nominal belanja, nilai tukar rupiah per poin, aturan kualifikasi tier berbasis akumulasi poin atau belanja, diskon member per tier, dan sinkronisasi real-time ke POS & Pelanggan.",
+  "updatedAt": "2026-10-19T08:18:46.162394301Z",
+  "requestFeedback": true,
+  "userFacing": true
+}

@@ -11,19 +11,26 @@ import {
   Award, 
   Sparkles, 
   Gift, 
-  PlusCircle, 
-  MinusCircle, 
-  X, 
-  ShieldCheck, 
   CheckCircle2, 
-  AlertCircle,
-  HelpCircle,
-  Clock
+  Clock, 
+  Percent, 
+  Coins, 
+  X 
 } from 'lucide-react';
 
 interface LoyaltyHistoryProps {
   customerId: string;
 }
+
+const TIER_GRADIENT_MAP: Record<string, string> = {
+  BRONZE: 'from-amber-700/80 to-amber-900 border-amber-600/40 text-amber-100',
+  SILVER: 'from-slate-400 to-slate-600 border-slate-300/40 text-slate-100',
+  GOLD: 'from-amber-400 to-yellow-600 border-yellow-300/50 text-yellow-950',
+  PLATINUM: 'from-purple-600 to-indigo-800 border-purple-400/40 text-purple-100',
+  EMERALD: 'from-emerald-600 to-teal-800 border-emerald-400/40 text-emerald-100',
+  BLUE: 'from-sky-500 to-blue-700 border-blue-400/40 text-blue-100',
+  ROSE: 'from-rose-500 to-pink-700 border-rose-400/40 text-rose-100'
+};
 
 export function LoyaltyHistory({ customerId }: LoyaltyHistoryProps) {
   const customer = useLiveQuery(() => db.customers.get(customerId), [customerId]);
@@ -81,12 +88,8 @@ export function LoyaltyHistory({ customerId }: LoyaltyHistoryProps) {
 
   if (!customer) return null;
 
-  const tierColors = {
-    BRONZE: 'from-amber-700/80 to-amber-900 border-amber-600/40 text-amber-200',
-    SILVER: 'from-slate-400 to-slate-600 border-slate-300/40 text-slate-100',
-    GOLD: 'from-amber-400 to-yellow-600 border-yellow-300/50 text-yellow-950',
-    PLATINUM: 'from-purple-600 to-indigo-800 border-purple-400/40 text-purple-100'
-  };
+  const gradientClass = (stats?.tierColorScheme && TIER_GRADIENT_MAP[stats.tierColorScheme]) 
+    || TIER_GRADIENT_MAP.BRONZE;
 
   return (
     <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden space-y-6 p-6">
@@ -108,7 +111,7 @@ export function LoyaltyHistory({ customerId }: LoyaltyHistoryProps) {
               )}
             </div>
             <p className="text-xs text-slate-500 font-medium">
-              Riwayat pengumpulan poin belanja otomatis (1 Pts tiap Rp 10.000) dan penukaran reward.
+              Riwayat pengumpulan poin otomatis dan benefit diskon berjenjang member tier.
             </p>
           </div>
         </div>
@@ -134,7 +137,7 @@ export function LoyaltyHistory({ customerId }: LoyaltyHistoryProps) {
       {stats && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Tier Card */}
-          <div className={`p-5 rounded-2xl bg-gradient-to-br ${tierColors[stats.tier]} shadow-md border flex flex-col justify-between text-white`}>
+          <div className={`p-5 rounded-2xl bg-gradient-to-br ${gradientClass} shadow-md border flex flex-col justify-between text-white`}>
             <div>
               <div className="flex justify-between items-center mb-3">
                 <span className="text-[10px] font-black uppercase tracking-widest opacity-80">
@@ -148,8 +151,9 @@ export function LoyaltyHistory({ customerId }: LoyaltyHistoryProps) {
               <h4 className="text-2xl font-black tracking-tight mb-1">
                 {stats.currentPoints.toLocaleString()} <span className="text-sm font-bold opacity-80">PTS</span>
               </h4>
-              <p className="text-xs opacity-90 font-medium">
-                Saldo Poin Tersedia
+              <p className="text-xs opacity-90 font-medium flex items-center gap-1.5">
+                <Coins size={13} className="opacity-80" />
+                <span>Nilai Tukar: Rp {stats.pointsRupiahValue.toLocaleString()}</span>
               </p>
             </div>
 
@@ -166,7 +170,10 @@ export function LoyaltyHistory({ customerId }: LoyaltyHistoryProps) {
               </div>
               {stats.nextTier && (
                 <p className="text-[10px] opacity-80 italic">
-                  Butuh {stats.pointsToNextTier} Pts lagi untuk naik ke tingkat berikutnya.
+                  {stats.qualificationBasis === 'LIFETIME_SPEND'
+                    ? `Butuh belanja Rp ${stats.spendToNextTier.toLocaleString()} lagi untuk naik tier.`
+                    : `Butuh ${stats.pointsToNextTier} Pts lagi untuk naik tier.`
+                  }
                 </p>
               )}
             </div>
@@ -185,36 +192,40 @@ export function LoyaltyHistory({ customerId }: LoyaltyHistoryProps) {
                 <span className="text-[10px] text-slate-400 ml-1 font-bold">PTS</span>
               </div>
               <span className="text-[10px] text-slate-500 font-medium">
-                Akumulasi belanja seumur hidup
+                Akumulasi reward seumur hidup
               </span>
             </div>
 
             <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-2xl flex flex-col justify-between">
               <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                Poin Ditukarkan
+                Diskon Member Aktif
               </span>
-              <div className="my-2">
-                <span className="text-xl font-black text-amber-600 tabular-nums">
-                  -{stats.totalRedeemed.toLocaleString()}
+              <div className="my-2 flex items-baseline">
+                <span className="text-xl font-black text-blue-600 tabular-nums">
+                  {stats.tierDiscountPercent}%
                 </span>
-                <span className="text-[10px] text-slate-400 ml-1 font-bold">PTS</span>
+                <span className="text-[10px] text-slate-400 ml-1 font-bold">POTONGAN</span>
               </div>
               <span className="text-[10px] text-slate-500 font-medium">
-                Klaim hadiah sembako/diskon
+                Otomatis di transaksi kasir POS
               </span>
             </div>
 
             <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-2xl flex flex-col justify-between col-span-2 sm:col-span-1">
               <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                Keuntungan Tier
+                Keuntungan Tier {stats.tier}
               </span>
               <ul className="my-1.5 space-y-1">
-                {stats.tierPerks.slice(0, 2).map((perk, idx) => (
-                  <li key={idx} className="text-[11px] font-bold text-slate-700 flex items-center gap-1.5 truncate">
-                    <Sparkles size={11} className="text-amber-500 shrink-0" />
-                    <span className="truncate">{perk}</span>
-                  </li>
-                ))}
+                {stats.tierPerks && stats.tierPerks.length > 0 ? (
+                  stats.tierPerks.slice(0, 3).map((perk, idx) => (
+                    <li key={idx} className="text-[11px] font-bold text-slate-700 flex items-center gap-1.5 truncate">
+                      <Sparkles size={11} className="text-amber-500 shrink-0" />
+                      <span className="truncate">{perk}</span>
+                    </li>
+                  ))
+                ) : (
+                  <li className="text-[11px] text-slate-400 italic">Standar promo reguler</li>
+                )}
               </ul>
               <span className="text-[10px] text-amber-600 font-bold">
                 ✓ Otomatis aktif di kasir
@@ -308,7 +319,7 @@ export function LoyaltyHistory({ customerId }: LoyaltyHistoryProps) {
               </div>
               <button 
                 onClick={() => setIsAdjustmentModalOpen(false)}
-                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
               >
                 <X size={18} />
               </button>
@@ -324,6 +335,12 @@ export function LoyaltyHistory({ customerId }: LoyaltyHistoryProps) {
                   <span>Saldo Saat Ini:</span>
                   <span className="text-sm">{(customer.loyaltyPoints || 0).toLocaleString()} Pts</span>
                 </div>
+                {stats && (
+                  <div className="flex justify-between items-center text-amber-800 text-[11px] mt-0.5">
+                    <span>Estimasi Nilai Tukar:</span>
+                    <span className="font-mono font-bold">Rp {( (customer.loyaltyPoints || 0) * stats.pointRedemptionValue ).toLocaleString()}</span>
+                  </div>
+                )}
               </div>
 
               <div>
@@ -334,7 +351,7 @@ export function LoyaltyHistory({ customerId }: LoyaltyHistoryProps) {
                   <button
                     type="button"
                     onClick={() => setAdjustType('REDEEM')}
-                    className={`p-2.5 rounded-xl border text-xs font-bold transition-all ${
+                    className={`p-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
                       adjustType === 'REDEEM'
                         ? 'bg-amber-600 text-white border-amber-600 shadow-sm'
                         : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
@@ -345,7 +362,7 @@ export function LoyaltyHistory({ customerId }: LoyaltyHistoryProps) {
                   <button
                     type="button"
                     onClick={() => setAdjustType('EARN')}
-                    className={`p-2.5 rounded-xl border text-xs font-bold transition-all ${
+                    className={`p-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
                       adjustType === 'EARN'
                         ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
                         : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
@@ -375,7 +392,7 @@ export function LoyaltyHistory({ customerId }: LoyaltyHistoryProps) {
                       key={preset}
                       type="button"
                       onClick={() => setAdjustPoints(preset)}
-                      className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-bold"
+                      className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-bold cursor-pointer"
                     >
                       {preset} Pts
                     </button>
@@ -401,14 +418,14 @@ export function LoyaltyHistory({ customerId }: LoyaltyHistoryProps) {
                 <button
                   type="button"
                   onClick={() => setIsAdjustmentModalOpen(false)}
-                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-xs uppercase tracking-wider rounded-xl transition-all"
+                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-500 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-md shadow-amber-200 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
+                  className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-500 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-md shadow-amber-200 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer"
                 >
                   {isSubmitting ? 'Menyimpan...' : 'Simpan Penyesuaian'}
                 </button>

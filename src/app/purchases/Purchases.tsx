@@ -13,7 +13,9 @@ import {
   ArrowUpRight,
   Banknote,
   Clock,
-  History
+  History,
+  Camera,
+  Sparkles
 } from 'lucide-react';
 import { PurchaseService } from '@/core/services/purchase-service';
 import { useAuthStore } from '@/core/auth-store';
@@ -21,6 +23,7 @@ import { useDeviceId } from '@/core/device-store';
 import { useToastStore } from '@/core/toast-store';
 import type { Product, Supplier, Purchase } from '@/core/types';
 import { SupplierModal } from '@/app/suppliers/SupplierModal';
+import { ReceiptScannerModal } from '@/app/purchases/ReceiptScannerModal';
 
 export default function Purchases() {
   const { currentUser } = useAuthStore();
@@ -38,12 +41,60 @@ export default function Purchases() {
   const [moneyStorageId, setMoneyStorageId] = useState<'WARUNG' | 'IKAN' | 'UANG_DIGITAL'>('WARUNG');
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSupplierModalOpen, setIsSupplierModalOpen] = useState(false);
+  const [isScannerModalOpen, setIsScannerModalOpen] = useState(false);
   const [settlePurchaseTarget, setSettlePurchaseTarget] = useState<Purchase | null>(null);
   const [settleStorageId, setSettleStorageId] = useState<'WARUNG' | 'IKAN' | 'UANG_DIGITAL'>('WARUNG');
 
   const suppliers = useLiveQuery(() => db.suppliers.where('status').equals('ACTIVE').toArray());
   const products = useLiveQuery(() => db.products.where('status').equals('ACTIVE').toArray());
   const purchaseHistory = useLiveQuery(() => db.purchases.orderBy('timestamp').reverse().toArray());
+
+  const handleApplyScannedReceipt = (result: {
+    supplierId?: string;
+    invoiceNumber: string;
+    items: {
+      productId: string;
+      name: string;
+      quantity: number;
+      unit: string;
+      purchasePrice: number;
+      discount: number;
+    }[];
+  }) => {
+    if (result.supplierId) {
+      setSelectedSupplierId(result.supplierId);
+    }
+    if (result.invoiceNumber) {
+      setInvoiceNumber(result.invoiceNumber);
+    }
+
+    // Merge scanned items into current purchase items list
+    const currentList = [...items];
+    for (const scItem of result.items) {
+      const idx = currentList.findIndex(i => i.productId === scItem.productId);
+      if (idx >= 0) {
+        currentList[idx] = {
+          ...currentList[idx],
+          quantity: scItem.quantity,
+          purchasePrice: scItem.purchasePrice,
+          unit: scItem.unit,
+          discount: scItem.discount
+        };
+      } else {
+        currentList.push({
+          productId: scItem.productId,
+          name: scItem.name,
+          quantity: scItem.quantity,
+          unit: scItem.unit,
+          purchasePrice: scItem.purchasePrice,
+          discount: scItem.discount
+        });
+      }
+    }
+
+    setItems(currentList);
+    addToast(`${result.items.length} barang dari struk berhasil dimasukkan ke Daftar Barang Masuk! Silakan periksa kembali sebelum menyimpan.`, 'success');
+  };
 
   const addItem = (product: Product) => {
     if (items.find(i => i.productId === product.productId)) return;
@@ -139,8 +190,40 @@ export default function Purchases() {
       </div>
 
       {currentTab === 'NEW' ? (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <div className="lg:col-span-1 space-y-6">
+        <div className="space-y-6">
+          {/* Smart Receipt Scanner Banner */}
+          <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 rounded-3xl p-6 text-white shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-5 border border-blue-500/20">
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-blue-600/30 text-blue-400 flex items-center justify-center border border-blue-400/30 shrink-0">
+                <Camera size={28} />
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-black uppercase tracking-tight text-white">
+                    Pindai Struk / Faktur Kulakan
+                  </h3>
+                  <span className="text-[9px] font-black tracking-widest text-blue-300 bg-blue-500/20 border border-blue-400/30 px-2 py-0.5 rounded-md flex items-center gap-1 uppercase">
+                    <Sparkles size={10} /> AI OCR
+                  </span>
+                </div>
+                <p className="text-xs text-slate-300 font-medium max-w-xl">
+                  Foto langsung dari kamera atau unggah struk belanja grosir. AI akan mengekstrak barang, jumlah, dan harga satuan secara otomatis ke Daftar Barang Masuk.
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setIsScannerModalOpen(true)}
+              className="px-6 py-3.5 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg shadow-blue-600/30 transition-all transform active:scale-95 flex items-center gap-2.5 shrink-0"
+            >
+              <Camera size={18} />
+              Scan Foto Struk
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="lg:col-span-1 space-y-6">
             <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-6">
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
@@ -301,19 +384,32 @@ export default function Purchases() {
 
           <div className="lg:col-span-2 space-y-6">
             <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden flex flex-col min-h-[600px]">
-              <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+              <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center"><Package size={20} /></div>
-                  <h3 className="font-black text-slate-900 uppercase tracking-tight">Daftar Barang Masuk</h3>
+                  <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center shrink-0"><Package size={20} /></div>
+                  <div>
+                    <h3 className="font-black text-slate-900 uppercase tracking-tight">Daftar Barang Masuk</h3>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{items.length} Macam Barang</p>
+                  </div>
                 </div>
-                <div className="text-right">
-                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-                    Barang: Rp {items.reduce((acc, i) => acc + (i.quantity * i.purchasePrice - i.discount), 0).toLocaleString()}
-                    {additionalCost > 0 && ` + Biaya: Rp ${additionalCost.toLocaleString()} (${additionalCostAllocation === 'CAPITALIZE_INTO_WAC' ? 'Masuk WAC' : 'Beban Opex'})`}
-                  </p>
-                  <p className="text-sm font-black text-blue-600 tabular-nums">
-                    Total Faktur: Rp {(items.reduce((acc, i) => acc + (i.quantity * i.purchasePrice - i.discount), 0) + (additionalCost || 0)).toLocaleString()}
-                  </p>
+                <div className="flex items-center justify-between sm:justify-end gap-4">
+                  <button
+                    type="button"
+                    onClick={() => setIsScannerModalOpen(true)}
+                    className="flex items-center gap-1.5 px-3.5 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-xl text-xs font-black uppercase tracking-wider transition-colors border border-blue-200/60"
+                  >
+                    <Camera size={14} />
+                    Scan Struk
+                  </button>
+                  <div className="text-right">
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                      Barang: Rp {items.reduce((acc, i) => acc + (i.quantity * i.purchasePrice - i.discount), 0).toLocaleString()}
+                      {additionalCost > 0 && ` + Biaya: Rp ${additionalCost.toLocaleString()} (${additionalCostAllocation === 'CAPITALIZE_INTO_WAC' ? 'Masuk WAC' : 'Beban Opex'})`}
+                    </p>
+                    <p className="text-sm font-black text-blue-600 tabular-nums">
+                      Total Faktur: Rp {(items.reduce((acc, i) => acc + (i.quantity * i.purchasePrice - i.discount), 0) + (additionalCost || 0)).toLocaleString()}
+                    </p>
+                  </div>
                 </div>
               </div>
 
@@ -377,6 +473,7 @@ export default function Purchases() {
             </div>
           </div>
         </div>
+      </div>
       ) : (
         <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
@@ -473,6 +570,14 @@ export default function Purchases() {
           </div>
         </div>
       )}
+
+      <ReceiptScannerModal
+        isOpen={isScannerModalOpen}
+        onClose={() => setIsScannerModalOpen(false)}
+        products={products || []}
+        suppliers={suppliers || []}
+        onApply={handleApplyScannedReceipt}
+      />
 
       <SupplierModal
         isOpen={isSupplierModalOpen}
