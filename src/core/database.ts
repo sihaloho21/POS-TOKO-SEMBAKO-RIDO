@@ -57,7 +57,7 @@ export class LocalDatabase extends Dexie {
       bundles: 'bundleId, status',
       customers: 'customerId, name, phone, status',
       suppliers: 'supplierId, name, status',
-      transactions: 'transactionId, receiptNumber, type, status, cashierId, deviceId, shiftId, clientTimestamp',
+      transactions: 'transactionId, receiptNumber, type, status, cashierId, deviceId, shiftId, clientTimestamp, originalTransactionId, customerId, receivableId',
       receivables: 'receivableId, transactionId, customerId, status, dueDate',
       receivablePayments: 'paymentId, receivableId, timestamp',
       purchases: 'purchaseId, supplierId, invoiceNumber, status, timestamp',
@@ -80,6 +80,10 @@ export class LocalDatabase extends Dexie {
 
     this.version(9).stores({
       receivables: 'receivableId, transactionId, customerId, status, dueDate, createdAt'
+    });
+
+    this.version(10).stores({
+      transactions: 'transactionId, receiptNumber, type, status, cashierId, deviceId, shiftId, clientTimestamp, originalTransactionId, customerId, receivableId'
     });
   }
 }

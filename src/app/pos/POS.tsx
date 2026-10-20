@@ -35,10 +35,16 @@ import {
   Camera,
   Zap,
   Trophy,
-  Sparkles
+  Sparkles,
+  Wallet,
+  Calendar,
+  History
 } from 'lucide-react';
+import { addDays, format } from 'date-fns';
 import { CameraBarcodeScanner } from '@/components/CameraBarcodeScanner';
 import { QuickSaleModal } from './QuickSaleModal';
+import { DebtCorrectionModal } from './DebtCorrectionModal';
+import { SalesHistory } from './SalesHistory';
 import { LoyaltyEngine } from '@/core/loyalty-engine';
 import { formatMultiUnitBreakdown, getProductAvailableUnits } from '@/core/utils/unit-helper';
 import { motion, AnimatePresence } from 'motion/react';
@@ -111,6 +117,23 @@ export default function POS() {
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'QRIS' | 'TRANSFER'>('CASH');
   const [cashTendered, setCashTendered] = useState<number>(0);
+
+  // Partial Payment / Bon Kasir States (Uang Pembeli Kurang)
+  const [allowPartialDebt, setAllowPartialDebt] = useState(false);
+  const [partialDueDateDays, setPartialDueDateDays] = useState<number>(1); // Default 1 Hari (Besok)
+  const [customPartialDueDate, setCustomPartialDueDate] = useState<string>('');
+  const [partialDebtCustomerName, setPartialDebtCustomerName] = useState<string>('');
+  const [partialDebtCustomerPhone, setPartialDebtCustomerPhone] = useState<string>('');
+  const [isQuickAddCustomerInCheckout, setIsQuickAddCustomerInCheckout] = useState(false);
+  const [selectedCustomerIdInCheckout, setSelectedCustomerIdInCheckout] = useState<string>('');
+  const [partialDebtNotes, setPartialDebtNotes] = useState<string>('');
+  const [partialOwnerPin, setPartialOwnerPin] = useState<string>('');
+  const [partialPinError, setPartialPinError] = useState<string>('');
+
+  // Retroactive Debt Correction Modal (Transaksi Terlanjur Selesai / Terlanjur Lunas)
+  const [txToCorrect, setTxToCorrect] = useState<Transaction | null>(null);
+  const [isCorrectionModalOpen, setIsCorrectionModalOpen] = useState(false);
+  const [isSalesHistoryModalOpen, setIsSalesHistoryModalOpen] = useState(false);
   
   const [isQuickAddProductOpen, setIsQuickAddProductOpen] = useState(false);
   const [newProductName, setNewProductName] = useState('');
@@ -165,6 +188,10 @@ export default function POS() {
         e.preventDefault();
         setIsCameraScannerOpen(prev => !prev);
       }
+      if (e.key === 'F4') {
+        e.preventDefault();
+        setIsSalesHistoryModalOpen(prev => !prev);
+      }
       if (e.key === 'F6') {
         e.preventDefault();
         setIsQuickSaleOpen(prev => !prev);
@@ -185,6 +212,7 @@ export default function POS() {
         setIsQuickAddProductOpen(false);
         setIsHeldModalOpen(false);
         setIsGajianApprovalOpen(false);
+        setIsSalesHistoryModalOpen(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -536,23 +564,40 @@ export default function POS() {
     executeFinalSale('GAJIAN');
   };
 
-  const executeFinalSale = async (finalMethod: string, allowInsufficientStock: boolean = false) => {
+  const executeFinalSale = async (
+    finalMethod: string, 
+    allowInsufficientStock: boolean = false,
+    partialConfig?: {
+      paidCashAmount: number;
+      remainingDebtAmount: number;
+      dueDate?: string;
+      customerId?: string;
+      customerName?: string;
+    }
+  ) => {
     if (!currentUser || !currentShift) return;
 
     setIsProcessing(true);
     try {
+      const targetCustomerId = partialConfig?.customerId || selectedCustomer?.customerId;
+
       const transactionId = await TransactionEngine.createSale({
         cashierId: currentUser.userId,
         deviceId: deviceId,
         shiftId: currentShift.shiftId,
-        customerId: selectedCustomer?.customerId,
+        customerId: targetCustomerId,
         items: cart,
         discount: totalCartDiscount,
         paymentMethodId: finalMethod,
         moneyStorageId: moneyStorageId,
         type: transactionType,
         allowInsufficientStock,
-        allowStoreClosedOverride: currentUser.role === 'OWNER'
+        allowStoreClosedOverride: currentUser.role === 'OWNER',
+        partialPayment: partialConfig ? {
+          paidCashAmount: partialConfig.paidCashAmount,
+          remainingDebtAmount: partialConfig.remainingDebtAmount,
+          dueDate: partialConfig.dueDate
+        } : undefined
       });
       
       const transaction = await db.transactions.get(transactionId);
@@ -562,9 +607,9 @@ export default function POS() {
       }
 
       // Deduct redeemed points if used
-      if (activeRedeemPoints > 0 && selectedCustomer?.customerId) {
+      if (activeRedeemPoints > 0 && targetCustomerId) {
         await LoyaltyEngine.recordAdjustmentEvent({
-          customerId: selectedCustomer.customerId,
+          customerId: targetCustomerId,
           type: 'REDEEM',
           points: activeRedeemPoints,
           reason: `Tukar Poin Diskon Belanja Nota #${transaction?.receiptNumber || transactionId}`
@@ -573,14 +618,18 @@ export default function POS() {
 
       const pointsEarned = transaction?.loyaltyPointsEarned || 0;
       let successMsg = `Transaksi ${transaction?.receiptNumber || ''} Berhasil!`;
-      if (memberTierDiscountAmount > 0) {
-        successMsg += ` (Diskon Member ${customerLoyaltyStats?.tier || ''} ${memberTierDiscountPercent}%: -Rp ${memberTierDiscountAmount.toLocaleString()})`;
-      }
-      if (activeRedeemPoints > 0) {
-        successMsg += ` (Tukar ${activeRedeemPoints} Pts = Diskon Rp ${loyaltyDiscount.toLocaleString()})`;
-      }
-      if (pointsEarned > 0) {
-        successMsg += ` (+${pointsEarned} Pts untuk ${selectedCustomer?.name || 'Member'})`;
+      if (partialConfig) {
+        successMsg = `Transaksi ${transaction?.receiptNumber || ''} Berhasil! Diterima Tunai Rp ${partialConfig.paidCashAmount.toLocaleString()}, Sisa Rp ${partialConfig.remainingDebtAmount.toLocaleString()} otomatis dicatat jadi Piutang/Bon ${partialConfig.customerName || 'Pelanggan'}.`;
+      } else {
+        if (memberTierDiscountAmount > 0) {
+          successMsg += ` (Diskon Member ${customerLoyaltyStats?.tier || ''} ${memberTierDiscountPercent}%: -Rp ${memberTierDiscountAmount.toLocaleString()})`;
+        }
+        if (activeRedeemPoints > 0) {
+          successMsg += ` (Tukar ${activeRedeemPoints} Pts = Diskon Rp ${loyaltyDiscount.toLocaleString()})`;
+        }
+        if (pointsEarned > 0) {
+          successMsg += ` (+${pointsEarned} Pts untuk ${selectedCustomer?.name || 'Member'})`;
+        }
       }
 
       setCart([]);
@@ -588,10 +637,14 @@ export default function POS() {
       setLoyaltyPointsToRedeem(0);
       setTransactionType('SALE');
       setIsPaymentModalOpen(false);
+      setAllowPartialDebt(false);
+      setPartialDebtCustomerName('');
+      setPartialDebtCustomerPhone('');
+      setSelectedCustomerIdInCheckout('');
       setOverrideStockPrompt(null);
       addToast(successMsg, 'success');
       setShowSuccess(true);
-      setTimeout(() => setShowSuccess(false), 3000);
+      setTimeout(() => setShowSuccess(false), 5000);
     } catch (error: any) {
       const errMsg = error?.message || 'Gagal memproses transaksi.';
       const isShortage = errMsg.toLowerCase().includes('stok') || 
@@ -612,6 +665,82 @@ export default function POS() {
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  const handleConfirmPartialPayment = async () => {
+    if (!currentUser || !currentShift) return;
+    setPartialPinError('');
+
+    const shortage = Math.max(0, payableTotal - cashTendered);
+    if (shortage <= 0) {
+      executeFinalSale(paymentMethod);
+      return;
+    }
+
+    if (cashTendered < 0) {
+      addToast('Nominal uang diterima tidak valid.', 'error');
+      return;
+    }
+
+    // Resolve Customer
+    let custId = selectedCustomer?.customerId || selectedCustomerIdInCheckout;
+    let custName = selectedCustomer?.name || '';
+
+    if (isQuickAddCustomerInCheckout || !custId) {
+      if (!partialDebtCustomerName.trim()) {
+        addToast('Nama pelanggan wajib diisi untuk mencatat data utang/bon.', 'error');
+        return;
+      }
+      custName = partialDebtCustomerName.trim();
+      const existing = customers?.find(c => c.name.toLowerCase() === custName.toLowerCase());
+      if (existing) {
+        custId = existing.customerId;
+        custName = existing.name;
+      } else {
+        custId = uuidv4();
+        const newCust: Customer = {
+          customerId: custId,
+          name: custName,
+          phone: partialDebtCustomerPhone.trim(),
+          isReseller: false,
+          creditLimit: 500000,
+          defaultDueDateDays: partialDueDateDays || 1,
+          loyaltyPoints: 0,
+          status: 'ACTIVE',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+        await db.customers.add(newCust);
+      }
+    } else {
+      const found = customers?.find(c => c.customerId === custId);
+      if (found) custName = found.name;
+    }
+
+    // Check PIN if Kasir and policy requires it
+    if (currentUser.role === 'KASIR' && partialOwnerPin) {
+      const ownerUser = await db.users.filter(u => u.role === 'OWNER' && u.pinHash === partialOwnerPin.trim()).first();
+      if (!ownerUser) {
+        setPartialPinError('PIN Owner salah! Otorisasi ditolak.');
+        return;
+      }
+    }
+
+    // Determine Due Date
+    let dueDateStr: string;
+    if (customPartialDueDate) {
+      dueDateStr = new Date(customPartialDueDate).toISOString();
+    } else {
+      dueDateStr = addDays(new Date(), partialDueDateDays || 1).toISOString();
+    }
+
+    await executeFinalSale('CASH', false, {
+      paidCashAmount: cashTendered,
+      remainingDebtAmount: shortage,
+      dueDate: dueDateStr,
+      customerId: custId,
+      customerName: custName
+    });
   };
 
   const handleKasirStockOverride = async () => {
@@ -986,11 +1115,22 @@ export default function POS() {
                   setNewProductBarcode(search);
                   setIsQuickAddProductOpen(true);
                 }}
-                className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-sm shadow-emerald-200 transition-all shrink-0"
+                className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-sm shadow-emerald-200 transition-all shrink-0 cursor-pointer"
                 title="Daftarkan produk cepat langsung dari POS"
               >
                 <PlusCircle size={15} />
                 <span>+ Produk Cepat</span>
+              </button>
+
+              {/* Riwayat Struk / Penjualan Button (F4) */}
+              <button
+                type="button"
+                onClick={() => setIsSalesHistoryModalOpen(true)}
+                className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-amber-300 font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-sm transition-all shrink-0 cursor-pointer"
+                title="Lihat Riwayat Struk & Koreksi Jadi Bon (F4)"
+              >
+                <History size={15} className="text-amber-400" />
+                <span>Riwayat Struk (F4)</span>
               </button>
 
               <select 
@@ -1512,7 +1652,7 @@ export default function POS() {
                   </label>
                   <input
                     type="number"
-                    value={cashTendered ?? 0}
+                    value={cashTendered === 0 && !allowPartialDebt ? '' : cashTendered}
                     onChange={(e) => setCashTendered(Number(e.target.value))}
                     className="w-full text-xl font-black text-center p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 tabular-nums"
                   />
@@ -1523,7 +1663,12 @@ export default function POS() {
                   {quickCashOptions.map((opt) => (
                     <button
                       key={opt}
-                      onClick={() => setCashTendered(opt)}
+                      onClick={() => {
+                        setCashTendered(opt);
+                        if (opt >= payableTotal) {
+                          setAllowPartialDebt(false);
+                        }
+                      }}
                       className={`px-2.5 py-1 rounded-lg text-[10px] font-black tabular-nums transition-all ${
                         cashTendered === opt
                           ? 'bg-blue-600 text-white'
@@ -1535,13 +1680,187 @@ export default function POS() {
                   ))}
                 </div>
 
-                {/* Kembalian */}
+                {/* Kembalian / Status Kurang */}
                 <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 flex justify-between items-center text-xs">
-                  <span className="font-bold text-slate-600">Kembalian:</span>
-                  <span className={`font-black text-base tabular-nums ${changeDue >= 0 ? 'text-emerald-600' : 'text-rose-500'}`}>
-                    Rp {changeDue.toLocaleString()}
+                  <span className="font-bold text-slate-600">
+                    {cashTendered >= payableTotal ? 'Kembalian:' : 'Kekurangan Uang:'}
+                  </span>
+                  <span className={`font-black text-base tabular-nums ${cashTendered >= payableTotal ? 'text-emerald-600' : 'text-rose-600'}`}>
+                    {cashTendered >= payableTotal ? `Rp ${(cashTendered - payableTotal).toLocaleString()}` : `-Rp ${(payableTotal - cashTendered).toLocaleString()}`}
                   </span>
                 </div>
+
+                {/* Opsi Pembayaran Sebagian / Bon Utang Pelanggan jika Uang Kurang */}
+                {cashTendered < payableTotal && (
+                  <div className="bg-amber-50/90 border-2 border-amber-300 rounded-2xl p-3.5 space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-xl bg-amber-500 text-white flex items-center justify-center font-black shrink-0">
+                          <Wallet size={16} />
+                        </div>
+                        <div>
+                          <p className="text-xs font-black text-amber-950">
+                            Uang Kurang Rp {(payableTotal - cashTendered).toLocaleString()}
+                          </p>
+                          <p className="text-[10px] text-amber-800">
+                            Izinkan bayar sebagian & catat sisa jadi utang (bon)?
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAllowPartialDebt(!allowPartialDebt);
+                          if (!selectedCustomer && customers && customers.length > 0 && !selectedCustomerIdInCheckout) {
+                            setSelectedCustomerIdInCheckout(customers[0].customerId);
+                          }
+                        }}
+                        className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                          allowPartialDebt 
+                            ? 'bg-amber-600 text-white shadow-sm' 
+                            : 'bg-white border border-amber-300 text-amber-800 hover:bg-amber-100'
+                        }`}
+                      >
+                        {allowPartialDebt ? 'Aktif (Bon)' : 'Catat Bon'}
+                      </button>
+                    </div>
+
+                    {allowPartialDebt && (
+                      <div className="pt-2 border-t border-amber-200 space-y-3 animate-in fade-in">
+                        {/* Summary perhitungan otomatis */}
+                        <div className="grid grid-cols-2 gap-2 bg-white/80 p-2.5 rounded-xl border border-amber-200 text-xs">
+                          <div>
+                            <span className="text-[10px] font-bold text-slate-500 uppercase block">Uang Diterima</span>
+                            <span className="font-black text-emerald-600 tabular-nums">Rp {cashTendered.toLocaleString()}</span>
+                          </div>
+                          <div className="border-l border-amber-100 pl-2">
+                            <span className="text-[10px] font-black text-amber-900 uppercase block">Sisa Jadi Utang (Otomatis)</span>
+                            <span className="font-black text-rose-600 tabular-nums">Rp {(payableTotal - cashTendered).toLocaleString()}</span>
+                          </div>
+                        </div>
+
+                        {/* Pilih / Input Pelanggan */}
+                        <div>
+                          <div className="flex justify-between items-center mb-1">
+                            <label className="text-[10px] font-black uppercase tracking-wider text-slate-600">
+                              Pelanggan yang Berutang *
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => setIsQuickAddCustomerInCheckout(!isQuickAddCustomerInCheckout)}
+                              className="text-[10px] font-bold text-blue-600 hover:underline"
+                            >
+                              {isQuickAddCustomerInCheckout ? 'Pilih Terdaftar' : '+ Tambah Nama Baru'}
+                            </button>
+                          </div>
+
+                          {selectedCustomer ? (
+                            <div className="flex items-center justify-between p-2 bg-white rounded-xl border border-amber-300 text-xs">
+                              <span className="font-bold text-slate-800">{selectedCustomer.name} (Pelanggan Keranjang)</span>
+                              <span className="text-[10px] text-slate-400">Terpilih</span>
+                            </div>
+                          ) : isQuickAddCustomerInCheckout ? (
+                            <div className="space-y-1.5">
+                              <input
+                                type="text"
+                                placeholder="Nama Pembeli / Pelanggan (misal: Pak Budi)"
+                                value={partialDebtCustomerName}
+                                onChange={(e) => setPartialDebtCustomerName(e.target.value)}
+                                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-amber-500"
+                              />
+                              <input
+                                type="tel"
+                                placeholder="No. HP / WhatsApp (opsional)"
+                                value={partialDebtCustomerPhone}
+                                onChange={(e) => setPartialDebtCustomerPhone(e.target.value)}
+                                className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-medium outline-none focus:border-amber-500"
+                              />
+                            </div>
+                          ) : (
+                            <select
+                              value={selectedCustomerIdInCheckout}
+                              onChange={(e) => setSelectedCustomerIdInCheckout(e.target.value)}
+                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-amber-500"
+                            >
+                              <option value="">-- Pilih Pelanggan --</option>
+                              {customers?.map((c) => (
+                                <option key={c.customerId} value={c.customerId}>
+                                  {c.name} {c.phone ? `(${c.phone})` : ''}
+                                </option>
+                              ))}
+                            </select>
+                          )}
+                        </div>
+
+                        {/* Jatuh Tempo */}
+                        <div>
+                          <label className="text-[10px] font-black uppercase tracking-wider text-slate-600 block mb-1">
+                            Janji Bayar / Jatuh Tempo Pelunasan
+                          </label>
+                          <div className="grid grid-cols-4 gap-1 mb-1.5">
+                            {[
+                              { label: 'Besok (+1 Hr)', days: 1 },
+                              { label: '3 Hari', days: 3 },
+                              { label: '7 Hari', days: 7 },
+                              { label: '14 Hari', days: 14 }
+                            ].map((d) => (
+                              <button
+                                key={d.days}
+                                type="button"
+                                onClick={() => {
+                                  setPartialDueDateDays(d.days);
+                                  setCustomPartialDueDate(format(addDays(new Date(), d.days), 'yyyy-MM-dd'));
+                                }}
+                                className={`py-1.5 px-1 rounded-lg text-[10px] font-bold text-center border transition-all ${
+                                  partialDueDateDays === d.days
+                                    ? 'bg-amber-600 text-white border-amber-600'
+                                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                                }`}
+                              >
+                                {d.label}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] text-slate-500 font-bold shrink-0">Tanggal:</span>
+                            <input
+                              type="date"
+                              value={customPartialDueDate}
+                              onChange={(e) => {
+                                setCustomPartialDueDate(e.target.value);
+                                setPartialDueDateDays(0);
+                              }}
+                              className="flex-1 px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold outline-none focus:border-amber-500"
+                            />
+                          </div>
+                        </div>
+
+                        {/* PIN Owner jika Kasir (opsional / otorisasi) */}
+                        {currentUser?.role === 'KASIR' && (
+                          <div className="pt-2 border-t border-amber-200">
+                            <label className="text-[10px] font-bold text-slate-600 block mb-1">
+                              PIN Owner Otorisasi (Jika Diwajibkan Toko)
+                            </label>
+                            <input
+                              type="password"
+                              maxLength={6}
+                              placeholder="PIN Owner (opsional)"
+                              value={partialOwnerPin}
+                              onChange={(e) => {
+                                setPartialOwnerPin(e.target.value);
+                                setPartialPinError('');
+                              }}
+                              className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono text-center tracking-widest outline-none focus:border-amber-500"
+                            />
+                            {partialPinError && (
+                              <p className="text-[10px] text-rose-600 font-bold text-center mt-1">{partialPinError}</p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
@@ -1552,14 +1871,30 @@ export default function POS() {
               >
                 Batal
               </button>
-              <button
-                onClick={() => executeFinalSale(paymentMethod)}
-                disabled={paymentMethod === 'CASH' && cashTendered < payableTotal}
-                className="flex-1 py-3 bg-blue-600 hover:bg-blue-500 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-blue-200 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none transition-all flex items-center justify-center gap-1.5"
-              >
-                <CheckCircle size={16} />
-                Selesai & Cetak Struk
-              </button>
+
+              {allowPartialDebt && cashTendered < payableTotal ? (
+                <button
+                  onClick={handleConfirmPartialPayment}
+                  disabled={
+                    isProcessing ||
+                    cashTendered < 0 ||
+                    (!selectedCustomer && !selectedCustomerIdInCheckout && !partialDebtCustomerName.trim())
+                  }
+                  className="flex-1 py-3 bg-amber-600 hover:bg-amber-500 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-amber-200 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <CheckCircle size={16} />
+                  <span>Bayar Rp {cashTendered.toLocaleString()} & Catat Bon</span>
+                </button>
+              ) : (
+                <button
+                  onClick={() => executeFinalSale(paymentMethod)}
+                  disabled={paymentMethod === 'CASH' && cashTendered < payableTotal}
+                  className="flex-1 py-3 bg-blue-600 hover:bg-blue-500 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-blue-200 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <CheckCircle size={16} />
+                  <span>Selesai & Cetak Struk</span>
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -1820,9 +2155,22 @@ export default function POS() {
             </div>
             <div>
               <span className="font-black text-base uppercase tracking-wider block">TRANSAKSI BERHASIL</span>
-              <span className="text-xs font-bold text-emerald-100">
+              <span className="text-xs font-bold text-emerald-100 block mb-1">
                 Struk {lastTx?.receiptNumber} dicatat & dicetak.
               </span>
+              {lastTx && !lastTx.receivableId && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTxToCorrect(lastTx);
+                    setIsCorrectionModalOpen(true);
+                  }}
+                  className="px-2.5 py-1 bg-amber-400 hover:bg-amber-300 text-slate-950 text-[10px] font-black rounded-lg uppercase tracking-wider shadow transition-all flex items-center gap-1 cursor-pointer"
+                >
+                  <Wallet size={12} />
+                  <span>Uang Kurang? Catat Jadi Bon Utang</span>
+                </button>
+              )}
             </div>
           </motion.div>
         )}
@@ -2039,6 +2387,52 @@ export default function POS() {
         onAddAndCheckout={handleQuickSaleAddAndCheckout}
         catalogProducts={products || []}
       />
+
+      {/* Retroactive Debt Correction Modal (Untuk transaksi yang sudah terlanjur selesai) */}
+      <DebtCorrectionModal
+        isOpen={isCorrectionModalOpen}
+        onClose={() => {
+          setIsCorrectionModalOpen(false);
+          setTxToCorrect(null);
+        }}
+        transaction={txToCorrect}
+        onSuccess={() => {
+          addToast('Transaksi berhasil dikoreksi menjadi bon piutang!', 'success');
+        }}
+      />
+
+      {/* Sales History Modal within POS (F4) */}
+      {isSalesHistoryModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-4xl w-full p-6 shadow-2xl border border-slate-200 animate-in zoom-in-95 max-h-[90vh] flex flex-col">
+            <div className="flex justify-between items-center pb-3 border-b border-slate-100 mb-4 shrink-0">
+              <div className="flex items-center gap-2">
+                <div className="w-9 h-9 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center">
+                  <History size={20} />
+                </div>
+                <div>
+                  <h3 className="font-black text-slate-900 text-base uppercase tracking-tight">
+                    Riwayat Transaksi & Struk Kasir
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Cari nota, cetak ulang struk, atau klik "Koreksi Jadi Bon" jika uang pembeli kurang
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setIsSalesHistoryModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto custom-scrollbar pr-1">
+              <SalesHistory />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -156,6 +156,21 @@ export class PrintService {
             <span>${transaction.type === 'RETURN' ? '-Rp ' : 'Rp '}${transaction.total.toLocaleString()}</span>
           </div>
 
+          ${(transaction.remainingDebtAmount && transaction.remainingDebtAmount > 0) ? `
+            <div class="dashed"></div>
+            <div class="flex-between">
+              <span>DIBAYAR (${transaction.paymentMethodId || 'TUNAI'}):</span>
+              <span>Rp ${(transaction.paidAmount || 0).toLocaleString()}</span>
+            </div>
+            <div class="flex-between bold" style="font-size: 1.05em; color: #b91c1c;">
+              <span>SISA UTANG (BON):</span>
+              <span>Rp ${transaction.remainingDebtAmount.toLocaleString()}</span>
+            </div>
+            <div class="center bold" style="margin-top: 4px; font-size: 0.85em; background: #fee2e2; padding: 3px 0; border: 1px dashed #b91c1c;">
+              *** STATUS: BON / UTANG PELANGGAN ***
+            </div>
+          ` : ''}
+
           ${transaction.loyaltyPointsEarned > 0 ? `
             <div class="dashed"></div>
             <div class="flex-between bold" style="font-size: 0.9em;">

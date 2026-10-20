@@ -12,17 +12,22 @@ import {
   Calendar,
   User as UserIcon,
   Package,
-  AlertCircle
+  AlertCircle,
+  Wallet
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { TransactionEngine } from '@/core/transaction-engine';
 import { useAuthStore } from '@/core/auth-store';
 import { PrintService } from '@/core/utils/print-service';
+import { DebtCorrectionModal } from './DebtCorrectionModal';
+import type { Transaction } from '@/core/types';
 
 export function SalesHistory() {
   const { currentUser } = useAuthStore();
   const [search, setSearch] = useState('');
   const [expandedId, setViewingId] = useState<string | null>(null);
+  const [txToCorrect, setTxToCorrect] = useState<Transaction | null>(null);
+  const [isCorrectionModalOpen, setIsCorrectionModalOpen] = useState(false);
   const [isVoiding, setIsVoiding] = useState<string | null>(null);
   const [voidReason, setVoidReason] = useState('');
 
@@ -103,16 +108,30 @@ export function SalesHistory() {
                     <td className="px-6 py-4 text-xs font-bold text-slate-600 uppercase">
                       {tx.customerId ? `ID: ${tx.customerId.slice(-6)}` : 'Umum'}
                     </td>
-                    <td className="px-6 py-4 text-sm font-black text-slate-900 tabular-nums">
-                      Rp {tx.total.toLocaleString()}
+                    <td className="px-6 py-4">
+                      <p className="text-sm font-black text-slate-900 tabular-nums">
+                        Rp {tx.total.toLocaleString()}
+                      </p>
+                      {tx.remainingDebtAmount && tx.remainingDebtAmount > 0 ? (
+                        <p className="text-[10px] font-bold text-rose-600">
+                          Sisa Bon: Rp {tx.remainingDebtAmount.toLocaleString()}
+                        </p>
+                      ) : null}
                     </td>
                     <td className="px-6 py-4">
-                      <span className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest border ${
-                        tx.status === 'COMPLETED' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' :
-                        tx.status === 'VOIDED' ? 'bg-rose-50 text-rose-600 border-rose-100' : 'bg-slate-50 text-slate-500'
-                      }`}>
-                        {tx.status}
-                      </span>
+                      <div className="flex flex-col gap-1 items-start">
+                        <span className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest border ${
+                          tx.status === 'COMPLETED' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' :
+                          tx.status === 'VOIDED' ? 'bg-rose-50 text-rose-600 border-rose-100' : 'bg-slate-50 text-slate-500'
+                        }`}>
+                          {tx.status}
+                        </span>
+                        {tx.remainingDebtAmount && tx.remainingDebtAmount > 0 && (
+                          <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 uppercase">
+                            Ada Utang
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-2">
@@ -167,19 +186,43 @@ export function SalesHistory() {
                                   <span className="text-slate-900 uppercase">Total</span>
                                   <span className="text-blue-600 tabular-nums">Rp {tx.total.toLocaleString()}</span>
                                 </div>
+                                {tx.remainingDebtAmount && tx.remainingDebtAmount > 0 ? (
+                                  <>
+                                    <div className="flex justify-between text-xs font-bold border-t border-slate-100 pt-2">
+                                      <span className="text-slate-500 uppercase">Dibayar Tunai:</span>
+                                      <span className="text-emerald-600 tabular-nums">Rp {(tx.paidAmount || 0).toLocaleString()}</span>
+                                    </div>
+                                    <div className="flex justify-between text-xs font-black text-rose-600">
+                                      <span className="uppercase">Sisa Utang (Bon):</span>
+                                      <span className="tabular-nums">Rp {tx.remainingDebtAmount.toLocaleString()}</span>
+                                    </div>
+                                  </>
+                                ) : null}
                               </div>
 
-                              <div className="flex gap-2 pt-4">
+                              <div className="flex flex-wrap gap-2 pt-4">
                                 <button 
                                   onClick={() => handlePrint(tx.transactionId)}
-                                  className="flex-1 flex items-center justify-center gap-2 py-3 bg-slate-900 text-white rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-800 transition-all shadow-lg shadow-slate-200"
+                                  className="flex-1 min-w-[110px] flex items-center justify-center gap-2 py-3 bg-slate-900 text-white rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-800 transition-all shadow-lg shadow-slate-200"
                                 >
                                   <Printer size={16} /> Print Struk
                                 </button>
+                                {tx.status === 'COMPLETED' && !tx.receivableId && (
+                                  <button 
+                                    onClick={() => {
+                                      setTxToCorrect(tx);
+                                      setIsCorrectionModalOpen(true);
+                                    }}
+                                    className="flex-1 min-w-[130px] flex items-center justify-center gap-1.5 py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest transition-all shadow-md shadow-amber-200"
+                                    title="Koreksi transaksi ini menjadi bayar sebagian & catat sisa utang (bon)"
+                                  >
+                                    <Wallet size={14} /> Koreksi Jadi Bon
+                                  </button>
+                                )}
                                 {tx.status === 'COMPLETED' && (
                                   <button 
                                     onClick={() => setIsVoiding(tx.transactionId)}
-                                    className="flex-1 flex items-center justify-center gap-2 py-3 bg-white border border-rose-200 text-rose-600 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-rose-50 transition-all"
+                                    className="flex-1 min-w-[90px] flex items-center justify-center gap-2 py-3 bg-white border border-rose-200 text-rose-600 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-rose-50 transition-all"
                                   >
                                     <XCircle size={16} /> Void
                                   </button>
@@ -231,6 +274,19 @@ export function SalesHistory() {
           </table>
         </div>
       </div>
+
+      {/* Debt Correction Modal */}
+      <DebtCorrectionModal
+        isOpen={isCorrectionModalOpen}
+        onClose={() => {
+          setIsCorrectionModalOpen(false);
+          setTxToCorrect(null);
+        }}
+        transaction={txToCorrect}
+        onSuccess={() => {
+          // Modal will close and refresh list
+        }}
+      />
     </div>
   );
 }

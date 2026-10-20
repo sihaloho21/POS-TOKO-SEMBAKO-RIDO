@@ -81,11 +81,18 @@ export function QuickRefundModal({
     if (transaction && isOpen) {
       const loadContext = async () => {
         // 1. Fetch past return transactions for cumulative limit check
-        const pastReturns = await db.transactions
-          .where('originalTransactionId')
-          .equals(transaction.transactionId)
-          .filter(tx => tx.type === 'RETURN')
-          .toArray();
+        let pastReturns: Transaction[] = [];
+        try {
+          pastReturns = await db.transactions
+            .where('originalTransactionId')
+            .equals(transaction.transactionId)
+            .filter(tx => tx.type === 'RETURN')
+            .toArray();
+        } catch {
+          pastReturns = await db.transactions
+            .filter(tx => tx.type === 'RETURN' && (tx.originalTransactionId === transaction.transactionId || tx.originalReceiptNumber === transaction.receiptNumber))
+            .toArray();
+        }
 
         const returnedQtyMap = new Map<string, number>();
         for (const pr of pastReturns) {

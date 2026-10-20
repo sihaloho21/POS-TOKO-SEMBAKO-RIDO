@@ -25,11 +25,13 @@ import {
   Hourglass,
   FileQuestion,
   Layers,
-  Undo2
+  Undo2,
+  Wallet
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
 import { QuickRefundModal } from './QuickRefundModal';
+import { DebtCorrectionModal } from '../pos/DebtCorrectionModal';
 
 export default function TransactionHistory() {
   const { currentUser } = useAuthStore();
@@ -37,6 +39,7 @@ export default function TransactionHistory() {
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'COMPLETED' | 'RETURN' | 'approval_pending' | 'HOLD' | 'VOIDED'>('ALL');
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
   const [quickRefundTx, setQuickRefundTx] = useState<Transaction | null>(null);
+  const [debtCorrectionTx, setDebtCorrectionTx] = useState<Transaction | null>(null);
   
   // Kasir Request Modal
   const [requestTx, setRequestTx] = useState<Transaction | null>(null);
@@ -450,6 +453,18 @@ export default function TransactionHistory() {
                             </button>
                           )}
 
+                          {/* Koreksi Jadi Bon Button */}
+                          {tx.status === 'COMPLETED' && tx.type !== 'RETURN' && !tx.receivableId && (
+                            <button
+                              onClick={() => setDebtCorrectionTx(tx)}
+                              title="Uang pembeli kurang? Koreksi transaksi ini jadi piutang (bon)"
+                              className="px-2.5 py-1.5 text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1 transition-all cursor-pointer shadow-xs shrink-0"
+                            >
+                              <Wallet size={12} />
+                              <span>Koreksi Jadi Bon</span>
+                            </button>
+                          )}
+
                           {/* KASIR: Request Void/Refund button on COMPLETED transactions */}
                           {!isVoided && tx.status === 'COMPLETED' && tx.type !== 'RETURN' && (
                             <button
@@ -622,6 +637,19 @@ export default function TransactionHistory() {
                 >
                   <Undo2 size={16} />
                   Quick Refund
+                </button>
+              )}
+              {selectedTx.status === 'COMPLETED' && selectedTx.type !== 'RETURN' && !selectedTx.receivableId && (
+                <button
+                  onClick={() => {
+                    const target = selectedTx;
+                    setSelectedTx(null);
+                    setDebtCorrectionTx(target);
+                  }}
+                  className="flex-1 py-3 bg-amber-600 text-white font-black text-xs uppercase tracking-wider rounded-xl hover:bg-amber-500 shadow-md shadow-amber-200 flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Wallet size={16} />
+                  Koreksi Jadi Bon
                 </button>
               )}
             </div>
@@ -811,6 +839,17 @@ export default function TransactionHistory() {
         onClose={() => setQuickRefundTx(null)}
         onSuccess={(returnTx) => {
           setFeedbackMsg(`Nota Retur ${returnTx.receiptNumber} berhasil dibuat dengan total refund Rp ${returnTx.total.toLocaleString()}!`);
+          setTimeout(() => setFeedbackMsg(''), 5000);
+        }}
+      />
+
+      {/* Debt Correction Modal (Koreksi Transaksi Jadi Bon Utang) */}
+      <DebtCorrectionModal
+        isOpen={!!debtCorrectionTx}
+        onClose={() => setDebtCorrectionTx(null)}
+        transaction={debtCorrectionTx}
+        onSuccess={(res) => {
+          setFeedbackMsg(`Koreksi Berhasil! Nota #${res.receiptNumber} diubah: Sisa Rp ${res.remainingDebt.toLocaleString()} dicatat jadi Piutang ${res.customerName}.`);
           setTimeout(() => setFeedbackMsg(''), 5000);
         }}
       />

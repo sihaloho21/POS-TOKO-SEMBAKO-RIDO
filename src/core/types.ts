@@ -160,6 +160,9 @@ export interface Transaction {
   returnReason?: string;
   authorizedBy?: string;
   isRestocked?: boolean;
+  paidAmount?: number;
+  remainingDebtAmount?: number;
+  receivableId?: string;
 }
 
 export interface Receivable {

@@ -222,7 +222,9 @@ export class LoyaltyEngine {
       db.customers.get(customerId),
       db.loyaltyEvents.where('customerId').equals(customerId).toArray(),
       LoyaltySettingsService.getSettings(),
-      db.transactions.where('customerId').equals(customerId).toArray()
+      db.transactions.where('customerId').equals(customerId).toArray().catch(() =>
+        db.transactions.filter(t => t.customerId === customerId).toArray()
+      )
     ]);
 
     const currentPoints = customer?.loyaltyPoints || 0;

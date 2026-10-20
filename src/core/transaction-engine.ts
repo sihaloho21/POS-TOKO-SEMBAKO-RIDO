@@ -33,6 +33,11 @@ export class TransactionEngine {
     type: 'SALE' | 'GAJIAN';
     allowInsufficientStock?: boolean;
     allowStoreClosedOverride?: boolean;
+    partialPayment?: {
+      paidCashAmount: number;
+      remainingDebtAmount: number;
+      dueDate?: string;
+    };
   }): Promise<string> {
     const startTime = performance.now();
     // Check Store Status (Requirement 8)
@@ -101,6 +106,8 @@ export class TransactionEngine {
       moneyStorageId: params.moneyStorageId,
       loyaltyPointsEarned: 0, // Calculated below
       clientTimestamp: timestamp,
+      paidAmount: params.partialPayment ? params.partialPayment.paidCashAmount : total,
+      remainingDebtAmount: params.partialPayment ? params.partialPayment.remainingDebtAmount : (params.type === 'GAJIAN' ? total : 0),
     };
 
     // 1. Calculate Loyalty Points based on transaction total
@@ -189,7 +196,59 @@ export class TransactionEngine {
     }
 
     // 5. Handle Finance & Receivables (PRD 14, 27)
-    if (params.type === 'GAJIAN' && params.customerId) {
+    if (params.partialPayment && params.customerId) {
+      // PARTIAL CASH PAYMENT + SISA PIUTANG (DP / Bayar Sebagian)
+      const customer = await db.customers.get(params.customerId);
+      const receivableId = uuidv4();
+      const dueDate = params.partialPayment.dueDate || addDays(new Date(), customer?.defaultDueDateDays || 30).toISOString();
+
+      const receivable: Receivable = {
+        receivableId,
+        transactionId,
+        customerId: params.customerId,
+        totalAmount: total,
+        paidAmount: params.partialPayment.paidCashAmount,
+        remainingAmount: params.partialPayment.remainingDebtAmount,
+        dueDate,
+        status: 'PARTIAL',
+        createdAt: timestamp
+      };
+      await db.receivables.add(receivable);
+      await this.addToQueue('receivables', receivableId, 'CREATE', receivable);
+
+      // Log the initial DP payment record
+      await db.receivablePayments.add({
+        paymentId: uuidv4(),
+        receivableId,
+        amount: params.partialPayment.paidCashAmount,
+        paymentMethodId: params.paymentMethodId,
+        moneyStorageId: params.moneyStorageId,
+        userId: params.cashierId,
+        timestamp,
+        paymentDate: timestamp.slice(0, 10),
+        notes: `Pembayaran tunai awal (DP) saat transaksi POS #${transaction.receiptNumber}`
+      });
+
+      // Finance event for the physical cash actually received (misal Rp 95.000)
+      if (params.partialPayment.paidCashAmount > 0) {
+        const financeEvent: FinanceEvent = {
+          financeEventId: uuidv4(),
+          amount: params.partialPayment.paidCashAmount,
+          storageId: params.moneyStorageId,
+          direction: 'IN',
+          referenceId: transactionId,
+          referenceType: 'TRANSACTION',
+          description: `Pembayaran sebagian tunai (DP) Nota #${transaction.receiptNumber} - Pelanggan: ${customer?.name || 'Pelanggan'} (Sisa Piutang: Rp ${params.partialPayment.remainingDebtAmount.toLocaleString()})`,
+          userId: params.cashierId,
+          deviceId: params.deviceId,
+          timestamp
+        };
+        await db.financeEvents.add(financeEvent);
+        await this.addToQueue('financeEvents', financeEvent.financeEventId, 'CREATE', financeEvent);
+      }
+
+      await db.transactions.update(transactionId, { receivableId });
+    } else if (params.type === 'GAJIAN' && params.customerId) {
       const customer = await db.customers.get(params.customerId);
       const receivableId = uuidv4();
       const dueDate = addDays(new Date(), customer?.defaultDueDateDays || 30).toISOString();
@@ -207,6 +266,7 @@ export class TransactionEngine {
       };
       await db.receivables.add(receivable);
       await this.addToQueue('receivables', receivableId, 'CREATE', receivable);
+      await db.transactions.update(transactionId, { receivableId });
     } else {
       const financeEvent: FinanceEvent = {
         financeEventId: uuidv4(),
@@ -252,6 +312,159 @@ export class TransactionEngine {
     });
 
     return transactionId;
+  }
+
+  /**
+   * Mengubah / mengoreksi transaksi tunai yang sudah terlanjur selesai menjadi pembayaran sebagian,
+   * di mana uang fisik yang benar-benar diterima disesuaikan ke kas laci, dan sisanya dicatat otomatis
+   * sebagai piutang (utang pelanggan).
+   */
+  static async convertToPartialPaymentWithReceivable(params: {
+    transactionId: string;
+    actualPaidAmount: number;
+    customerId: string;
+    dueDate?: string;
+    notes?: string;
+    userId: string;
+    role: string;
+    deviceId: string;
+  }): Promise<{ receivableId: string; remainingDebt: number; receiptNumber: string }> {
+    const tx = await db.transactions.get(params.transactionId);
+    if (!tx) {
+      throw new Error('Data transaksi tidak ditemukan.');
+    }
+
+    if (params.actualPaidAmount < 0) {
+      throw new Error('Nominal uang yang diterima tidak boleh minus (negatif).');
+    }
+
+    if (params.actualPaidAmount >= tx.total) {
+      throw new Error(`Nominal uang yang diterima (Rp ${params.actualPaidAmount.toLocaleString()}) harus lebih kecil dari total belanja (Rp ${tx.total.toLocaleString()}) untuk mencatat sisa utang.`);
+    }
+
+    if (tx.receivableId) {
+      throw new Error('Transaksi ini sudah terhubung dengan catatan piutang.');
+    }
+
+    const customer = await db.customers.get(params.customerId);
+    if (!customer) {
+      throw new Error('Data pelanggan wajib dipilih untuk pencatatan piutang.');
+    }
+
+    const remainingDebt = tx.total - params.actualPaidAmount;
+    const receivableId = uuidv4();
+    const timestamp = new Date().toISOString();
+    const dueDate = params.dueDate || addDays(new Date(), customer.defaultDueDateDays || 30).toISOString();
+
+    await db.transaction(
+      'rw',
+      [db.transactions, db.receivables, db.receivablePayments, db.financeEvents, db.auditLogs, db.syncQueue],
+      async () => {
+        // 1. Catat Receivable di db.receivables
+        const receivable: Receivable = {
+          receivableId,
+          transactionId: tx.transactionId,
+          customerId: params.customerId,
+          totalAmount: tx.total,
+          paidAmount: params.actualPaidAmount,
+          remainingAmount: remainingDebt,
+          dueDate,
+          status: params.actualPaidAmount > 0 ? 'PARTIAL' : 'OPEN',
+          createdAt: timestamp
+        };
+        await db.receivables.add(receivable);
+
+        // 2. Catat bukti pembayaran DP / cicilan awal di receivablePayments jika ada uang diterima
+        if (params.actualPaidAmount > 0) {
+          await db.receivablePayments.add({
+            paymentId: uuidv4(),
+            receivableId,
+            amount: params.actualPaidAmount,
+            paymentMethodId: tx.paymentMethodId || 'CASH',
+            moneyStorageId: tx.moneyStorageId || 'WARUNG',
+            userId: params.userId,
+            timestamp,
+            paymentDate: timestamp.slice(0, 10),
+            notes: `Pembayaran awal saat transaksi #${tx.receiptNumber} (Disahkan penyesuaian piutang)`
+          });
+        }
+
+        // 3. Sesuaikan Finance Event agar uang di laci kasir cocok dengan uang fisik
+        const existingEvents = await db.financeEvents
+          .where('referenceId')
+          .equals(tx.transactionId)
+          .toArray();
+
+        if (existingEvents.length > 0) {
+          const firstEvt = existingEvents[0];
+          await db.financeEvents.update(firstEvt.financeEventId, {
+            amount: params.actualPaidAmount,
+            description: `Penyesuaian Tunai Diterima: Rp ${params.actualPaidAmount.toLocaleString()} (Nota #${tx.receiptNumber}, Sisa Rp ${remainingDebt.toLocaleString()} jadi Piutang ${customer.name})`
+          });
+        } else {
+          await db.financeEvents.add({
+            financeEventId: uuidv4(),
+            amount: params.actualPaidAmount,
+            storageId: tx.moneyStorageId || 'WARUNG',
+            direction: 'IN',
+            referenceId: tx.transactionId,
+            referenceType: 'TRANSACTION',
+            description: `Penyesuaian Tunai Diterima Nota #${tx.receiptNumber} (${customer.name})`,
+            userId: params.userId,
+            deviceId: params.deviceId,
+            timestamp
+          });
+        }
+
+        // 4. Update data transaksi
+        await db.transactions.update(tx.transactionId, {
+          customerId: params.customerId,
+          paidAmount: params.actualPaidAmount,
+          remainingDebtAmount: remainingDebt,
+          receivableId
+        });
+
+        // 5. Audit Log
+        await AuditEngine.log({
+          userId: params.userId,
+          role: params.role,
+          deviceId: params.deviceId,
+          action: 'CONVERT_TO_PARTIAL_RECEIVABLE',
+          module: 'POS_TRANSACTIONS',
+          referenceId: tx.transactionId,
+          before: {
+            total: tx.total,
+            customerId: tx.customerId
+          },
+          after: {
+            actualPaidAmount: params.actualPaidAmount,
+            remainingDebt,
+            customerId: params.customerId,
+            customerName: customer.name,
+            receivableId,
+            notes: params.notes,
+            timestamp
+          }
+        });
+
+        // 6. Sync queues
+        await db.syncQueue.add({
+          entityType: 'receivables',
+          entityId: receivableId,
+          action: 'CREATE',
+          payload: receivable,
+          status: 'PENDING',
+          retryCount: 0,
+          createdAt: timestamp
+        });
+      }
+    );
+
+    return {
+      receivableId,
+      remainingDebt,
+      receiptNumber: tx.receiptNumber
+    };
   }
 
   static async processReturnOrVoid(params: {
@@ -474,11 +687,18 @@ export class TransactionEngine {
     }
 
     // 0. Cumulative Return Validation (Prevent returning more than remaining unreturned quantity)
-    const pastReturns = await db.transactions
-      .where('originalTransactionId')
-      .equals(originalTx.transactionId)
-      .filter(tx => tx.type === 'RETURN')
-      .toArray();
+    let pastReturns: Transaction[] = [];
+    try {
+      pastReturns = await db.transactions
+        .where('originalTransactionId')
+        .equals(originalTx.transactionId)
+        .filter(tx => tx.type === 'RETURN')
+        .toArray();
+    } catch {
+      pastReturns = await db.transactions
+        .filter(tx => tx.type === 'RETURN' && (tx.originalTransactionId === originalTx.transactionId || tx.originalReceiptNumber === originalTx.receiptNumber))
+        .toArray();
+    }
 
     const alreadyReturnedMap = new Map<string, number>();
     for (const pr of pastReturns) {

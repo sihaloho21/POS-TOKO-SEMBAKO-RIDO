@@ -198,7 +198,7 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
     { id: 'pos', label: 'POS', icon: <ShoppingCart size={18} /> },
     { id: 'shift', label: 'Cashier Shift', icon: <ClipboardList size={18} /> },
     { id: 'shift-history', label: 'Shift History', icon: <CalendarClock size={18} /> },
-    { id: 'transactions', label: 'Transactions', icon: <Receipt size={18} /> },
+    { id: 'transactions', label: 'Riwayat Transaksi (Sales)', icon: <Receipt size={18} /> },
     { id: 'customers', label: 'Customers', icon: <Users size={18} /> },
     { id: 'digital', label: 'Digital Services', icon: <Smartphone size={18} /> },
     { id: 'inventory', label: 'Inventory', icon: <Package size={18} />, disabled: !isOwner },
