@@ -28,7 +28,7 @@ export class InventoryPredictionService {
       transactions.forEach(tx => {
         tx.items.forEach(item => {
           if (item.productId === product.productId) {
-            totalSold += (item.baseQty ?? item.quantity ?? 0);
+            totalSold += (item.quantity ?? 0);
           }
         });
       });

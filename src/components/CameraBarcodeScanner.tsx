@@ -22,6 +22,7 @@ interface CameraBarcodeScannerProps {
   title?: string;
   subtitle?: string;
   continuous?: boolean; // If true, stays open after scanning (e.g. in POS)
+  inline?: boolean; // If true, renders embedded inside layout instead of blocking modal
   lastScannedInfo?: { name: string; price?: number; barcode: string } | null;
   sampleBarcodes?: { barcode: string; label: string }[];
 }
@@ -33,6 +34,7 @@ export function CameraBarcodeScanner({
   title = 'Scan Barcode Kamera',
   subtitle = 'Arahkan kamera ke barcode produk',
   continuous = false,
+  inline = false,
   lastScannedInfo = null,
   sampleBarcodes = []
 }: CameraBarcodeScannerProps) {
@@ -263,6 +265,178 @@ export function CameraBarcodeScanner({
   }, [isOpen, onClose]);
 
   if (!isOpen) return null;
+
+  if (inline) {
+    return (
+      <div className="bg-slate-900 w-full rounded-2xl shadow-lg border border-slate-800 overflow-hidden flex flex-col sm:flex-row text-white">
+        {/* Left/Top: Live Camera Viewport */}
+        <div className="relative w-full sm:w-64 md:w-72 h-44 sm:h-auto bg-black overflow-hidden flex items-center justify-center shrink-0">
+          <video
+            ref={videoRef}
+            playsInline
+            muted
+            className="w-full h-full object-cover"
+          />
+
+          {flashSuccess && (
+            <div className="absolute inset-0 bg-emerald-500/35 pointer-events-none transition-opacity duration-300 z-30" />
+          )}
+
+          {/* Target Reticle Overlay */}
+          <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center p-3 z-20">
+            <div className={`relative w-44 h-28 rounded-xl border-2 transition-all ${
+              flashSuccess ? 'border-emerald-400 shadow-lg shadow-emerald-500/50' : 'border-blue-400/80 shadow-md shadow-blue-500/20'
+            }`}>
+              <div className="absolute -top-0.5 -left-0.5 w-4 h-4 border-t-2 border-l-2 border-blue-400 rounded-tl" />
+              <div className="absolute -top-0.5 -right-0.5 w-4 h-4 border-t-2 border-r-2 border-blue-400 rounded-tr" />
+              <div className="absolute -bottom-0.5 -left-0.5 w-4 h-4 border-b-2 border-l-2 border-blue-400 rounded-bl" />
+              <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 border-b-2 border-r-2 border-blue-400 rounded-br" />
+              <div className="absolute left-2 right-2 h-0.5 bg-gradient-to-r from-transparent via-rose-500 to-transparent shadow-sm shadow-rose-500 animate-pulse top-1/2 -translate-y-1/2" />
+            </div>
+          </div>
+
+          {/* Camera Controls Overlay */}
+          <div className="absolute top-2 right-2 flex gap-1.5 z-20">
+            {hasTorch && (
+              <button
+                type="button"
+                onClick={toggleTorch}
+                className={`p-1.5 rounded-lg backdrop-blur-md transition-all border ${
+                  isTorchOn
+                    ? 'bg-amber-500 text-slate-950 border-amber-300'
+                    : 'bg-slate-900/70 text-white border-slate-700 hover:bg-slate-800'
+                }`}
+                title={isTorchOn ? 'Matikan Lampu' : 'Nyalakan Lampu'}
+              >
+                {isTorchOn ? <Zap size={14} /> : <ZapOff size={14} />}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={flipCamera}
+              className="p-1.5 rounded-lg bg-slate-900/70 hover:bg-slate-800 text-white border border-slate-700 backdrop-blur-md transition-all cursor-pointer"
+              title="Ganti Kamera (Depan / Belakang)"
+            >
+              <FlipHorizontal size={14} />
+            </button>
+          </div>
+
+          {errorMessage && (
+            <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-md p-3 flex flex-col items-center justify-center text-center z-30">
+              <AlertCircle size={20} className="text-rose-400 mb-1" />
+              <p className="text-[10px] text-slate-300 font-bold leading-tight mb-2 line-clamp-2">{errorMessage}</p>
+              <button
+                type="button"
+                onClick={startCamera}
+                className="flex items-center gap-1 px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-black uppercase tracking-wider rounded-lg transition-all cursor-pointer"
+              >
+                <RefreshCw size={11} />
+                Coba Lagi
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Right/Bottom: Controls, Status & Quick Input */}
+        <div className="flex-1 p-3.5 flex flex-col justify-between gap-2.5">
+          <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-2">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
+              <h3 className="font-black text-xs uppercase tracking-wider text-white">{title}</h3>
+              <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-[9px] font-black uppercase tracking-wider">
+                SIAP SCAN OTOMATIS
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setSoundEnabled(!soundEnabled)}
+                className={`p-1.5 rounded-lg transition-all ${
+                  soundEnabled ? 'text-blue-400 hover:bg-slate-800' : 'text-slate-500 hover:bg-slate-800'
+                }`}
+                title={soundEnabled ? 'Bisu Suara' : 'Aktifkan Suara Beep'}
+              >
+                {soundEnabled ? <Volume2 size={15} /> : <VolumeX size={15} />}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  stopCamera();
+                  onClose();
+                }}
+                className="px-2 py-1 text-[10px] font-black uppercase tracking-wider text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
+                title="Sembunyikan Kamera (F3)"
+              >
+                <X size={14} />
+                <span>Tutup</span>
+              </button>
+            </div>
+          </div>
+
+          {lastScannedInfo ? (
+            <div className="px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-between text-xs">
+              <div className="flex items-center gap-2 min-w-0">
+                <CheckCircle2 size={15} className="text-emerald-400 shrink-0" />
+                <div className="truncate">
+                  <span className="font-bold text-white uppercase text-[11px] mr-2">{lastScannedInfo.name}</span>
+                  <span className="text-[10px] text-emerald-400 font-mono">
+                    ({lastScannedInfo.barcode})
+                    {lastScannedInfo.price !== undefined && ` • Rp ${lastScannedInfo.price.toLocaleString()}`}
+                  </span>
+                </div>
+              </div>
+              <span className="px-2 py-0.5 rounded-full bg-emerald-500 text-slate-950 font-black text-[9px] uppercase tracking-wider shrink-0 ml-2">
+                + Masuk Keranjang
+              </span>
+            </div>
+          ) : (
+            <p className="text-[11px] text-slate-400 font-medium">
+              Arahkan barcode produk ke kamera atau gunakan scanner fisik/USB untuk langsung memasukkan ke keranjang belanja.
+            </p>
+          )}
+
+          <div className="flex flex-wrap items-center gap-2">
+            <form onSubmit={handleManualSubmit} className="flex gap-1.5 flex-1 min-w-[200px]">
+              <div className="relative flex-1">
+                <Barcode size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                <input
+                  type="text"
+                  placeholder="Ketik / tempel kode barcode lalu Enter..."
+                  value={manualCode}
+                  onChange={(e) => setManualCode(e.target.value)}
+                  className="w-full pl-8 pr-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white placeholder-slate-500 outline-none focus:border-blue-500"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={!manualCode.trim()}
+                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-600 text-white font-black text-[10px] uppercase tracking-wider rounded-xl transition-all cursor-pointer"
+              >
+                Tambah
+              </button>
+            </form>
+
+            {sampleBarcodes.length > 0 && (
+              <div className="flex items-center gap-1 overflow-x-auto max-w-full py-0.5">
+                {sampleBarcodes.slice(0, 3).map((item) => (
+                  <button
+                    key={item.barcode}
+                    type="button"
+                    onClick={() => handleDetectedCode(item.barcode)}
+                    className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg text-[10px] font-mono border border-slate-700/80 transition-all shrink-0"
+                    title={`Simulasi scan ${item.label}`}
+                  >
+                    ⚡ {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-[250] flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200">

@@ -27,7 +27,6 @@ import ToastContainer from './app/components/ToastContainer';
 import { ErrorBoundary } from './app/components/ErrorBoundary';
 import { SyncEngine } from './core/sync-engine';
 import { ProductService } from './core/services/product-service';
-import { FishService } from './core/services/fish-service';
 
 export default function App() {
   const { currentUser, isAuthenticated, initializeAuth } = useAuthStore();
@@ -46,10 +45,6 @@ export default function App() {
 
     // Ensure baseline products and stock movements are valid
     ProductService.ensureBaselineProductsAndStock(currentUser?.userId).catch(err => console.warn('Baseline products init error:', err));
-
-    // Ensure minimal fish products and suppliers
-    FishService.ensureMinimalFishProducts(currentUser?.userId).catch(err => console.warn('Fish products init error:', err));
-    FishService.ensureFishSuppliers(currentUser?.userId).catch(err => console.warn('Fish suppliers init error:', err));
 
     // Check low stock
     ProductService.checkLowStock().catch(err => console.warn('checkLowStock failed:', err));

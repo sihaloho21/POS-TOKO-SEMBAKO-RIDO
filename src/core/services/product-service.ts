@@ -214,7 +214,20 @@ export class ProductService {
     const product = await db.products.get(productId);
     if (!product) return;
     
+    // Track deleted product ID so baseline seeding will never resurrect this product
+    try {
+      const deletedSetting = await db.settings.get('deleted_product_ids');
+      const ids: string[] = deletedSetting?.ids || [];
+      if (!ids.includes(productId)) {
+        ids.push(productId);
+        await db.settings.put({ id: 'deleted_product_ids', ids });
+      }
+    } catch (e) {
+      console.warn('Failed to record deleted_product_ids:', e);
+    }
+
     await db.products.delete(productId);
+    await db.productCosts.delete(productId);
 
     await AuditEngine.log({
       userId: 'SYSTEM',
@@ -739,12 +752,20 @@ export class ProductService {
       }
     ];
 
-    for (const bp of baselineProducts) {
-      const existing = await db.products.get(bp.productId);
-      if (!existing) {
-        await db.products.put(bp);
-        await db.productCosts.put({ productId: bp.productId, hpp: bp.hpp, updatedAt: nowStr });
+    const seedFlag = await db.settings.get('baseline_products_seeded');
+    const deletedSetting = await db.settings.get('deleted_product_ids');
+    const deletedIds: string[] = deletedSetting?.ids || [];
+
+    if (!seedFlag) {
+      for (const bp of baselineProducts) {
+        if (deletedIds.includes(bp.productId)) continue;
+        const existing = await db.products.get(bp.productId);
+        if (!existing) {
+          await db.products.put(bp);
+          await db.productCosts.put({ productId: bp.productId, hpp: bp.hpp, updatedAt: nowStr });
+        }
       }
+      await db.settings.put({ id: 'baseline_products_seeded', value: true, seededAt: nowStr });
     }
 
     // Verify stock ledger integrity for ALL non-bundle products
@@ -779,26 +800,8 @@ export class ProductService {
           timestamp: nowStr
         });
         await StockService.reconcileProductStock(prod.productId);
-      } else if (derived <= 0) {
-        // Case 2: Product movements exist but resulted in 0 or negative stock (like the -1 in the bug report)
-        const replenishQty = Math.max(100, Math.abs(derived) + 50);
-        await StockService.recordMovement({
-          productId: prod.productId,
-          movementType: 'ADJUSTMENT_IN',
-          qty: replenishQty,
-          unit: prod.baseUnit,
-          baseQty: replenishQty,
-          referenceId: `replenish_${prod.productId}_${uuidv4().slice(0, 6)}`,
-          segmentId: prod.productType === 'FISH' ? 'IKAN' : 'WARUNG',
-          reason: 'Penambahan Stok Otomatis (Pemulihan Stok Negatif/Kosong Sistem)',
-          costSnapshot: prod.hpp || 10000,
-          userId,
-          deviceId: 'LOCAL',
-          timestamp: nowStr
-        });
-        await StockService.reconcileProductStock(prod.productId);
       } else {
-        // Reconcile cached stock in product doc if out of sync
+        // Reconcile cached stock in product doc if out of sync with movements
         if (prod.stock !== derived) {
           await db.products.update(prod.productId, {
             stock: derived,

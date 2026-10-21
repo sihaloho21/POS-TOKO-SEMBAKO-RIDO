@@ -51,8 +51,6 @@ import { useAuthStore } from '@/core/auth-store';
 import { useToastStore } from '@/core/toast-store';
 import { 
   FishService, 
-  MINIMAL_FISH_SPECIES, 
-  MINIMAL_FISH_SUPPLIERS,
   type FishProcurementCycle 
 } from '@/core/services/fish-service';
 import { SupplierModal } from '@/app/suppliers/SupplierModal';
@@ -253,31 +251,6 @@ export default function FishManagement() {
     () => FishService.getDailyFishProfitReport(todayPrefix),
     [todayPrefix, deathMovements]
   );
-
-  // Check which minimal species exist
-  const speciesStatus = useMemo(() => {
-    const names = ['nila', 'mas', 'gurame', 'lele', 'patin'];
-    const activeNames = allFishProducts?.map(p => p.name.toLowerCase()) || [];
-    return names.map(target => ({
-      target,
-      label: target.toUpperCase(),
-      exists: activeNames.some(n => n.includes(target))
-    }));
-  }, [allFishProducts]);
-
-  const allMinimalSpeciesPresent = speciesStatus.every(s => s.exists);
-
-  // Initialize Minimal Fish & Suppliers
-  const handleSeedMinimalFish = async () => {
-    try {
-      await FishService.ensureMinimalFishProducts(currentUser?.userId || 'SYSTEM');
-      await FishService.ensureFishSuppliers(currentUser?.userId || 'SYSTEM');
-      await refreshProcurementCycles();
-      addToast('5 Produk Ikan Minimal (Nila, Mas, Gurame, Lele, Patin) dan Supplier (Cikande & Rau) berhasil diinisialisasi!', 'success');
-    } catch (e: any) {
-      addToast('Gagal inisialisasi: ' + e.message, 'error');
-    }
-  };
 
   // Submit Fish Death
   const handleSaveDeath = async (e: React.FormEvent) => {
@@ -555,40 +528,6 @@ export default function FishManagement() {
         </div>
       </div>
 
-      {/* Mandatory Fish Species Readiness Indicator */}
-      {!allMinimalSpeciesPresent && (
-        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0">
-              <AlertTriangle size={20} />
-            </div>
-            <div>
-              <p className="text-xs font-black text-amber-950 uppercase tracking-tight">
-                Persyaratan Minimal Produk Retail Ikan (Nila, Mas, Gurame, Lele, Patin)
-              </p>
-              <div className="flex flex-wrap gap-1.5 mt-1.5">
-                {speciesStatus.map(s => (
-                  <span 
-                    key={s.target}
-                    className={`text-[10px] font-black px-2 py-0.5 rounded-md uppercase tracking-wider ${
-                      s.exists ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-700'
-                    }`}
-                  >
-                    {s.exists ? '✓' : '✗'} {s.label}
-                  </span>
-                ))}
-              </div>
-            </div>
-          </div>
-          <button
-            onClick={handleSeedMinimalFish}
-            className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-md shadow-amber-200 shrink-0"
-          >
-            Lengkapi 5 Produk & Supplier Ikan
-          </button>
-        </div>
-      )}
-
       {/* Summary KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Card 1: Total Stok Ikan */}
@@ -731,7 +670,7 @@ export default function FishManagement() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
               <input 
                 type="text" 
-                placeholder="Cari jenis ikan (Nila, Mas, Gurame, Lele, Patin)..."
+                placeholder="Cari jenis atau barcode ikan..."
                 className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-xs font-bold shadow-sm"
                 value={search ?? ''}
                 onChange={(e) => setSearch(e.target.value)}

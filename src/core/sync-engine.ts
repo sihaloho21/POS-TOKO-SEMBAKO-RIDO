@@ -1,4 +1,4 @@
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import { db as localDb } from './database';
 import { db as firestoreDb, auth, handleFirestoreError, OperationType } from '../firebase/config';
 import type { SyncQueueItem } from './types';
@@ -65,19 +65,27 @@ export class SyncEngine {
 
       const docRef = doc(firestoreDb, collectionName, item.entityId);
       
-      // Sanitize payload: remove undefined values which Firestore doesn't accept
-      const sanitizedPayload = JSON.parse(JSON.stringify(item.payload, (_, v) => v === undefined ? null : v));
+      if (item.action === 'DELETE') {
+        try {
+          await deleteDoc(docRef);
+        } catch (error) {
+          handleFirestoreError(error, OperationType.DELETE, collectionName);
+        }
+      } else {
+        // Sanitize payload: remove undefined values which Firestore doesn't accept
+        const sanitizedPayload = JSON.parse(JSON.stringify(item.payload, (_, v) => v === undefined ? null : v));
 
-      const payload = {
-        ...sanitizedPayload,
-        syncStatus: 'SYNCED',
-        serverTimestamp: serverTimestamp()
-      };
+        const payload = {
+          ...sanitizedPayload,
+          syncStatus: 'SYNCED',
+          serverTimestamp: serverTimestamp()
+        };
 
-      try {
-        await setDoc(docRef, payload, { merge: true });
-      } catch (error) {
-        handleFirestoreError(error, OperationType.WRITE, collectionName);
+        try {
+          await setDoc(docRef, payload, { merge: true });
+        } catch (error) {
+          handleFirestoreError(error, OperationType.WRITE, collectionName);
+        }
       }
 
       const networkDurationMs = Math.round(performance.now() - netStart);

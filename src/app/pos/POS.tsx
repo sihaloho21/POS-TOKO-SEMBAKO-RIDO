@@ -221,10 +221,12 @@ export default function POS() {
 
   const products = useLiveQuery(
     () => db.products.filter(p => 
-      p.name.toLowerCase().includes(search.toLowerCase()) || 
-      p.barcode.includes(search) ||
-      !!(p.sku && p.sku.includes(search)) ||
-      Boolean(p.conversionRules && p.conversionRules.some(r => r.barcode && r.barcode.includes(search)))
+      p.status === 'ACTIVE' && (
+        p.name.toLowerCase().includes(search.toLowerCase()) || 
+        p.barcode.includes(search) ||
+        !!(p.sku && p.sku.includes(search)) ||
+        Boolean(p.conversionRules && p.conversionRules.some(r => r.barcode && r.barcode.includes(search)))
+      )
     ).toArray(),
     [search]
   );
@@ -251,13 +253,6 @@ export default function POS() {
     calculateStocks();
     return () => { isMounted = false; };
   }, [products]);
-
-  // Ensure stock movements and baseline items are healthy on POS initialization
-  useEffect(() => {
-    ProductService.ensureBaselineProductsAndStock(currentUser?.userId).catch(err =>
-      console.warn('POS stock ensure baseline error:', err)
-    );
-  }, [currentUser?.userId]);
 
   const handleInspectBundle = async (bundleId: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();

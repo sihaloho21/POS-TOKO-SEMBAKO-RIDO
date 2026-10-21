@@ -26,7 +26,7 @@ export function InventoryHeatmap() {
         const matchingItems = tx.items.filter(i => i.productId === product.productId);
         if (matchingItems.length > 0) {
           matchingItems.forEach(item => {
-            totalSold += (item.baseQty ?? item.quantity ?? 0);
+            totalSold += (item.quantity ?? 0);
           });
           transactionCount++;
         }
