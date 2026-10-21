@@ -17,7 +17,12 @@ import {
   ArrowRight,
   Banknote,
   CheckCircle2,
-  BookmarkPlus
+  BookmarkPlus,
+  Search,
+  PackageCheck,
+  AlertCircle,
+  Trash2,
+  RotateCcw
 } from 'lucide-react';
 
 interface QuickSaleModalProps {
@@ -47,9 +52,13 @@ interface CommonItemDef {
   name: string;
   defaultPrice: number;
   unit: string;
-  category: 'LARIS' | 'SEMBAKO' | 'MINUMAN' | 'DAPUR' | 'LAINNYA';
+  category: 'KATALOG' | 'LARIS' | 'SEMBAKO' | 'MINUMAN' | 'DAPUR' | 'LAINNYA';
   iconColor: string;
   salesCount?: number;
+  stock?: number;
+  isCatalogSynced?: boolean;
+  matchedProductId?: string;
+  realProduct?: Product;
 }
 
 const COMMON_ITEMS: CommonItemDef[] = [
@@ -77,7 +86,8 @@ export function QuickSaleModal({
   catalogProducts = []
 }: QuickSaleModalProps) {
   const [activeTab, setActiveTab] = useState<'COMMON' | 'CUSTOM'>('COMMON');
-  const [categoryFilter, setCategoryFilter] = useState<'ALL' | 'LARIS' | 'SEMBAKO' | 'MINUMAN' | 'DAPUR' | 'LAINNYA'>('ALL');
+  const [categoryFilter, setCategoryFilter] = useState<'ALL' | 'KATALOG' | 'LARIS' | 'SEMBAKO' | 'MINUMAN' | 'DAPUR' | 'LAINNYA'>('ALL');
+  const [searchQuery, setSearchQuery] = useState<string>('');
 
   // Custom Item / Price States
   const [customName, setCustomName] = useState<string>('Item Bebas');
@@ -86,6 +96,35 @@ export function QuickSaleModal({
   const [customUnit, setCustomUnit] = useState<string>('PCS');
   const [saveToCatalog, setSaveToCatalog] = useState<boolean>(false);
   const [lastAddedLabel, setLastAddedLabel] = useState<string>('');
+
+  // Hidden/Deleted Quick Sale Items
+  const [hiddenItemIds, setHiddenItemIds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('pos_hidden_quick_sale_items');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const handleDeleteQuickItem = (itemId: string, itemName: string) => {
+    const updated = [...hiddenItemIds, itemId];
+    setHiddenItemIds(updated);
+    try {
+      localStorage.setItem('pos_hidden_quick_sale_items', JSON.stringify(updated));
+    } catch {}
+    setLastAddedLabel(`"${itemName}" dihapus dari Quick Sale`);
+    setTimeout(() => setLastAddedLabel(''), 2500);
+  };
+
+  const handleRestoreHiddenItems = () => {
+    setHiddenItemIds([]);
+    try {
+      localStorage.removeItem('pos_hidden_quick_sale_items');
+    } catch {}
+    setLastAddedLabel(`Semua item Quick Sale dipulihkan`);
+    setTimeout(() => setLastAddedLabel(''), 2500);
+  };
 
   // Top dynamic fast-moving items
   const [dynamicTopItems, setDynamicTopItems] = useState<CommonItemDef[]>([]);
@@ -99,8 +138,32 @@ export function QuickSaleModal({
     unit: string;
     category?: string;
     total: number;
+    isCatalogSynced?: boolean;
+    stock?: number;
   } | null>(null);
   const [expressCashTendered, setExpressCashTendered] = useState<number>(0);
+
+  // Helper: Smart Matching between quick item template and real catalog products
+  const findMatchingProduct = (item: { id: string; name: string }): Product | undefined => {
+    // 1. Direct ID match
+    let matched = catalogProducts.find(p => p.productId === item.id);
+    if (matched) return matched;
+
+    // 2. Exact name match (case-insensitive)
+    const lowerName = item.name.toLowerCase().trim();
+    matched = catalogProducts.find(p => p.name.toLowerCase().trim() === lowerName);
+    if (matched) return matched;
+
+    // 3. Keyword / Substring match (e.g. "beras", "minyak", "telur", "gula", "mie", "ikan")
+    const primaryKeywords = ['beras', 'minyak', 'telur', 'gula', 'mie', 'kopi', 'air', 'galon', 'garam', 'kerupuk', 'gas', 'ikan'];
+    const foundRoot = primaryKeywords.find(r => lowerName.includes(r));
+    if (foundRoot) {
+      matched = catalogProducts.find(p => p.name.toLowerCase().includes(foundRoot));
+      if (matched) return matched;
+    }
+
+    return undefined;
+  };
 
   // Load real-time top fast-moving items
   useEffect(() => {
@@ -118,7 +181,7 @@ export function QuickSaleModal({
         const countMap = new Map<string, { qty: number; name: string }>();
         for (const tx of recentTxs) {
           for (const item of tx.items) {
-            if (item.productId) {
+            if (item.productId && !item.productId.startsWith('quick-')) {
               const prev = countMap.get(item.productId) || { qty: 0, name: item.nameSnapshot };
               countMap.set(item.productId, { qty: prev.qty + item.quantity, name: item.nameSnapshot });
             }
@@ -140,7 +203,11 @@ export function QuickSaleModal({
               unit: prod.baseUnit || 'PCS',
               category: 'LARIS',
               iconColor: 'bg-amber-100 text-amber-900',
-              salesCount: data.qty
+              salesCount: data.qty,
+              stock: prod.stock,
+              isCatalogSynced: true,
+              matchedProductId: prod.productId,
+              realProduct: prod
             });
           }
         }
@@ -154,7 +221,11 @@ export function QuickSaleModal({
               defaultPrice: p.normalPrice,
               unit: p.baseUnit || 'PCS',
               category: 'LARIS',
-              iconColor: 'bg-amber-100 text-amber-900'
+              iconColor: 'bg-amber-100 text-amber-900',
+              stock: p.stock,
+              isCatalogSynced: true,
+              matchedProductId: p.productId,
+              realProduct: p
             });
           });
         }
@@ -187,45 +258,138 @@ export function QuickSaleModal({
     } catch {}
   };
 
-  const notifyAdded = (name: string, qty: number) => {
+  const notifyAdded = (name: string, qty: number, isSynced: boolean = true) => {
     playQuickBeep();
-    setLastAddedLabel(`${qty}x ${name} ditambahkan!`);
-    setTimeout(() => setLastAddedLabel(''), 2000);
+    setLastAddedLabel(`${qty}x ${name} ditambahkan! ${isSynced ? '✓ Stok sinkron' : '(Item lepas non-stok)'}`);
+    setTimeout(() => setLastAddedLabel(''), 2500);
   };
 
-  // Filtered Common Items
+  // Convert real catalog products to Quick Items so kasir can 1-click add any store product
+  const catalogQuickItems = useMemo<CommonItemDef[]>(() => {
+    return catalogProducts.map(p => ({
+      id: p.productId,
+      name: p.name,
+      defaultPrice: p.normalPrice,
+      unit: p.baseUnit || 'PCS',
+      category: p.productType === 'FISH' ? 'LAINNYA' : (p.categoryId === 'FISH' ? 'LAINNYA' : (p.categoryId as any) || 'SEMBAKO'),
+      iconColor: p.productType === 'FISH' ? 'bg-cyan-100 text-cyan-800' : 'bg-blue-100 text-blue-800',
+      stock: p.stock,
+      isCatalogSynced: true,
+      matchedProductId: p.productId,
+      realProduct: p
+    }));
+  }, [catalogProducts]);
+
+  // Filtered Common Items with live inventory synchronization
   const filteredCommonItems = useMemo(() => {
-    if (categoryFilter === 'LARIS') {
-      return dynamicTopItems.length > 0 ? dynamicTopItems : COMMON_ITEMS.slice(0, 6);
+    // Enhance static COMMON_ITEMS with matched catalog status
+    const enhancedCommonItems = COMMON_ITEMS.map(item => {
+      const matched = findMatchingProduct(item);
+      if (matched) {
+        return {
+          ...item,
+          name: matched.name,
+          defaultPrice: matched.normalPrice,
+          unit: matched.baseUnit || item.unit,
+          stock: matched.stock,
+          isCatalogSynced: true,
+          matchedProductId: matched.productId,
+          realProduct: matched
+        };
+      }
+      return {
+        ...item,
+        isCatalogSynced: false
+      };
+    });
+
+    let result: CommonItemDef[] = [];
+    if (categoryFilter === 'KATALOG') {
+      result = catalogQuickItems;
+    } else if (categoryFilter === 'LARIS') {
+      result = dynamicTopItems.length > 0 ? dynamicTopItems : catalogQuickItems.slice(0, 8);
+    } else if (categoryFilter === 'ALL') {
+      // Prioritize top items, then real catalog products, then templates without duplicate names
+      const seenNames = new Set<string>();
+      const combined: CommonItemDef[] = [];
+
+      dynamicTopItems.forEach(item => {
+        seenNames.add(item.name.toLowerCase());
+        combined.push(item);
+      });
+
+      catalogQuickItems.forEach(item => {
+        if (!seenNames.has(item.name.toLowerCase())) {
+          seenNames.add(item.name.toLowerCase());
+          combined.push(item);
+        }
+      });
+
+      enhancedCommonItems.forEach(item => {
+        if (!seenNames.has(item.name.toLowerCase())) {
+          seenNames.add(item.name.toLowerCase());
+          combined.push(item);
+        }
+      });
+
+      result = combined;
+    } else {
+      // Filter by specific category
+      const catalogFiltered = catalogQuickItems.filter(item => item.category === categoryFilter);
+      const commonFiltered = enhancedCommonItems.filter(item => item.category === categoryFilter);
+      
+      // Combine without duplicate names
+      const seenNames = new Set<string>();
+      const combined: CommonItemDef[] = [];
+      catalogFiltered.forEach(i => {
+        seenNames.add(i.name.toLowerCase());
+        combined.push(i);
+      });
+      commonFiltered.forEach(i => {
+        if (!seenNames.has(i.name.toLowerCase())) {
+          seenNames.add(i.name.toLowerCase());
+          combined.push(i);
+        }
+      });
+      result = combined;
     }
-    if (categoryFilter === 'ALL') {
-      return [...dynamicTopItems, ...COMMON_ITEMS];
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      result = result.filter(item => 
+        item.name.toLowerCase().includes(q) || 
+        item.category.toLowerCase().includes(q)
+      );
     }
-    return COMMON_ITEMS.filter(item => item.category === categoryFilter);
-  }, [categoryFilter, dynamicTopItems]);
+
+    if (hiddenItemIds.length > 0) {
+      result = result.filter(item => !hiddenItemIds.includes(item.id));
+    }
+
+    return result;
+  }, [categoryFilter, dynamicTopItems, catalogQuickItems, searchQuery, hiddenItemIds]);
 
   if (!isOpen) return null;
 
   // Handle adding common item
   const handleAddCommon = (item: CommonItemDef, multiplier: number = 1) => {
     // Check if matching catalog product exists to keep stock sync
-    const matchedCatalogProduct = catalogProducts.find(
-      p => p.productId === item.id || p.name.toLowerCase() === item.name.toLowerCase() || p.barcode === item.id
-    );
-
-    const price = matchedCatalogProduct ? matchedCatalogProduct.normalPrice : item.defaultPrice;
-    const productId = matchedCatalogProduct ? matchedCatalogProduct.productId : (item.id.startsWith('ci-') ? undefined : item.id);
+    const matched = item.realProduct || findMatchingProduct(item);
+    const price = matched ? matched.normalPrice : item.defaultPrice;
+    const productId = matched ? matched.productId : (item.id.startsWith('ci-') ? undefined : item.id);
+    const finalName = matched ? matched.name : item.name;
+    const finalUnit = matched ? (matched.baseUnit || item.unit) : item.unit;
 
     onAddItem({
       productId,
-      name: item.name,
+      name: finalName,
       price,
       quantity: multiplier,
-      unit: item.unit,
+      unit: finalUnit,
       category: item.category
     });
 
-    notifyAdded(item.name, multiplier);
+    notifyAdded(finalName, multiplier, !!productId);
   };
 
   // Handle adding custom price item
@@ -235,13 +399,18 @@ export function QuickSaleModal({
     const itemName = customName.trim() || 'Item Bebas';
     let productId: string | undefined = undefined;
 
-    // Optional: Save as new catalog product in db.products
+    // Optional: Save as new catalog product in db.products to track stock
     if (saveToCatalog) {
       try {
         const newProdId = uuidv4();
         const barcodeVal = `888${Date.now().toString().slice(-6)}`;
+        const now = new Date().toISOString();
+        const initialStock = 20;
+        const hppEst = Math.round(customPrice * 0.85);
+
         await db.products.add({
           productId: newProdId,
+          sku: `CUSTOM-${Date.now().toString().slice(-4)}`,
           barcode: barcodeVal,
           name: itemName,
           categoryId: 'SEMBAKO',
@@ -250,14 +419,21 @@ export function QuickSaleModal({
           saleUnits: [customUnit],
           conversionRules: [],
           normalPrice: customPrice,
-          hpp: Math.round(customPrice * 0.85),
+          hpp: hppEst,
           minimumStock: 5,
-          targetStock: 20,
-          stock: 20,
+          targetStock: 25,
+          stock: initialStock,
           status: 'ACTIVE',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
+          createdAt: now,
+          updatedAt: now
         });
+
+        await db.productCosts.put({
+          productId: newProdId,
+          hpp: hppEst,
+          updatedAt: now
+        });
+
         productId = newProdId;
       } catch (err) {
         console.warn('Could not auto-save product to catalog:', err);
@@ -275,11 +451,16 @@ export function QuickSaleModal({
 
     if (andCheckout && onAddAndCheckout) {
       const totalAmount = customPrice * customQty;
-      setExpressItem({ ...payload, total: totalAmount });
+      setExpressItem({ 
+        ...payload, 
+        total: totalAmount,
+        isCatalogSynced: !!productId,
+        stock: productId ? 20 : undefined
+      });
       setExpressCashTendered(totalAmount);
     } else {
       onAddItem(payload);
-      notifyAdded(itemName, customQty);
+      notifyAdded(itemName, customQty, !!productId);
       setCustomQty(1);
     }
   };
@@ -365,9 +546,61 @@ export function QuickSaleModal({
         <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
           {activeTab === 'COMMON' ? (
             <div className="space-y-4">
+              {/* Search & Filter Header */}
+              <div className="flex flex-col sm:flex-row gap-2">
+                <div className="relative flex-1">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Cari item cepat / nama produk inventori..."
+                    className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 placeholder-slate-400 outline-none focus:border-amber-500 focus:bg-white"
+                  />
+                  {searchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchQuery('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-sm font-bold"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Status Info Banner */}
+              <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-2.5 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-600">
+                <div className="flex items-center gap-2">
+                  <span className="flex items-center gap-1 font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200">
+                    <Check size={12} className="stroke-[3]" />
+                    Sinkron Inventori
+                  </span>
+                  <span className="text-slate-500 hidden sm:inline">
+                    Item dengan label stok otomatis memotong inventori saat nota dibayar.
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {hiddenItemIds.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleRestoreHiddenItems}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-[10px] font-bold transition-all cursor-pointer"
+                      title="Kembalikan semua item yang pernah dihapus secara manual dari Quick Sale"
+                    >
+                      <RotateCcw size={11} />
+                      <span>Pulihkan {hiddenItemIds.length} item terhapus</span>
+                    </button>
+                  )}
+                  <span className="text-[10px] font-black uppercase text-slate-400">
+                    {filteredCommonItems.length} Produk
+                  </span>
+                </div>
+              </div>
+
               {/* Category Filter Chips */}
               <div className="flex flex-wrap gap-1.5 pb-1">
-                {(['ALL', 'LARIS', 'SEMBAKO', 'MINUMAN', 'DAPUR', 'LAINNYA'] as const).map(cat => (
+                {(['ALL', 'KATALOG', 'LARIS', 'SEMBAKO', 'MINUMAN', 'DAPUR', 'LAINNYA'] as const).map(cat => (
                   <button
                     key={cat}
                     type="button"
@@ -378,80 +611,126 @@ export function QuickSaleModal({
                         : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                     }`}
                   >
-                    {cat === 'ALL' ? 'Semua Kategori' : cat === 'LARIS' ? '🔥 Top Terlaris' : cat}
+                    {cat === 'ALL' ? 'Semua Kategori' : cat === 'KATALOG' ? '📦 Dari Inventori' : cat === 'LARIS' ? '🔥 Top Terlaris' : cat}
                   </button>
                 ))}
               </div>
 
               {/* Grid of Common Items */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                {filteredCommonItems.map(item => (
-                  <div
-                    key={item.id}
-                    className="p-3.5 bg-white border border-slate-200 hover:border-amber-400 rounded-2xl shadow-sm hover:shadow-md transition-all flex flex-col justify-between group"
-                  >
-                    <div>
-                      <div className="flex justify-between items-start mb-2">
-                        <span className={`px-2 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-wider ${item.iconColor}`}>
-                          {item.unit}
-                        </span>
-                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                          {item.salesCount !== undefined ? `${item.salesCount}x Terjual` : item.category}
-                        </span>
+              {filteredCommonItems.length === 0 ? (
+                <div className="py-12 px-4 text-center border-2 border-dashed border-slate-200 rounded-2xl space-y-3">
+                  <p className="text-xs font-bold text-slate-500">
+                    Tidak ada produk yang ditampilkan di kategori ini atau hasil pencarian tidak ditemukan.
+                  </p>
+                  {hiddenItemIds.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleRestoreHiddenItems}
+                      className="px-3.5 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold hover:bg-slate-800 inline-flex items-center gap-1.5 transition-all cursor-pointer"
+                    >
+                      <RotateCcw size={13} />
+                      Pulihkan {hiddenItemIds.length} Item yang Terhapus
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {filteredCommonItems.map(item => (
+                    <div
+                      key={item.id}
+                      className="p-3.5 bg-white border border-slate-200 hover:border-amber-400 rounded-2xl shadow-sm hover:shadow-md transition-all flex flex-col justify-between group"
+                    >
+                      <div>
+                        <div className="flex justify-between items-start mb-1.5">
+                          <span className={`px-2 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-wider ${item.iconColor}`}>
+                            {item.unit}
+                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                              {item.salesCount !== undefined ? `${item.salesCount}x Terjual` : item.category}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteQuickItem(item.id, item.name);
+                              }}
+                              className="text-slate-300 hover:text-rose-600 hover:bg-rose-50 p-1 rounded-md transition-colors cursor-pointer"
+                              title={`Hapus / sembunyikan "${item.name}" dari Quick Sale`}
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        </div>
+                        <h4 className="font-bold text-slate-900 text-xs line-clamp-2 min-h-[32px]">
+                          {item.name}
+                        </h4>
+                        <div className="flex items-center justify-between mt-1">
+                          <p className="text-sm font-black text-blue-600 tabular-nums">
+                            Rp {item.defaultPrice.toLocaleString()}
+                          </p>
+                          {item.isCatalogSynced ? (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-[9px] font-bold" title="Tersinkron dengan inventori toko">
+                              <Check size={9} className="stroke-[3]" />
+                              Stok {item.stock ?? 0}
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[9px] font-medium" title="Item cepat non-katalog (tidak melacak stok)">
+                              Lepas
+                            </span>
+                          )}
+                        </div>
                       </div>
-                      <h4 className="font-bold text-slate-900 text-xs line-clamp-2 min-h-[32px]">
-                        {item.name}
-                      </h4>
-                      <p className="text-sm font-black text-blue-600 tabular-nums mt-1">
-                        Rp {item.defaultPrice.toLocaleString()}
-                      </p>
-                    </div>
 
-                    {/* Quick Add Buttons */}
-                    <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => handleAddCommon(item, 1)}
-                        className="flex-1 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1 transition-all active:scale-95 cursor-pointer"
-                        title="Tambah 1 ke keranjang"
-                      >
-                        <Plus size={12} />
-                        <span>+1</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleAddCommon(item, 2)}
-                        className="px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition-all active:scale-95 cursor-pointer"
-                        title="Tambah 2"
-                      >
-                        +2
-                      </button>
-                      {onAddAndCheckout && (
+                      {/* Quick Add Buttons */}
+                      <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center gap-1.5">
                         <button
                           type="button"
-                          onClick={() => {
-                            const totalAmount = item.defaultPrice;
-                            setExpressItem({
-                              productId: item.id.startsWith('ci-') ? undefined : item.id,
-                              name: item.name,
-                              price: item.defaultPrice,
-                              quantity: 1,
-                              unit: item.unit,
-                              category: item.category,
-                              total: totalAmount
-                            });
-                            setExpressCashTendered(totalAmount);
-                          }}
-                          className="px-2 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-lg text-xs font-black transition-all active:scale-95 cursor-pointer"
-                          title="Langsung Bayar Cepat 1 Item"
+                          onClick={() => handleAddCommon(item, 1)}
+                          className="flex-1 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1 transition-all active:scale-95 cursor-pointer"
+                          title="Tambah 1 ke keranjang"
                         >
-                          ⚡
+                          <Plus size={12} />
+                          <span>+1</span>
                         </button>
-                      )}
+                        <button
+                          type="button"
+                          onClick={() => handleAddCommon(item, 2)}
+                          className="px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition-all active:scale-95 cursor-pointer"
+                          title="Tambah 2"
+                        >
+                          +2
+                        </button>
+                        {onAddAndCheckout && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const totalAmount = item.defaultPrice;
+                              const prodId = item.realProduct?.productId || item.matchedProductId || (item.id.startsWith('ci-') ? undefined : item.id);
+                              setExpressItem({
+                                productId: prodId,
+                                name: item.name,
+                                price: item.defaultPrice,
+                                quantity: 1,
+                                unit: item.unit,
+                                category: item.category,
+                                total: totalAmount,
+                                isCatalogSynced: !!prodId,
+                                stock: item.stock
+                              });
+                              setExpressCashTendered(totalAmount);
+                            }}
+                            className="px-2 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-lg text-xs font-black transition-all active:scale-95 cursor-pointer"
+                            title="Langsung Bayar Cepat 1 Item"
+                          >
+                            ⚡
+                          </button>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           ) : (
             /* CUSTOM PRICE & KEYPAD MODE */
