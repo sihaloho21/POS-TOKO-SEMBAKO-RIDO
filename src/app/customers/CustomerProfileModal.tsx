@@ -398,7 +398,15 @@ export function CustomerProfileModal({
                   <span className="font-black text-emerald-600">Rp {remainingCredit.toLocaleString()}</span>
                 </div>
                 <div className="pt-2 border-t border-slate-100 flex justify-between text-[11px]">
-                  <span className="text-slate-400 font-bold uppercase">Jatuh Tempo Default</span>
+                  <span className="text-slate-400 font-bold uppercase">Skema Gajian:</span>
+                  <span className="font-black text-slate-800">
+                    {customer.gajianTempoType === 'SAME_DATE_NEXT_MONTH'
+                      ? 'Sama Tanggal Ambil Bln Depan'
+                      : `Tanggal ${customer.gajianDate || 7} Tiap Bulan`}
+                  </span>
+                </div>
+                <div className="flex justify-between text-[11px]">
+                  <span className="text-slate-400 font-bold uppercase">Jatuh Tempo Default:</span>
                   <span className="font-black text-slate-700">{customer.defaultDueDateDays || 30} Hari</span>
                 </div>
               </div>

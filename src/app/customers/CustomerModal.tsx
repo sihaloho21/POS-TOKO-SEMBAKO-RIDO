@@ -297,6 +297,89 @@ export function CustomerModal({ customer, onClose }: CustomerModalProps) {
                   onChange={e => setFormData({ ...formData, defaultDueDateDays: Number(e.target.value) })}
                 />
               </div>
+
+              {/* 2 Tipe Skema Tempo Gajian */}
+              <div className="space-y-2 pt-2 border-t border-white/10">
+                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">
+                  Skema Tempo Gajian
+                </label>
+                <div className="grid grid-cols-1 gap-2">
+                  <label className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
+                    (formData.gajianTempoType || 'TANGGAL_6_7') === 'TANGGAL_6_7'
+                      ? 'bg-blue-600/20 border-blue-500 text-white shadow-sm'
+                      : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'
+                  }`}>
+                    <input
+                      type="radio"
+                      name="gajianTempoType"
+                      value="TANGGAL_6_7"
+                      checked={(formData.gajianTempoType || 'TANGGAL_6_7') === 'TANGGAL_6_7'}
+                      onChange={() => setFormData({ ...formData, gajianTempoType: 'TANGGAL_6_7' })}
+                      className="mt-1 text-blue-500"
+                    />
+                    <div className="space-y-1 text-xs">
+                      <div className="font-bold flex items-center gap-2">
+                        <span>1. Tanggal 6-7 Setiap Bulan (Default)</span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 leading-relaxed">
+                        Jatuh tempo otomatis di tanggal 6 atau 7 setiap bulannya sesuai siklus gajian bulanan.
+                      </p>
+                      {(formData.gajianTempoType || 'TANGGAL_6_7') === 'TANGGAL_6_7' && (
+                        <div className="flex items-center gap-2 pt-1.5">
+                          <span className="text-[10px] text-slate-400">Pilih Tanggal:</span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              setFormData({ ...formData, gajianDate: 6 });
+                            }}
+                            className={`px-2.5 py-1 rounded-lg text-[10px] font-black transition-all ${
+                              (formData.gajianDate || 7) === 6 ? 'bg-blue-500 text-white' : 'bg-white/10 text-slate-300 hover:bg-white/20'
+                            }`}
+                          >
+                            Tanggal 6
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              setFormData({ ...formData, gajianDate: 7 });
+                            }}
+                            className={`px-2.5 py-1 rounded-lg text-[10px] font-black transition-all ${
+                              (formData.gajianDate || 7) === 7 ? 'bg-blue-500 text-white' : 'bg-white/10 text-slate-300 hover:bg-white/20'
+                            }`}
+                          >
+                            Tanggal 7 (Standar)
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </label>
+
+                  <label className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
+                    formData.gajianTempoType === 'SAME_DATE_NEXT_MONTH'
+                      ? 'bg-blue-600/20 border-blue-500 text-white shadow-sm'
+                      : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'
+                  }`}>
+                    <input
+                      type="radio"
+                      name="gajianTempoType"
+                      value="SAME_DATE_NEXT_MONTH"
+                      checked={formData.gajianTempoType === 'SAME_DATE_NEXT_MONTH'}
+                      onChange={() => setFormData({ ...formData, gajianTempoType: 'SAME_DATE_NEXT_MONTH' })}
+                      className="mt-1 text-blue-500"
+                    />
+                    <div className="space-y-1 text-xs">
+                      <div className="font-bold flex items-center gap-2">
+                        <span>2. Sama Tanggal Ambil Bulan Depan</span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 leading-relaxed">
+                        Contoh: Ambil barang tgl 15, maka jatuh tempo pada tgl 15 bulan depannya.
+                      </p>
+                    </div>
+                  </label>
+                </div>
+              </div>
             </div>
           </div>
 

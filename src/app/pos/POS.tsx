@@ -48,7 +48,8 @@ import { SalesHistory } from './SalesHistory';
 import { LoyaltyEngine } from '@/core/loyalty-engine';
 import { formatMultiUnitBreakdown, getProductAvailableUnits } from '@/core/utils/unit-helper';
 import { motion, AnimatePresence } from 'motion/react';
-import type { Product, TransactionItem, Customer, Transaction, Bundle } from '@/core/types';
+import type { Product, TransactionItem, Customer, Transaction, Bundle, GajianTempoType } from '@/core/types';
+import { calculateGajianDueDate, formatGajianDueDateLabel } from '@/core/utils/gajian-tempo';
 import { v4 as uuidv4 } from 'uuid';
 import { ShiftService } from '@/core/services/shift-service';
 import { StoreStatusService } from '@/core/services/store-status-service';
@@ -110,6 +111,8 @@ export default function POS() {
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [transactionType, setTransactionType] = useState<'SALE' | 'GAJIAN'>('SALE');
   const [moneyStorageId, setMoneyStorageId] = useState<'WARUNG' | 'IKAN' | 'UANG_DIGITAL'>('WARUNG');
+  const [activeGajianTempoType, setActiveGajianTempoType] = useState<GajianTempoType>('TANGGAL_6_7');
+  const [activeGajianDay, setActiveGajianDay] = useState<number>(7);
   
   const [weightProduct, setWeightProduct] = useState<Product | null>(null);
 
@@ -308,9 +311,16 @@ export default function POS() {
   const totalCartDiscount = memberTierDiscountAmount + loyaltyDiscount;
   const payableTotal = Math.max(0, subtotalAfterTierDiscount - loyaltyDiscount);
 
-  // Reset redeemed points when customer changes
+  // Reset redeemed points and sync customer gajian tempo settings when customer changes
   useEffect(() => {
     setLoyaltyPointsToRedeem(0);
+    if (selectedCustomer) {
+      setActiveGajianTempoType(selectedCustomer.gajianTempoType || 'TANGGAL_6_7');
+      setActiveGajianDay(selectedCustomer.gajianDate || 7);
+    } else {
+      setActiveGajianTempoType('TANGGAL_6_7');
+      setActiveGajianDay(7);
+    }
   }, [selectedCustomer?.customerId]);
 
   // Recalculate cart item prices when customer or transactionType (SALE <-> GAJIAN) changes
@@ -575,6 +585,9 @@ export default function POS() {
     setIsProcessing(true);
     try {
       const targetCustomerId = partialConfig?.customerId || selectedCustomer?.customerId;
+      const gajianDueDate = transactionType === 'GAJIAN'
+        ? calculateGajianDueDate(activeGajianTempoType, activeGajianDay).toISOString()
+        : undefined;
 
       const transactionId = await TransactionEngine.createSale({
         cashierId: currentUser.userId,
@@ -588,6 +601,7 @@ export default function POS() {
         type: transactionType,
         allowInsufficientStock,
         allowStoreClosedOverride: currentUser.role === 'OWNER',
+        gajianDueDate,
         partialPayment: partialConfig ? {
           paidCashAmount: partialConfig.paidCashAmount,
           remainingDebtAmount: partialConfig.remainingDebtAmount,
@@ -1164,6 +1178,75 @@ export default function POS() {
                 <CreditCard size={15} /> TRANSAKSI GAJIAN (TEMPO)
               </button>
             </div>
+
+            {/* Gajian Tempo 2-Type Selector & Live Preview */}
+            {transactionType === 'GAJIAN' && (
+              <div className="mt-2.5 p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-1.5 text-xs">
+                  <span className="flex items-center gap-1.5 font-black uppercase text-[10px] tracking-wider text-amber-800">
+                    <Calendar size={13} className="text-amber-600" />
+                    Skema Tempo Gajian:
+                  </span>
+                  <span className="text-[11px] font-black text-amber-950 bg-amber-100 px-2.5 py-0.5 rounded-lg border border-amber-300">
+                    📅 Jatuh Tempo: {formatGajianDueDateLabel(calculateGajianDueDate(activeGajianTempoType, activeGajianDay))}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setActiveGajianTempoType('TANGGAL_6_7')}
+                    className={`p-2 rounded-xl text-left border transition-all cursor-pointer ${
+                      activeGajianTempoType === 'TANGGAL_6_7'
+                        ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-sm font-black'
+                        : 'bg-white text-slate-700 border-amber-200/80 hover:bg-amber-50/50 text-xs font-semibold'
+                    }`}
+                  >
+                    <div className="text-[11px] font-black">1. Tanggal 6-7 Setiap Bulan (Default)</div>
+                    <div className="text-[10px] opacity-80 font-medium">Jatuh tempo tgl 6 atau 7 rutin bulanan</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setActiveGajianTempoType('SAME_DATE_NEXT_MONTH')}
+                    className={`p-2 rounded-xl text-left border transition-all cursor-pointer ${
+                      activeGajianTempoType === 'SAME_DATE_NEXT_MONTH'
+                        ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-sm font-black'
+                        : 'bg-white text-slate-700 border-amber-200/80 hover:bg-amber-50/50 text-xs font-semibold'
+                    }`}
+                  >
+                    <div className="text-[11px] font-black">2. Sama Tanggal Ambil Bulan Depan</div>
+                    <div className="text-[10px] opacity-80 font-medium">
+                      Ambil tgl {new Date().getDate()} → Tempo tgl {new Date().getDate()} bulan depan
+                    </div>
+                  </button>
+                </div>
+
+                {activeGajianTempoType === 'TANGGAL_6_7' && (
+                  <div className="flex items-center gap-2 pt-0.5 text-[11px] text-amber-900">
+                    <span className="text-[10px] font-black uppercase text-amber-800">Pilihan Tanggal:</span>
+                    <button
+                      type="button"
+                      onClick={() => setActiveGajianDay(6)}
+                      className={`px-2.5 py-0.5 rounded-lg text-[10px] font-black cursor-pointer transition-all ${
+                        activeGajianDay === 6 ? 'bg-amber-600 text-white shadow-sm' : 'bg-white border border-amber-300 text-amber-900'
+                      }`}
+                    >
+                      Tanggal 6
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveGajianDay(7)}
+                      className={`px-2.5 py-0.5 rounded-lg text-[10px] font-black cursor-pointer transition-all ${
+                        activeGajianDay === 7 ? 'bg-amber-600 text-white shadow-sm' : 'bg-white border border-amber-300 text-amber-900'
+                      }`}
+                    >
+                      Tanggal 7 (Standar)
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Product Grid */}

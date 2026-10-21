@@ -78,6 +78,8 @@ export interface Bundle {
   updatedAt?: string;
 }
 
+export type GajianTempoType = 'TANGGAL_6_7' | 'SAME_DATE_NEXT_MONTH';
+
 export interface Customer {
   customerId: string;
   name: string;
@@ -87,6 +89,8 @@ export interface Customer {
   isReseller: boolean;
   creditLimit: number;
   defaultDueDateDays: number;
+  gajianTempoType?: GajianTempoType; // 'TANGGAL_6_7' (default tgl 6-7) or 'SAME_DATE_NEXT_MONTH' (sama tanggal ambil bulan depan)
+  gajianDate?: number; // 6 or 7, default 7 jika TANGGAL_6_7
   loyaltyPoints: number;
   status: 'ACTIVE' | 'INACTIVE';
   createdAt: string;

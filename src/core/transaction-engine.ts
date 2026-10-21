@@ -19,6 +19,7 @@ import { BundleService } from './services/bundle-service';
 import { StoreStatusService } from './services/store-status-service';
 import { FinanceService } from './services/finance-service';
 import { PerformanceTracker } from './services/performance-tracker';
+import { calculateGajianDueDate } from './utils/gajian-tempo';
 
 export class TransactionEngine {
   static async createSale(params: {
@@ -38,6 +39,7 @@ export class TransactionEngine {
       remainingDebtAmount: number;
       dueDate?: string;
     };
+    gajianDueDate?: string;
   }): Promise<string> {
     const startTime = performance.now();
     // Check Store Status (Requirement 8)
@@ -251,7 +253,11 @@ export class TransactionEngine {
     } else if (params.type === 'GAJIAN' && params.customerId) {
       const customer = await db.customers.get(params.customerId);
       const receivableId = uuidv4();
-      const dueDate = addDays(new Date(), customer?.defaultDueDateDays || 30).toISOString();
+      const dueDate = params.gajianDueDate || calculateGajianDueDate(
+        customer?.gajianTempoType || 'TANGGAL_6_7',
+        customer?.gajianDate || 7,
+        new Date(timestamp)
+      ).toISOString();
       
       const receivable: Receivable = {
         receivableId,

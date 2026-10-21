@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuthStore } from '@/core/auth-store';
 import { motion, AnimatePresence } from 'motion/react';
 import { db } from '@/core/database';
 import { Keypad } from '@/components/Keypad';
-import { LogIn, Lock, ShieldCheck, UserCheck } from 'lucide-react';
+import { LogIn, Lock, ShieldCheck, UserCheck, Keyboard } from 'lucide-react';
 import type { Product } from '@/core/types';
 import { ProductService } from '@/core/services/product-service';
 import { StoreStatusService } from '@/core/services/store-status-service';
@@ -12,6 +12,8 @@ export default function Login() {
   const [pin, setPin] = useState('');
   const [error, setError] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
   const { login, seedDefaultUsers } = useAuthStore();
 
   useEffect(() => {
@@ -61,36 +63,123 @@ export default function Login() {
     init();
   }, [seedDefaultUsers]);
 
-  const handleKeyPress = (val: string) => {
+  // Focus hidden input on initial load or reset
+  useEffect(() => {
+    if (!isInitializing) {
+      inputRef.current?.focus();
+    }
+  }, [isInitializing]);
+
+  const handleInputDigit = (digit: string) => {
+    if (isLoggingIn) return;
     if (error) setError(false);
-    if (val === 'clear') {
-      setPin('');
-    } else if (pin.length < 6) {
-      const newPin = pin + val;
-      setPin(newPin);
+    setPin(prev => {
+      if (prev.length >= 6) return prev;
+      const newPin = prev + digit;
       if (newPin.length === 6) {
-        handleLogin(newPin);
+        triggerLogin(newPin);
       }
+      return newPin;
+    });
+  };
+
+  const handleBackspace = () => {
+    if (isLoggingIn) return;
+    if (error) setError(false);
+    setPin(prev => prev.slice(0, -1));
+  };
+
+  const handleClear = () => {
+    if (isLoggingIn) return;
+    if (error) setError(false);
+    setPin('');
+  };
+
+  const triggerLogin = async (finalPin: string) => {
+    setIsLoggingIn(true);
+    try {
+      const success = await login(finalPin);
+      if (!success) {
+        setError(true);
+        setPin('');
+        inputRef.current?.focus();
+      }
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
-  const handleLogin = async (finalPin: string) => {
-    const success = await login(finalPin);
-    if (!success) {
-      setError(true);
-      setPin('');
+  const handleKeyPress = (val: string) => {
+    if (val === 'clear') {
+      handleBackspace();
+    } else if (/^[0-9]$/.test(val)) {
+      handleInputDigit(val);
     }
   };
+
+  // Global keyboard listener (supports standard number row & numpad keys)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if user is pressing browser shortcuts with Ctrl, Alt, or Meta
+      if (e.ctrlKey || e.altKey || e.metaKey) return;
+
+      if (/^[0-9]$/.test(e.key)) {
+        e.preventDefault();
+        handleInputDigit(e.key);
+      } else if (e.key === 'Backspace') {
+        e.preventDefault();
+        handleBackspace();
+      } else if (e.key === 'Escape' || e.key === 'Delete') {
+        e.preventDefault();
+        handleClear();
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (pin.length === 6 && !isLoggingIn) {
+          triggerLogin(pin);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [pin, isLoggingIn, error]);
 
   if (isInitializing) return null;
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+    <div 
+      className="min-h-screen bg-slate-50 flex items-center justify-center p-4 cursor-default select-none"
+      onClick={() => inputRef.current?.focus()}
+    >
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="w-full max-w-md bg-white rounded-3xl shadow-xl p-8 border border-slate-200"
+        className="w-full max-w-md bg-white rounded-3xl shadow-xl p-8 border border-slate-200 relative"
       >
+        {/* Hidden accessible input to support physical keyboards and mobile virtual numpad */}
+        <input
+          ref={inputRef}
+          type="password"
+          inputMode="numeric"
+          pattern="[0-9]*"
+          maxLength={6}
+          autoFocus
+          value={pin}
+          onChange={(e) => {
+            const clean = e.target.value.replace(/\D/g, '').slice(0, 6);
+            if (error) setError(false);
+            setPin(clean);
+            if (clean.length === 6 && !isLoggingIn) {
+              triggerLogin(clean);
+            }
+          }}
+          className="absolute -top-[9999px] -left-[9999px] opacity-0 pointer-events-none"
+          tabIndex={-1}
+          aria-label="Input PIN Angka"
+        />
+
         <div className="text-center mb-6">
           <div className="w-14 h-14 bg-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-lg shadow-blue-200">
             <Lock className="text-white w-7 h-7" />
@@ -122,12 +211,25 @@ export default function Login() {
           </div>
         </div>
 
-        <div className="flex justify-center gap-3 mb-6">
+        {/* Interactive PIN Dots Indicator */}
+        <div 
+          onClick={() => inputRef.current?.focus()}
+          className="flex justify-center gap-3 mb-6 cursor-pointer py-2 focus:outline-none"
+          title="Klik untuk mengetik via keyboard fisik"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              inputRef.current?.focus();
+            }
+          }}
+        >
           {[...Array(6)].map((_, i) => (
             <div 
               key={i}
               className={`w-4 h-4 rounded-full border-2 transition-all duration-200 ${
-                pin.length > i ? 'bg-blue-600 border-blue-600 scale-110 shadow-sm shadow-blue-300' : 'bg-transparent border-slate-300'
+                pin.length > i 
+                  ? 'bg-blue-600 border-blue-600 scale-110 shadow-sm shadow-blue-300' 
+                  : (pin.length === i && !error ? 'border-blue-400 bg-blue-50/50 scale-105 animate-pulse' : 'bg-transparent border-slate-300')
               } ${error ? 'border-red-500 bg-red-50' : ''}`}
             />
           ))}
@@ -148,8 +250,15 @@ export default function Login() {
 
         <Keypad onKeyPress={handleKeyPress} />
 
-        <div className="mt-6 text-center text-[10px] text-slate-400 font-bold uppercase tracking-widest">
-          Masukkan 6-Digit PIN Anda
+        {/* Keyboard Input Hint */}
+        <div className="mt-5 pt-3 border-t border-slate-100 flex flex-col items-center gap-1.5 text-center">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-100 border border-slate-200/80 rounded-xl text-[11px] text-slate-600 font-medium">
+            <Keyboard size={13} className="text-blue-600" />
+            <span>Ketik PIN angka langsung via <strong>Keyboard</strong> / <strong>Numpad</strong></span>
+          </div>
+          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">
+            Tekan Backspace untuk hapus • Esc untuk reset
+          </p>
         </div>
       </motion.div>
     </div>
