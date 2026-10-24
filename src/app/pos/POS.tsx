@@ -612,7 +612,8 @@ export default function POS() {
       dueDate?: string;
       customerId?: string;
       customerName?: string;
-    }
+    },
+    shouldPrint: boolean = true
   ) => {
     if (!currentUser || !currentShift) return;
 
@@ -642,11 +643,12 @@ export default function POS() {
           dueDate: partialConfig.dueDate
         } : undefined
       });
-      
       const transaction = await db.transactions.get(transactionId);
       if (transaction) {
         setLastTx(transaction);
-        PrintService.printReceipt(transaction);
+        if (shouldPrint) {
+          PrintService.printReceipt(transaction);
+        }
       }
 
       // Deduct redeemed points if used
@@ -710,13 +712,13 @@ export default function POS() {
     }
   };
 
-  const handleConfirmPartialPayment = async () => {
+  const handleConfirmPartialPayment = async (shouldPrint: boolean = true) => {
     if (!currentUser || !currentShift) return;
     setPartialPinError('');
 
     const shortage = Math.max(0, payableTotal - cashTendered);
     if (shortage <= 0) {
-      executeFinalSale(paymentMethod);
+      executeFinalSale(paymentMethod, false, undefined, shouldPrint);
       return;
     }
 
@@ -783,7 +785,7 @@ export default function POS() {
       dueDate: dueDateStr,
       customerId: custId,
       customerName: custName
-    });
+    }, shouldPrint);
   };
 
   const handleKasirStockOverride = async () => {
@@ -2002,27 +2004,49 @@ export default function POS() {
               </button>
 
               {allowPartialDebt && cashTendered < payableTotal ? (
-                <button
-                  onClick={handleConfirmPartialPayment}
-                  disabled={
-                    isProcessing ||
-                    cashTendered < 0 ||
-                    (!selectedCustomer && !selectedCustomerIdInCheckout && !partialDebtCustomerName.trim())
-                  }
-                  className="flex-1 py-3 bg-amber-600 hover:bg-amber-500 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-amber-200 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <CheckCircle size={16} />
-                  <span>Bayar Rp {cashTendered.toLocaleString()} & Catat Bon</span>
-                </button>
+                <>
+                  <button
+                    onClick={() => handleConfirmPartialPayment(false)}
+                    disabled={
+                      isProcessing ||
+                      cashTendered < 0 ||
+                      (!selectedCustomer && !selectedCustomerIdInCheckout && !partialDebtCustomerName.trim())
+                    }
+                    className="flex-1 py-3 bg-amber-100 hover:bg-amber-200 text-amber-900 font-bold text-[10px] uppercase tracking-wider rounded-xl transition-all flex items-center justify-center gap-1 cursor-pointer"
+                  >
+                    <span>Selesai & Bon</span>
+                  </button>
+                  <button
+                    onClick={() => handleConfirmPartialPayment(true)}
+                    disabled={
+                      isProcessing ||
+                      cashTendered < 0 ||
+                      (!selectedCustomer && !selectedCustomerIdInCheckout && !partialDebtCustomerName.trim())
+                    }
+                    className="flex-[1.5] py-3 bg-amber-600 hover:bg-amber-500 text-white font-black text-[10px] uppercase tracking-wider rounded-xl shadow-lg shadow-amber-200 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <CheckCircle size={14} />
+                    <span>Cetak Struk & Bon</span>
+                  </button>
+                </>
               ) : (
-                <button
-                  onClick={() => executeFinalSale(paymentMethod)}
-                  disabled={paymentMethod === 'CASH' && cashTendered < payableTotal}
-                  className="flex-1 py-3 bg-blue-600 hover:bg-blue-500 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-blue-200 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <CheckCircle size={16} />
-                  <span>Selesai & Cetak Struk</span>
-                </button>
+                <>
+                  <button
+                    onClick={() => executeFinalSale(paymentMethod, false, undefined, false)}
+                    disabled={paymentMethod === 'CASH' && cashTendered < payableTotal}
+                    className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[10px] uppercase tracking-wider rounded-xl transition-all flex items-center justify-center gap-1 cursor-pointer"
+                  >
+                    <span>Hanya Selesai</span>
+                  </button>
+                  <button
+                    onClick={() => executeFinalSale(paymentMethod, false, undefined, true)}
+                    disabled={paymentMethod === 'CASH' && cashTendered < payableTotal}
+                    className="flex-[1.5] py-3 bg-blue-600 hover:bg-blue-500 text-white font-black text-[10px] uppercase tracking-wider rounded-xl shadow-lg shadow-blue-200 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <CheckCircle size={14} />
+                    <span>Cetak Struk</span>
+                  </button>
+                </>
               )}
             </div>
           </div>
