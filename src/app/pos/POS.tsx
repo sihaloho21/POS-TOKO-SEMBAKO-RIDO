@@ -264,7 +264,7 @@ export default function POS() {
         !!(p.sku && p.sku.includes(search)) ||
         Boolean(p.conversionRules && p.conversionRules.some(r => r.barcode && r.barcode.includes(search)))
       )
-    ).limit(100).toArray(),
+    ).toArray(),
     [search]
   );
 
@@ -890,13 +890,7 @@ export default function POS() {
   const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       const val = search.trim();
-      if (!val) {
-        // If empty enter, trigger checkout if cart not empty
-        if (cart.length > 0) {
-          triggerCheckout();
-        }
-        return;
-      }
+      if (!val) return;
 
       // Try one last exhaustive search if found 0 results or no auto-add triggered
       const match = products?.find(p => 
@@ -906,11 +900,17 @@ export default function POS() {
       );
 
       if (match) {
-        const rule = match.conversionRules?.find(r => r.barcode === val);
-        addToCart(match, 1, rule?.toUnit);
-        setSearch('');
+        // match might have already been added by handleSearchChange, 
+        // but if timing varies, this ensures it's added.
+        // We only add if it's still in the search box (not yet cleared by handleSearchChange)
+        if (search === val) {
+          const rule = match.conversionRules?.find(r => r.barcode === val);
+          addToCart(match, 1, rule?.toUnit);
+          setSearch('');
+        }
       } else {
         // PRODUCT NOT FOUND -> Prompt registration modal
+        addToast(`Barcode "${val}" tidak ditemukan.`, 'warning');
         setNewProductBarcode(val);
         setIsQuickAddProductOpen(true);
       }
@@ -1142,47 +1142,50 @@ export default function POS() {
         </div>
       )}
 
-      <div className="flex flex-col lg:flex-row flex-1 gap-3 overflow-hidden">
-        {/* Left Area: Product Selection */}
-        <div className="flex-1 flex flex-col min-w-0 bg-slate-50/50 rounded-2xl border border-slate-200 overflow-hidden shadow-inner">
-          <div className="p-3 bg-white border-b border-slate-200 space-y-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="relative flex-1 min-w-[200px]">
-                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                <input
+      {/* Main Catalog & Cart Area */}
+      <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-4 overflow-hidden">
+        {/* Left Area: Product Search, Filter & Catalog */}
+        <div className="flex-1 flex flex-col min-h-0 bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+          <div className="p-3.5 border-b border-slate-100 bg-slate-50/50 space-y-3">
+            <div className="flex flex-col sm:flex-row gap-2.5">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={17} />
+                <input 
+                  id="pos-search"
                   ref={searchInputRef}
-                  type="text"
-                  placeholder="Scan Barcode atau Cari Produk (F2)..."
-                  className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-bold text-xs shadow-sm transition-all"
-                  value={search}
+                  type="text" 
+                  placeholder="Cari (F2) / Scan Barcode Produk..."
+                  className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-xs shadow-sm font-medium"
+                  value={search ?? ''}
                   onChange={(e) => handleSearchChange(e.target.value)}
                   onKeyDown={handleSearchKeyDown}
                 />
-                {search && (
-                  <button 
-                    onClick={() => setSearch('')}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                  >
-                    <X size={16} />
-                  </button>
-                )}
               </div>
 
-              {/* Camera Scanner Toggle (F3) */}
+              {/* Camera Barcode Scanner Button */}
               <button
                 type="button"
-                onClick={() => setIsCameraScannerOpen(!isCameraScannerOpen)}
-                className={`px-3 py-2 rounded-xl flex items-center justify-center gap-1.5 font-bold text-xs shadow-sm transition-all shrink-0 cursor-pointer ${
-                  isCameraScannerOpen ? 'bg-blue-600 text-white shadow-blue-200' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
-                }`}
-                title="Buka scanner kamera (F3)"
+                onClick={() => setIsCameraScannerOpen(true)}
+                className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-sm shadow-blue-200 transition-all shrink-0 cursor-pointer"
+                title="Scan Barcode via Kamera Device (F3)"
               >
                 <Camera size={15} />
-                <span>Scanner (F3)</span>
+                <span>Scan Kamera (F3)</span>
               </button>
 
+              {/* Quick Sale Button for High-Volume Checkout */}
               <button
                 type="button"
+                onClick={() => setIsQuickSaleOpen(true)}
+                className="px-3.5 py-2 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 text-slate-950 font-black text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-sm shadow-amber-200 transition-all shrink-0 cursor-pointer"
+                title="Quick Sale: 1-Klik Item Favorit & Input Harga Bebas (F6)"
+              >
+                <Zap size={15} className="fill-current text-slate-950" />
+                <span>⚡ Quick Sale (F6)</span>
+              </button>
+
+              {/* Quick Add Product Button for Kasir */}
+              <button
                 onClick={() => {
                   setNewProductBarcode(search);
                   setIsQuickAddProductOpen(true);
@@ -1202,62 +1205,43 @@ export default function POS() {
                 title="Lihat Riwayat Struk & Koreksi Jadi Bon (F4)"
               >
                 <History size={15} className="text-amber-400" />
-                <span>Riwayat (F4)</span>
+                <span>Riwayat Struk (F4)</span>
               </button>
 
               <select 
-                className="px-3 py-2 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 font-bold text-xs shadow-sm max-w-[180px] truncate"
+                className="px-3 py-2 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 font-bold text-xs shadow-sm max-w-[200px]"
                 value={selectedCustomer?.customerId || ''}
                 onChange={(e) => {
                   const cust = customers?.find(c => c.customerId === e.target.value);
                   setSelectedCustomer(cust || null);
                 }}
               >
-                <option value="">PELANGGAN UMUM</option>
+                <option value="">PELANGGAN UMUM (F4)</option>
                 {customers?.map(c => (
                   <option key={c.customerId} value={c.customerId}>
-                    {c.name} {c.isReseller ? '★' : ''}
+                    {c.name} {c.isReseller ? '★ Reseller' : ''} {c.creditLimit > 0 ? `(Gajian: Rp ${c.creditLimit.toLocaleString()})` : ''}
                   </option>
                 ))}
               </select>
             </div>
 
-            {isCameraScannerOpen && (
-              <div className="pt-2 animate-in slide-in-from-top-2 duration-300">
-                <CameraBarcodeScanner
-                  isOpen={true}
-                  inline={true}
-                  onClose={() => setIsCameraScannerOpen(false)}
-                  onScan={handleCameraScan}
-                  title="Scanner Kamera Aktif"
-                  subtitle="Scan langsung masuk keranjang"
-                  continuous={true}
-                  lastScannedInfo={lastScannedProduct}
-                  sampleBarcodes={products?.slice(0, 4).map(p => ({
-                    barcode: p.barcode,
-                    label: p.name.length > 12 ? p.name.slice(0, 12) + '...' : p.name
-                  })) || []}
-                />
-              </div>
-            )}
-
             <div className="flex gap-2">
               <button 
                 onClick={() => setTransactionType('SALE')}
-                className={`flex-1 py-2 rounded-xl font-black text-[10px] uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all ${
+                className={`flex-1 py-1.5 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all ${
                   transactionType === 'SALE' ? 'bg-blue-600 text-white shadow-md shadow-blue-200' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
                 }`}
               >
-                <Banknote size={14} /> JUAL BIASA (CASH/QRIS)
+                <Banknote size={15} /> PENJUALAN BIASA (CASH/QRIS)
               </button>
 
               <button 
                 onClick={() => setTransactionType('GAJIAN')}
-                className={`flex-1 py-2 rounded-xl font-black text-[10px] uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all ${
+                className={`flex-1 py-1.5 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all ${
                   transactionType === 'GAJIAN' ? 'bg-amber-500 text-white shadow-md shadow-amber-200' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
                 }`}
               >
-                <CreditCard size={14} /> TRANSAKSI GAJIAN (TEMPO)
+                <CreditCard size={15} /> TRANSAKSI GAJIAN (TEMPO)
               </button>
             </div>
 
@@ -1331,10 +1315,10 @@ export default function POS() {
             )}
           </div>
 
-          {/* Product Grid - Compact High-Density View (Optimized for No Images) */}
-          <div className="flex-1 overflow-y-auto p-2 custom-scrollbar">
+          {/* Product Grid - Compact High-Density View */}
+          <div className="flex-1 overflow-y-auto p-3 custom-scrollbar">
             {products && products.length > 0 ? (
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-2">
                 {products.map((product) => {
                   const isBundle = product.productType === 'BUNDLE';
                   const availableBundles = isBundle ? (bundleStocks[product.productId] ?? 0) : 0;
@@ -1351,35 +1335,33 @@ export default function POS() {
                           addToCart(product);
                         }
                       }}
-                      className="group flex flex-col p-2 bg-white border border-slate-200 rounded-xl hover:border-blue-500 hover:shadow-md transition-all text-left relative overflow-hidden cursor-pointer select-none"
+                      className="group flex flex-col p-2 bg-white border border-slate-100 rounded-xl hover:border-blue-500 hover:shadow-md transition-all text-left relative overflow-hidden cursor-pointer select-none"
                     >
                       {isBundle && (
-                        <span className="absolute top-1 right-1 text-[6px] font-black uppercase tracking-wider bg-indigo-600 text-white px-1 py-0.5 rounded shadow-sm z-10">
+                        <span className="absolute top-1.5 right-1.5 text-[7px] font-black uppercase tracking-wider bg-indigo-600 text-white px-1 py-0.5 rounded shadow-sm z-10">
                           PAKET
                         </span>
                       )}
 
-                      <div className="flex items-start gap-2 min-w-0">
-                        <div className="w-7 h-7 shrink-0 bg-slate-50 rounded-lg flex items-center justify-center text-slate-400 group-hover:text-blue-500 transition-colors">
-                          {product.productType === 'FISH' ? (
-                            <Weight size={14} />
-                          ) : isBundle ? (
-                            <Layers size={14} className="text-indigo-500 group-hover:text-indigo-600" />
-                          ) : (
-                            <Package size={14} />
-                          )}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <h3 className="font-bold text-slate-900 text-[10px] line-clamp-2 leading-tight uppercase tracking-tight" title={product.name}>
-                            {product.name}
-                          </h3>
-                        </div>
+                      <div className="w-full aspect-square bg-slate-50 rounded-lg mb-1.5 flex items-center justify-center text-slate-300 group-hover:text-blue-500 transition-colors">
+                        {product.productType === 'FISH' ? (
+                          <Weight size={24} />
+                        ) : isBundle ? (
+                          <Layers size={24} className="text-indigo-500 group-hover:text-indigo-600" />
+                        ) : (
+                          <Package size={24} />
+                        )}
                       </div>
+                      <h3 className="font-bold text-slate-900 text-[10px] line-clamp-1 leading-tight mb-0.5 uppercase tracking-tight" title={product.name}>
+                        {product.name}
+                      </h3>
                       
-                      <div className="mt-2 pt-1 border-t border-slate-50 flex flex-col gap-0.5">
-                        <span className="font-black text-blue-600 text-[10px] tabular-nums">
-                          Rp {product.normalPrice.toLocaleString()}
-                        </span>
+                      <div className="mt-auto pt-1 border-t border-slate-50 space-y-0.5">
+                        <div className="flex justify-between items-center">
+                          <span className="font-black text-blue-600 text-[10px] tabular-nums">
+                            Rp {product.normalPrice.toLocaleString()}
+                          </span>
+                        </div>
 
                         <div className="text-[9px] font-bold">
                           {isBundle ? (
@@ -2511,6 +2493,20 @@ export default function POS() {
         onClose={() => setIsClockInOpen(false)}
       />
 
+      {/* Camera Barcode Scanner for POS */}
+      <CameraBarcodeScanner
+        isOpen={isCameraScannerOpen}
+        onClose={() => setIsCameraScannerOpen(false)}
+        onScan={handleCameraScan}
+        title="POS Camera Barcode Scanner"
+        subtitle="Arahkan kamera ke barcode untuk langsung tambah ke keranjang"
+        continuous={true}
+        lastScannedInfo={lastScannedProduct}
+        sampleBarcodes={products?.slice(0, 6).map(p => ({
+          barcode: p.barcode,
+          label: p.name.length > 16 ? p.name.slice(0, 16) + '...' : p.name
+        })) || []}
+      />
 
       {/* Quick Sale Modal (F6) */}
       <QuickSaleModal
