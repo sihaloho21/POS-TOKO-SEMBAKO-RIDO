@@ -126,9 +126,13 @@ export function SalesHistory() {
                         }`}>
                           {tx.status}
                         </span>
-                        {tx.remainingDebtAmount && tx.remainingDebtAmount > 0 && (
+                        {tx.remainingDebtAmount && tx.remainingDebtAmount > 0 ? (
                           <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 uppercase">
                             Ada Utang
+                          </span>
+                        ) : (tx.status === 'COMPLETED' && tx.type !== 'RETURN' && !tx.receivableId) && (
+                          <span className="text-[8px] font-black px-1.5 py-0.5 rounded bg-amber-100/50 text-amber-800 border border-amber-200 uppercase mt-0.5" title="Bisa dikoreksi jadi Bon">
+                            Bisa Koreksi
                           </span>
                         )}
                       </div>

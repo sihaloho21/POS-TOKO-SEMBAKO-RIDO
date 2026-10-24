@@ -6,11 +6,20 @@ import { registerSW } from 'virtual:pwa-register';
 
 // Prevent unhandled promise rejections and errors from crashing the app silently
 window.addEventListener('unhandledrejection', (event) => {
+  if (event.reason?.message?.includes('WebSocket') || event.reason?.message?.includes('HMR')) {
+    event.preventDefault();
+    return;
+  }
   console.warn('Unhandled promise rejection captured:', event.reason);
   event.preventDefault();
 });
 
 window.addEventListener('error', (event) => {
+  const msg = event.error?.message || event.message || '';
+  if (msg.includes('WebSocket') || msg.includes('HMR')) {
+    event.preventDefault();
+    return;
+  }
   console.warn('Global error captured:', event.error || event.message);
 });
 

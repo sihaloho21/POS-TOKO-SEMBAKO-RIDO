@@ -52,6 +52,11 @@ export default function Login() {
         // Ensure sembako baseline exists and stock movements are verified/repaired
         await ProductService.ensureBaselineProductsAndStock().catch(e => console.warn('Baseline products init error:', e));
 
+        // Ensure minimal fish products exist
+        await import('@/core/services/fish-service').then(({ FishService }) => 
+          FishService.ensureMinimalFishProducts().catch(e => console.warn('Fish products init error:', e))
+        );
+
         // Ensure store status is initialized
         await StoreStatusService.ensureInitialized().catch(e => console.warn('Store status init error:', e));
       } catch (err) {

@@ -254,6 +254,15 @@ export default function TransactionHistory() {
             <span>{feedbackMsg}</span>
           </div>
         )}
+
+        {!feedbackMsg && (
+          <div className="bg-blue-50/50 border border-blue-100 px-4 py-2 rounded-xl text-[10px] text-blue-700 flex items-center gap-2">
+            <ShieldAlert size={14} className="text-blue-500 shrink-0" />
+            <p>
+              <span className="font-bold">Tips:</span> Untuk mengubah transaksi tunai yang uangnya kurang menjadi Piutang/Bon, cari transaksi di bawah dan klik tombol <span className="bg-amber-400 text-amber-950 px-1.5 py-0.5 rounded font-black mx-1">Koreksi Jadi Bon</span>.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Filter and Search Bar */}
@@ -387,32 +396,41 @@ export default function TransactionHistory() {
                       </td>
 
                       <td className="py-4 px-6 text-center">
-                        {tx.type === 'RETURN' ? (
-                          <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-100 text-purple-700 border border-purple-200">
-                            RETUR SELESAI
-                          </span>
-                        ) : tx.voidActionType === 'REFUND' ? (
-                          <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-50 text-purple-700 border border-purple-200" title={tx.voidReason}>
-                            REFUNDED
-                          </span>
-                        ) : isPendingApproval ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300 animate-pulse">
-                            <Hourglass size={10} />
-                            APPROVAL PENDING
-                          </span>
-                        ) : tx.status === 'COMPLETED' ? (
-                          <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700">
-                            COMPLETED
-                          </span>
-                        ) : tx.status === 'HOLD' ? (
-                          <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-700">
-                            HOLD
-                          </span>
-                        ) : (
-                          <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-rose-100 text-rose-700">
-                            {tx.status}
-                          </span>
-                        )}
+                        <div className="flex flex-col items-center gap-1">
+                          {tx.type === 'RETURN' ? (
+                            <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-100 text-purple-700 border border-purple-200">
+                              RETUR SELESAI
+                            </span>
+                          ) : tx.voidActionType === 'REFUND' ? (
+                            <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-50 text-purple-700 border border-purple-200" title={tx.voidReason}>
+                              REFUNDED
+                            </span>
+                          ) : isPendingApproval ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300 animate-pulse">
+                              <Hourglass size={10} />
+                              APPROVAL PENDING
+                            </span>
+                          ) : tx.status === 'COMPLETED' ? (
+                            <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700">
+                              COMPLETED
+                            </span>
+                          ) : tx.status === 'HOLD' ? (
+                            <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-700">
+                              HOLD
+                            </span>
+                          ) : (
+                            <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-rose-100 text-rose-700">
+                              {tx.status}
+                            </span>
+                          )}
+
+                          {tx.status === 'COMPLETED' && tx.type !== 'RETURN' && !tx.receivableId && (
+                            <span className="flex items-center gap-1 text-[8px] font-black text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 mt-1 whitespace-nowrap shadow-3xs" title="Transaksi tunai ini bisa dikoreksi menjadi Piutang/Bon jika uang pembeli ternyata kurang.">
+                              <Wallet size={10} />
+                              BISA KOREKSI JADI BON
+                            </span>
+                          )}
+                        </div>
                       </td>
 
                       <td className="py-4 px-6">
@@ -458,9 +476,9 @@ export default function TransactionHistory() {
                             <button
                               onClick={() => setDebtCorrectionTx(tx)}
                               title="Uang pembeli kurang? Koreksi transaksi ini jadi piutang (bon)"
-                              className="px-2.5 py-1.5 text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1 transition-all cursor-pointer shadow-xs shrink-0"
+                              className="px-3 py-1.5 text-amber-900 bg-amber-400 hover:bg-amber-500 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer shadow-md shadow-amber-200 shrink-0"
                             >
-                              <Wallet size={12} />
+                              <Wallet size={12} className="fill-current" />
                               <span>Koreksi Jadi Bon</span>
                             </button>
                           )}
@@ -646,7 +664,7 @@ export default function TransactionHistory() {
                     setSelectedTx(null);
                     setDebtCorrectionTx(target);
                   }}
-                  className="flex-1 py-3 bg-amber-600 text-white font-black text-xs uppercase tracking-wider rounded-xl hover:bg-amber-500 shadow-md shadow-amber-200 flex items-center justify-center gap-2 cursor-pointer"
+                  className="flex-1 py-3 bg-amber-500 text-white font-black text-xs uppercase tracking-wider rounded-xl hover:bg-amber-600 shadow-lg shadow-amber-200 flex items-center justify-center gap-2 cursor-pointer transition-all"
                 >
                   <Wallet size={16} />
                   Koreksi Jadi Bon

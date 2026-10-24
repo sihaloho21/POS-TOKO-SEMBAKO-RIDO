@@ -217,7 +217,11 @@ export class ProductService {
     // Track deleted product ID so baseline seeding will never resurrect this product
     try {
       const deletedSetting = await db.settings.get('deleted_product_ids');
-      const ids: string[] = deletedSetting?.ids || [];
+      let ids: string[] = [];
+      if (deletedSetting && Array.isArray(deletedSetting.ids)) {
+        ids = deletedSetting.ids;
+      }
+      
       if (!ids.includes(productId)) {
         ids.push(productId);
         await db.settings.put({ id: 'deleted_product_ids', ids });
@@ -226,8 +230,16 @@ export class ProductService {
       console.warn('Failed to record deleted_product_ids:', e);
     }
 
+    // Hard delete from core tables
     await db.products.delete(productId);
     await db.productCosts.delete(productId);
+    
+    // Also clean up stock movements to prevent orphaned ledger entries
+    try {
+      await db.stockMovements.where('productId').equals(productId).delete();
+    } catch (e) {
+      console.warn('Failed to clean up stock movements for deleted product:', e);
+    }
 
     await AuditEngine.log({
       userId: 'SYSTEM',
@@ -752,21 +764,26 @@ export class ProductService {
       }
     ];
 
-    const seedFlag = await db.settings.get('baseline_products_seeded');
     const deletedSetting = await db.settings.get('deleted_product_ids');
     const deletedIds: string[] = deletedSetting?.ids || [];
 
-    if (!seedFlag) {
-      for (const bp of baselineProducts) {
-        if (deletedIds.includes(bp.productId)) continue;
-        const existing = await db.products.get(bp.productId);
-        if (!existing) {
-          await db.products.put(bp);
-          await db.productCosts.put({ productId: bp.productId, hpp: bp.hpp, updatedAt: nowStr });
-        }
+    for (const bp of baselineProducts) {
+      // 1. Never re-seed if explicitly deleted by user
+      if (deletedIds.includes(bp.productId)) continue;
+
+      const existing = await db.products.get(bp.productId);
+      if (!existing) {
+        // 2. Check if product already exists with same barcode (manual entry override)
+        const sameBarcode = await db.products.where('barcode').equals(bp.barcode).first();
+        if (sameBarcode) continue;
+
+        await db.products.put(bp);
+        await db.productCosts.put({ productId: bp.productId, hpp: bp.hpp, updatedAt: nowStr });
       }
-      await db.settings.put({ id: 'baseline_products_seeded', value: true, seededAt: nowStr });
     }
+
+    // Set flag that baseline process has run (though we now check individually for safety)
+    await db.settings.put({ id: 'baseline_products_seeded', value: true, seededAt: nowStr });
 
     // Verify stock ledger integrity for ALL non-bundle products
     const allProducts = await db.products.toArray();
@@ -776,7 +793,7 @@ export class ProductService {
       const movements = await db.stockMovements.where('productId').equals(prod.productId).toArray();
       const derived = await StockService.getDerivedStock(prod.productId);
 
-      // Case 1: No movements at all
+      // Case 1: No movements at all -> Initialize with Opening Balance
       if (movements.length === 0) {
         const initialQty = prod.stock > 0 ? prod.stock : 100;
         await db.stockMovements.add({

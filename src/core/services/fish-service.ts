@@ -178,13 +178,8 @@ export class FishService {
    * Ensures minimal 5 fish products (Nila, Ikan Mas, Gurame, Lele, Patin) exist in the database.
    */
   static async ensureMinimalFishProducts(userId: string = 'SYSTEM'): Promise<number> {
-    const seedFlag = await db.settings.get('minimal_fish_seeded');
     const deletedSetting = await db.settings.get('deleted_product_ids');
     const deletedIds: string[] = deletedSetting?.ids || [];
-
-    if (seedFlag) {
-      return 0;
-    }
 
     const existingProducts = await db.products.toArray();
     const existingFish = existingProducts.filter(p => p.productType === 'FISH');
@@ -192,12 +187,13 @@ export class FishService {
     const now = new Date().toISOString();
 
     for (const species of MINIMAL_FISH_SPECIES) {
+      // 1. Never re-seed if explicitly deleted
       if (deletedIds.includes(species.productId)) continue;
 
       const alreadyExists = existingFish.some(p => 
-        p.name.toLowerCase().includes(species.name.toLowerCase().split(' ')[1] || species.name.toLowerCase()) ||
         p.productId === species.productId ||
-        p.barcode === species.barcode
+        p.barcode === species.barcode ||
+        p.name.toLowerCase().includes(species.name.toLowerCase().split(' ')[1] || species.name.toLowerCase())
       );
 
       if (!alreadyExists) {

@@ -45,6 +45,11 @@ export default function App() {
 
     // Ensure baseline products and stock movements are valid
     ProductService.ensureBaselineProductsAndStock(currentUser?.userId).catch(err => console.warn('Baseline products init error:', err));
+    
+    // Ensure minimal fish products exist
+    import('./core/services/fish-service').then(({ FishService }) => {
+      FishService.ensureMinimalFishProducts(currentUser?.userId).catch(err => console.warn('Fish products init error:', err));
+    });
 
     // Check low stock
     ProductService.checkLowStock().catch(err => console.warn('checkLowStock failed:', err));
