@@ -15,13 +15,15 @@ import {
   Clock,
   History,
   Camera,
-  Sparkles
+  Sparkles,
+  CreditCard
 } from 'lucide-react';
 import { PurchaseService } from '@/core/services/purchase-service';
+import { PayLaterService } from '@/core/services/paylater-service';
 import { useAuthStore } from '@/core/auth-store';
 import { useDeviceId } from '@/core/device-store';
 import { useToastStore } from '@/core/toast-store';
-import type { Product, Supplier, Purchase } from '@/core/types';
+import type { Product, Supplier, Purchase, PayLaterBill, PayLaterInstallment } from '@/core/types';
 import { SupplierModal } from '@/app/suppliers/SupplierModal';
 import { ReceiptScannerModal } from '@/app/purchases/ReceiptScannerModal';
 
@@ -29,7 +31,9 @@ export default function Purchases() {
   const { currentUser } = useAuthStore();
   const { addToast } = useToastStore();
   const deviceId = useDeviceId();
-  const [currentTab, setCurrentTab] = useState<'NEW' | 'HISTORY'>('NEW');
+  const [paymentStatus, setPaymentStatus] = useState<'PAID' | 'PAYABLE' | 'SPAYLATER'>('PAID');
+  const [payLaterTenor, setPayLaterTenor] = useState<1 | 3>(1);
+  const [currentTab, setCurrentTab] = useState<'NEW' | 'HISTORY' | 'PAYLATER'>('NEW');
   const [selectedSupplierId, setSelectedSupplierId] = useState('');
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [productSearch, setProductSearch] = useState('');
@@ -37,7 +41,6 @@ export default function Purchases() {
   const [additionalCost, setAdditionalCost] = useState<number>(0);
   const [additionalCostAllocation, setAdditionalCostAllocation] = useState<'CAPITALIZE_INTO_WAC' | 'OPERATIONAL_EXPENSE'>('CAPITALIZE_INTO_WAC');
   const [additionalCostNotes, setAdditionalCostNotes] = useState<string>('');
-  const [paymentStatus, setPaymentStatus] = useState<'PAID' | 'PAYABLE'>('PAID');
   const [moneyStorageId, setMoneyStorageId] = useState<'WARUNG' | 'IKAN' | 'UANG_DIGITAL'>('WARUNG');
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSupplierModalOpen, setIsSupplierModalOpen] = useState(false);
@@ -48,6 +51,11 @@ export default function Purchases() {
   const suppliers = useLiveQuery(() => db.suppliers.where('status').equals('ACTIVE').toArray());
   const products = useLiveQuery(() => db.products.where('status').equals('ACTIVE').toArray());
   const purchaseHistory = useLiveQuery(() => db.purchases.orderBy('timestamp').reverse().toArray());
+  const payLaterBills = useLiveQuery(() => db.payLaterBills.toArray());
+  const payLaterInstallments = useLiveQuery(() => db.payLaterInstallments.orderBy('dueDate').toArray());
+  
+  const [settleInstallmentTarget, setSettleInstallmentTarget] = useState<PayLaterInstallment | null>(null);
+  const [settleInstallmentBill, setSettleInstallmentBill] = useState<PayLaterBill | null>(null);
 
   const handleApplyScannedReceipt = (result: {
     supplierId?: string;
@@ -130,6 +138,7 @@ export default function Purchases() {
         additionalCostAllocation,
         additionalCostNotes,
         paymentStatus,
+        tenor: paymentStatus === 'SPAYLATER' ? payLaterTenor : undefined,
         moneyStorageId: paymentStatus === 'PAID' ? moneyStorageId : undefined,
         userId: currentUser.userId,
         deviceId
@@ -159,8 +168,27 @@ export default function Purchases() {
       });
       addToast(`Hutang supplier Faktur #${settlePurchaseTarget.invoiceNumber} berhasil dilunasi!`, 'success');
       setSettlePurchaseTarget(null);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handlePayInstallment = async () => {
+    if (!settleInstallmentTarget || !currentUser) return;
+    setIsProcessing(true);
+    try {
+      await PayLaterService.payInstallment({
+        installmentId: settleInstallmentTarget.installmentId,
+        moneyStorageId: settleStorageId,
+        userId: currentUser.userId,
+        role: currentUser.role,
+        deviceId
+      });
+      addToast('Cicilan SPayLater berhasil dibayar!', 'success');
+      setSettleInstallmentTarget(null);
+      setSettleInstallmentBill(null);
     } catch (err: any) {
-      addToast(err.message || 'Gagal melunasi hutang supplier.', 'error');
+      addToast(err.message || 'Gagal membayar cicilan.', 'error');
     } finally {
       setIsProcessing(false);
     }
@@ -186,10 +214,16 @@ export default function Purchases() {
           >
             Riwayat
           </button>
+          <button 
+            onClick={() => setCurrentTab('PAYLATER')}
+            className={`px-6 py-2 rounded-lg font-black text-[10px] uppercase tracking-widest transition-all ${currentTab === 'PAYLATER' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'}`}
+          >
+            Hutang PayLater
+          </button>
         </div>
       </div>
 
-      {currentTab === 'NEW' ? (
+      {currentTab === 'NEW' && (
         <div className="space-y-6">
           {/* Smart Receipt Scanner Banner */}
           <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 rounded-3xl p-6 text-white shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-5 border border-blue-500/20">
@@ -270,8 +304,36 @@ export default function Purchases() {
                   >
                     Hutang (Credit)
                   </button>
+                  <button 
+                    onClick={() => setPaymentStatus('SPAYLATER')}
+                    className={`flex-1 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest border transition-all ${paymentStatus === 'SPAYLATER' ? 'bg-orange-50 text-orange-600 border-orange-200 shadow-sm' : 'bg-white text-slate-400 border-slate-200'}`}
+                  >
+                    SPayLater
+                  </button>
                 </div>
               </div>
+              {paymentStatus === 'SPAYLATER' && (
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Pilih Tenor Cicilan</label>
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={() => setPayLaterTenor(1)}
+                      className={`flex-1 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest border transition-all ${payLaterTenor === 1 ? 'bg-orange-600 text-white border-orange-600 shadow-sm' : 'bg-white text-slate-400 border-slate-200'}`}
+                    >
+                      1 Bulan (0%)
+                    </button>
+                    <button 
+                      onClick={() => setPayLaterTenor(3)}
+                      className={`flex-1 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest border transition-all ${payLaterTenor === 3 ? 'bg-orange-600 text-white border-orange-600 shadow-sm' : 'bg-white text-slate-400 border-slate-200'}`}
+                    >
+                      3 Bulan (0%)
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-slate-400 font-medium italic">
+                    * Jatuh tempo otomatis setiap tanggal 25 per bulan.
+                  </p>
+                </div>
+              )}
               {paymentStatus === 'PAID' && (
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Sumber Dana</label>
@@ -474,7 +536,9 @@ export default function Purchases() {
           </div>
         </div>
       </div>
-      ) : (
+    )}
+
+      {currentTab === 'HISTORY' && (
         <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
@@ -523,6 +587,124 @@ export default function Purchases() {
         </div>
       )}
 
+      {currentTab === 'PAYLATER' && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-orange-600 rounded-3xl p-6 text-white shadow-lg shadow-orange-200">
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-80 mb-1">Total Limit Terpakai</p>
+              <h3 className="text-2xl font-black tabular-nums">
+                Rp {(payLaterInstallments?.filter(i => i.status === 'PENDING').reduce((acc, i) => acc + i.amount, 0) || 0).toLocaleString()}
+              </h3>
+              <div className="mt-4 flex items-center gap-2 text-[10px] font-bold bg-white/20 w-fit px-3 py-1 rounded-full">
+                <CreditCard size={12} />
+                <span>SPayLater 0% Interest</span>
+              </div>
+            </div>
+            <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">Jatuh Tempo Bulan Ini</p>
+              <h3 className="text-2xl font-black text-slate-900 tabular-nums">
+                Rp {(payLaterInstallments?.filter(i => {
+                  if (i.status !== 'PENDING') return false;
+                  const d = new Date(i.dueDate);
+                  const now = new Date();
+                  return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+                }).reduce((acc, i) => acc + i.amount, 0) || 0).toLocaleString()}
+              </h3>
+              <p className="mt-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                <Clock size={12} className="text-amber-500" />
+                Bayar sebelum tanggal 25
+              </p>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="p-6 border-b border-slate-100">
+              <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Jadwal Cicilan SPayLater</h4>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50/50 text-slate-400 text-[10px] uppercase tracking-widest font-black border-b border-slate-100">
+                    <th className="px-6 py-4">Jatuh Tempo</th>
+                    <th className="px-6 py-4">Supplier / Faktur</th>
+                    <th className="px-6 py-4">Cicilan Ke</th>
+                    <th className="px-6 py-4">Jumlah</th>
+                    <th className="px-6 py-4">Status</th>
+                    <th className="px-6 py-4"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {payLaterInstallments?.map(inst => {
+                    const bill = payLaterBills?.find(b => b.billId === inst.billId);
+                    const purchase = purchaseHistory?.find(p => p.purchaseId === bill?.purchaseId);
+                    const supplier = suppliers?.find(s => s.supplierId === bill?.supplierId);
+                    const instsOfBill = payLaterInstallments.filter(i => i.billId === inst.billId).sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+                    const instIndex = instsOfBill.findIndex(i => i.installmentId === inst.installmentId) + 1;
+
+                    return (
+                      <tr key={inst.installmentId} className="hover:bg-slate-50/50 transition-colors group">
+                        <td className="px-6 py-4">
+                          <div className="flex flex-col">
+                            <span className="text-xs font-black text-slate-900">{new Date(inst.dueDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                            {new Date(inst.dueDate) < new Date() && inst.status === 'PENDING' && (
+                              <span className="text-[9px] font-black text-rose-600 uppercase tracking-tighter">Terlambat</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex flex-col">
+                            <span className="text-xs font-bold text-slate-700 uppercase truncate max-w-[150px]">{supplier?.name || 'Unknown'}</span>
+                            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">#{purchase?.invoiceNumber.slice(0, 10) || '---'}</span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{instIndex} dari {bill?.tenor}</span>
+                        </td>
+                        <td className="px-6 py-4 text-sm font-black text-slate-900 tabular-nums">Rp {inst.amount.toLocaleString()}</td>
+                        <td className="px-6 py-4">
+                          <span className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest border ${inst.status === 'PAID' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-orange-50 text-orange-600 border-orange-100'}`}>
+                            {inst.status === 'PAID' ? 'DIBAYAR' : 'BELUM BAYAR'}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          {inst.status === 'PENDING' ? (
+                            <button
+                              onClick={() => {
+                                setSettleInstallmentTarget(inst);
+                                setSettleInstallmentBill(bill || null);
+                                setSettleStorageId('WARUNG');
+                              }}
+                              className="px-3 py-1.5 bg-orange-600 hover:bg-orange-500 text-white rounded-xl text-[10px] font-black uppercase tracking-wider shadow-sm transition-all"
+                            >
+                              Bayar Cicilan
+                            </button>
+                          ) : (
+                            <div className="flex flex-col items-end">
+                              <span className="text-[9px] text-slate-400 font-bold uppercase">Lunas pada:</span>
+                              <span className="text-[9px] text-slate-500 font-black uppercase">{inst.paidAt ? new Date(inst.paidAt).toLocaleDateString() : '-'}</span>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {(!payLaterInstallments || payLaterInstallments.length === 0) && (
+                    <tr>
+                      <td colSpan={6} className="px-6 py-12 text-center">
+                        <div className="flex flex-col items-center gap-2 opacity-20">
+                          <History size={48} />
+                          <p className="text-xs font-black uppercase tracking-[0.2em]">Belum ada riwayat PayLater</p>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal Pelunasan Hutang Supplier */}
       {settlePurchaseTarget && (
         <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
@@ -565,6 +747,56 @@ export default function Purchases() {
                 className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-emerald-200 disabled:opacity-50"
               >
                 {isProcessing ? 'Memproses...' : 'Bayar & Lunasi'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {settleInstallmentTarget && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-in zoom-in-95">
+            <h3 className="font-black text-slate-900 text-base uppercase tracking-tight mb-2">
+              Bayar Cicilan SPayLater
+            </h3>
+            <p className="text-xs text-slate-500 mb-4">
+              Cicilan untuk Supplier <strong>{suppliers?.find(s => s.supplierId === settleInstallmentBill?.supplierId)?.name}</strong><br/>
+              Sebesar: <strong className="text-slate-900">Rp {settleInstallmentTarget.amount.toLocaleString()}</strong><br/>
+              Jatuh Tempo: <strong>{new Date(settleInstallmentTarget.dueDate).toLocaleDateString()}</strong>
+            </p>
+
+            <div className="space-y-3 mb-5">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">
+                Pilih Sumber Kas Pembayaran
+              </label>
+              <select
+                value={settleStorageId ?? 'WARUNG'}
+                onChange={(e) => setSettleStorageId(e.target.value as any)}
+                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-xs text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="WARUNG">Kas Warung</option>
+                <option value="IKAN">Kas Ikan</option>
+                <option value="UANG_DIGITAL">Kas Uang Digital</option>
+              </select>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setSettleInstallmentTarget(null);
+                  setSettleInstallmentBill(null);
+                }}
+                className="flex-1 py-3 font-bold text-xs uppercase tracking-wider text-slate-500 hover:bg-slate-100 rounded-xl"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handlePayInstallment}
+                disabled={isProcessing}
+                className="flex-1 py-3 bg-orange-600 hover:bg-orange-500 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-orange-200 disabled:opacity-50"
+              >
+                {isProcessing ? 'Memproses...' : 'Bayar Sekarang'}
               </button>
             </div>
           </div>

@@ -20,6 +20,8 @@ import type {
   PaymentMethod,
   DigitalService,
   LoyaltyEvent,
+  PayLaterBill,
+  PayLaterInstallment,
   SyncQueueItem 
 } from './types';
 
@@ -44,6 +46,8 @@ export class LocalDatabase extends Dexie {
   paymentMethods!: Table<PaymentMethod>;
   digitalServices!: Table<DigitalService>;
   loyaltyEvents!: Table<LoyaltyEvent>;
+  payLaterBills!: Table<PayLaterBill>;
+  payLaterInstallments!: Table<PayLaterInstallment>;
   settings!: Table<any>;
   syncQueue!: Table<SyncQueueItem>;
 
@@ -70,6 +74,8 @@ export class LocalDatabase extends Dexie {
       stockOpnames: 'opnameId, status, createdAt',
       digitalServices: 'serviceId, transactionId, serviceType, status',
       loyaltyEvents: 'loyaltyEventId, customerId, referenceId, timestamp',
+      payLaterBills: 'billId, purchaseId, supplierId, status',
+      payLaterInstallments: 'installmentId, billId, dueDate, status',
       settings: 'id',
       syncQueue: '++queueId, entityType, entityId, status, createdAt'
     });

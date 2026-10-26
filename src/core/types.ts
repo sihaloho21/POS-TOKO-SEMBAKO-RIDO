@@ -197,7 +197,7 @@ export interface Purchase {
   purchaseId: string;
   supplierId: string;
   invoiceNumber: string;
-  status: 'DRAFT' | 'CONFIRMED' | 'PAID' | 'CANCELLED';
+  status: 'DRAFT' | 'CONFIRMED' | 'PAID' | 'CANCELLED' | 'PAYABLE';
   items: PurchaseItem[];
   total: number;
   timestamp: string;
@@ -466,3 +466,23 @@ export interface LoyaltySettingsConfig {
   updatedBy?: string;
 }
 
+export interface PayLaterBill {
+  billId: string;
+  purchaseId: string;
+  supplierId: string;
+  totalAmount: number;
+  tenor: 1 | 3;
+  status: 'ACTIVE' | 'PAID' | 'CANCELLED';
+  createdAt: string;
+}
+
+export interface PayLaterInstallment {
+  installmentId: string;
+  billId: string;
+  amount: number;
+  dueDate: string;
+  status: 'PENDING' | 'PAID';
+  paidAt?: string;
+  moneyStorageId?: 'WARUNG' | 'IKAN' | 'UANG_DIGITAL';
+  financeEventId?: string;
+}

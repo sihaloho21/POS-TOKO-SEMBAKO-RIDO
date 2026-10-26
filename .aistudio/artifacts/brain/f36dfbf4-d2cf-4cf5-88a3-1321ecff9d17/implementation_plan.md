@@ -1,76 +1,68 @@
-# Real-time Inventory Summary Cards
+# PRD: Integrasi ShopeePayLater untuk Pembelian Barang (Kulakan)
 
-Add a high-visibility summary header to the Inventory Management page that provides real-time business metrics, including total capital investment (modal), SKU density, and stock health alerts.
+Fitur ini memungkinkan Owner untuk mencatat pembelian barang menggunakan metode ShopeePayLater (SPayLater) dengan tenor 1 atau 3 bulan (bunga 0%), pencatatan jadwal cicilan otomatis setiap tanggal 25, dan pemantauan total tagihan aktif.
 
 ### User Review & Critical Decisions
 
 > [!IMPORTANT]
-> The "Total Modal" calculation uses the **Weighted Average Cost (WAC/HPP)** stored in the `productCosts` table multiplied by the current `stock` level for each product. This data is only visible to the **OWNER** role to maintain financial confidentiality.
+> Pembayaran cicilan SPayLater akan memotong saldo kas toko (misal: Kas Ikan atau Kas Warung) pada saat jatuh tempo dikonfirmasi secara manual oleh user. Sistem akan memberikan pengingat visual untuk tagihan yang mendekati tanggal 25.
 
--   **Confirmed Position**: Displayed as a horizontal row of summary cards at the top of the Inventory page (header cards).
--   **Confirmed Metrics**:
-    1.  **Total Modal (IDR)**: Sum of (Current Stock × HPP).
-    2.  **Total Item (SKU)**: Count of all registered products.
-    3.  **Total Physical Units**: Sum of all stock quantities (mixed Pcs/Kg).
-    4.  **Low Stock Alert**: Percentage of active products currently below their minimum stock threshold.
+-   **Konfirmasi UI**: Menu "Purchases" akan memiliki tab baru bernama **"Hutang PayLater"**.
+-   **Logika Jatuh Tempo**: Jika belanja hari ini, cicilan pertama jatuh tempo pada **tanggal 25 bulan berikutnya**. Untuk tenor 3 bulan, cicilan 2 dan 3 jatuh tempo pada tanggal 25 di bulan-bulan selanjutnya.
+-   **Penyimpanan Dana**: Saat membayar cicilan, user dapat memilih sumber dana (Kas Warung / Ikan / Digital).
 
 ---
 
 ### 1. Overview & Core Concept
 
--   **What It Does**: It provides the business owner with an immediate financial snapshot of their warehouse value and operational health without needing to export reports or manually calculate spreadsheets.
--   **Target Audience / Persona**: The Store Owner (Rido) during morning inventory checks or procurement planning.
--   **Key Value**: Reduces the time to understand business liquidity tied up in stock and highlights immediate restock needs.
+-   **What It Does**: Memberikan fleksibilitas pembayaran kulakan dengan memisahkan pencatatan stok yang masuk hari ini dengan aliran kas keluar yang tertunda (deferred payment).
+-   **Key Value**: Membantu Owner mengelola likuiditas kas kecil. Barang (seperti ikan) bisa dijual terlebih dahulu untuk mengumpulkan uang pembayaran cicilan.
 
 ---
 
 ### 2. User Experience & Visual Design
 
--   **Key User Flows**:
-    1.  User navigates to the **Inventory** tab.
-    2.  System instantly calculates totals from the local Dexie database.
-    3.  A row of 4 compact, high-density cards appears below the page title.
-    4.  The "Low Stock" card pulses or changes color (Amber to Red) if the percentage exceeds a critical threshold (e.g., >20% items low).
--   **Visual Identity & Theme**:
-    -   *Aesthetic Direction*: Utilitarian Dashboard (SaaS style).
-    -   *Layout*: A responsive grid (`grid-cols-1 md:grid-cols-2 lg:grid-cols-4`) with standard container padding.
-    -   *Typographic Hierarchy*: Large tabular numerals for primary values (`text-2xl font-black tabular-nums`), small uppercase micro-labels for descriptions.
--   **Interactive Feedback**: Subtle hover lift effects on cards; numeric values will animate/transition smoothly if stock changes occur while the page is open.
+-   **Alur Input Pembelian**:
+    1.  Buka menu **Purchases > Input Baru**.
+    2.  Pilih Supplier dan scan/input barang.
+    3.  Pada bagian **Status Pembayaran**, tambahkan opsi **"ShopeePayLater"**.
+    4.  Pilih Tenor: **1 Bulan (1x)** atau **3 Bulan (3x)**.
+    5.  Sistem menampilkan estimasi nominal per cicilan dan tanggal jatuh tempo (25 per bulan).
+-   **Alur Monitoring & Pelunasan**:
+    1.  Buka menu **Purchases > Hutang PayLater**.
+    2.  Lihat ringkasan: **Total Limit Terpakai** dan **Total Tagihan Bulan Ini**.
+    3.  Daftar cicilan diurutkan berdasarkan tanggal jatuh tempo terdekat.
+    4.  Klik **"Bayar Cicilan"** -> Pilih Kas (Warung/Ikan) -> Konfirmasi.
 
 ---
 
 ### 3. Key Product Decisions & Trade-Offs
 
--   **Decision 1: Real-time Calculation via useLiveQuery**
-    -   *Chosen Approach*: Perform the summation on the client-side using `useLiveQuery` results.
-    -   *Why*: Provides an "instant" feel where values update immediately as sales or adjustments happen.
-    -   *Alternatives Considered*: Server-side aggregation (too slow for a local-first PWA architecture).
--   **Decision 2: Unit Normalization**
-    -   *Chosen Approach*: "Total Units" will be a raw sum of base units (e.g., 100 Pcs + 50 Kg = 150 units).
-    -   *Why*: Simplicity for a high-level summary. Detailed breakdowns remain available in the product table.
+-   **Decision 1: Dedicated Ledger for PayLater**
+    -   *Approach*: Menambahkan tabel `payLaterBills` di database lokal (Dexie).
+    -   *Why*: Karena satu pembelian SPayLater menghasilkan beberapa jadwal pembayaran (installments), struktur `Purchase` standar tidak cukup untuk melacak status tiap bulan.
+-   **Decision 2: Manual Payment Confirmation**
+    -   *Approach*: User harus mengklik "Bayar" secara manual di sistem saat mereka membayar tagihan di aplikasi Shopee.
+    -   *Why*: Sistem POS tidak terhubung langsung dengan API Shopee, sehingga sinkronisasi kas harus dilakukan manual untuk akurasi saldo laci.
 
 ---
 
-### 4. Technical Architecture & Data Strategy
+### 4. Technical Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Inventory.tsx                        │
-│  ┌───────────────────────────────────────────────────┐  │
-│  │             Summary Stats (Memoized)              │  │
-│  │  [Modal]  [SKUs]  [Total Units]  [Low Stock %]    │  │
-│  └───────────────────────────────────────────────────┘  │
-│                          │                              │
-│            useLiveQuery(db.products)                    │
-│            useLiveQuery(db.productCosts)                │
-└──────────────────────────┬──────────────────────────────┘
-                           │
-                 Dexie (IndexedDB)
+┌─────────────────────────────────┐      ┌─────────────────────────────┐
+│       Purchases Component       │─────▶│      PayLaterService        │
+│ (Selector SPayLater 1x/3x)      │      │ (Logic Cicilan & Due Date)  │
+└─────────────────────────────────┘      └──────────────┬──────────────┘
+                                                        │
+                                         ┌──────────────▼──────────────┐
+                                         │      Dexie DB (New Table)   │
+                                         │ - payLaterBills             │
+                                         │ - installments              │
+                                         └─────────────────────────────┘
 ```
 
--   **Data Model & State**:
-    -   `products`: Contains `stock`, `minimumStock`, `baseUnit`.
-    -   `productCosts`: Contains `hpp` (WAC) per `productId`.
--   **Logic Mapping**:
-    -   The calculation will be wrapped in `useMemo` dependent on the `products` and `costs` arrays.
-    -   A helper component `<StatCard />` will be used to maintain visual consistency across the 4 metrics.
+-   **Schema Baru**:
+    -   `PayLaterBill`: `id, purchaseId, totalAmount, tenor, status, createdAt`.
+    -   `PayLaterInstallment`: `id, billId, amount, dueDate, status, paidAt, storageId`.
+-   **Integrasi Finance**: Setiap pelunasan cicilan akan mencatatkan `FinanceEvent` tipe `OUT` pada storage yang dipilih.

@@ -19,7 +19,8 @@ export class PurchaseService {
     additionalCost?: number;
     additionalCostAllocation?: 'CAPITALIZE_INTO_WAC' | 'OPERATIONAL_EXPENSE';
     additionalCostNotes?: string;
-    paymentStatus: 'PAID' | 'PAYABLE';
+    paymentStatus: 'PAID' | 'PAYABLE' | 'SPAYLATER';
+    tenor?: 1 | 3;
     moneyStorageId?: 'WARUNG' | 'IKAN' | 'UANG_DIGITAL';
     userId: string;
     deviceId: string;
@@ -105,7 +106,7 @@ export class PurchaseService {
       purchaseId,
       supplierId: params.supplierId,
       invoiceNumber: params.invoiceNumber,
-      status: params.paymentStatus === 'PAID' ? 'PAID' : 'CONFIRMED',
+      status: params.paymentStatus === 'PAID' ? 'PAID' : (params.paymentStatus === 'SPAYLATER' ? 'PAYABLE' : 'CONFIRMED'),
       items: purchaseItems,
       total: totalInvoice,
       timestamp,
@@ -113,6 +114,19 @@ export class PurchaseService {
     };
 
     await db.purchases.add(purchase);
+
+    // If SPAYLATER, create the bill and installments
+    if (params.paymentStatus === 'SPAYLATER') {
+      const { PayLaterService } = await import('./paylater-service');
+      await PayLaterService.createPayLaterBill({
+        purchaseId,
+        supplierId: params.supplierId,
+        totalAmount: totalInvoice,
+        tenor: params.tenor || 1,
+        createdAt: timestamp
+      });
+    }
+
     await this.addToQueue('purchases', purchaseId, 'CREATE', purchase);
 
     // 3. Handle additional cost audit and operational expense if chosen
