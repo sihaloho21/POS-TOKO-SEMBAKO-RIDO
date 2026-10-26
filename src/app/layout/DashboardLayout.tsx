@@ -222,11 +222,15 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
       <aside className="hidden lg:flex flex-col w-72 bg-white border-r border-slate-200">
         <div className="p-6">
           <div className="flex items-center gap-3 mb-8 px-2">
-            <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-200">
-              <RefreshCw className="text-white" size={20} />
+            <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-md border border-slate-100 overflow-hidden p-1">
+              <img 
+                src="/assets/aistudio/LOGO_PS_0fc4cc95.png" 
+                alt="Logo" 
+                className="w-full h-full object-contain"
+              />
             </div>
             <div>
-              <h2 className="font-bold text-slate-900 leading-none tracking-tight">TOKO SEMBAKO RIAMA</h2>
+              <h2 className="font-bold text-slate-900 leading-none tracking-tight">PAKET SEMBAKO</h2>
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Business System</span>
             </div>
           </div>
@@ -413,8 +417,10 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
             >
               <div className="flex justify-between items-center mb-8">
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white"><RefreshCw size={16} /></div>
-                  <h2 className="font-bold text-slate-900">TOKO SEMBAKO RIAMA</h2>
+                  <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center border border-slate-100 overflow-hidden p-1">
+                    <img src="/assets/aistudio/LOGO_PS_0fc4cc95.png" alt="Logo" className="w-full h-full object-contain" />
+                  </div>
+                  <h2 className="font-bold text-slate-900 uppercase">PAKET SEMBAKO</h2>
                 </div>
                 <button onClick={() => setIsSidebarOpen(false)} className="p-2 text-slate-400"><X /></button>
               </div>

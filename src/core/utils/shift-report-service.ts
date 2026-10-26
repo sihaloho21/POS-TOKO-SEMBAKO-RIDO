@@ -40,7 +40,7 @@ export class ShiftReportService {
         <body>
           <div class="center">
             <div class="bold" style="font-size: 1.2em;">REKONSILIASI SHIFT</div>
-            <div class="bold">TOKO SEMBAKO RIAMA</div>
+            <div class="bold">PAKET SEMBAKO</div>
           </div>
 
           <div class="dashed"></div>

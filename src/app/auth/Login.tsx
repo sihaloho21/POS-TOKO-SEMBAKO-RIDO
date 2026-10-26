@@ -207,11 +207,12 @@ export default function Login() {
               <span className="text-[10px] font-bold text-slate-500">Owner Rido</span>
             </div>
 
-            <div className="flex flex-col items-center justify-center p-2.5 bg-white border border-emerald-200 rounded-xl text-center">
-              <div className="flex items-center gap-1.5 text-emerald-600 font-black text-xs uppercase tracking-wider">
+            <div className="flex flex-col items-center p-2.5 bg-white border border-emerald-200 rounded-xl text-center">
+              <div className="flex items-center gap-1.5 text-emerald-600 font-black text-xs uppercase tracking-wider mb-0.5">
                 <UserCheck size={14} />
                 2. KASIR
               </div>
+              <span className="text-[10px] font-bold text-slate-500">Kasir Romuel</span>
             </div>
           </div>
         </div>
@@ -261,8 +262,8 @@ export default function Login() {
             <Keyboard size={13} className="text-blue-600" />
             <span>Ketik PIN angka langsung via <strong>Keyboard</strong> / <strong>Numpad</strong></span>
           </div>
-          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">
-            Tekan Backspace untuk hapus • Esc untuk reset
+          <p className="text-[11px] text-slate-400 font-medium mt-0.5">
+            © 2026 Rido Alpredo Sihaloho. All rights reserved.
           </p>
         </div>
       </motion.div>

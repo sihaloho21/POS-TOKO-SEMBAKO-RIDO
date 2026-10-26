@@ -98,9 +98,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
     const hasKasir = await db.users.where('role').equals('KASIR').first();
     if (!hasKasir) {
-      await get().seedKasir('Kasir Riama', '123456');
-    } else if (hasKasir.pinHash !== '123456' || hasKasir.name === 'Kasir Harapan') {
-      await db.users.update(hasKasir.userId, { name: 'Kasir Riama', pinHash: '123456', updatedAt: new Date().toISOString() });
+      await get().seedKasir('Kasir Romuel', '123456');
+    } else if (hasKasir.pinHash !== '123456' || hasKasir.name === 'Kasir Harapan' || hasKasir.name === 'Kasir Riama') {
+      await db.users.update(hasKasir.userId, { name: 'Kasir Romuel', pinHash: '123456', updatedAt: new Date().toISOString() });
     }
   }
 }));

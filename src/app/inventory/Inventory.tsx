@@ -93,6 +93,32 @@ export default function Inventory() {
     [search, filterType, filterStatus]
   );
 
+  // Real-time Inventory Summary Statistics (Owner Only)
+  const stats = React.useMemo(() => {
+    if (!products) return { totalModal: 0, totalSkus: 0, totalUnits: 0, lowStockPercent: 0 };
+    
+    const totalSkus = products.length;
+    let totalModal = 0;
+    let totalUnits = 0;
+    let lowStockCount = 0;
+
+    products.forEach(p => {
+      totalUnits += (p.stock || 0);
+      if ((p.stock || 0) < (p.minimumStock || 0)) {
+        lowStockCount++;
+      }
+      
+      if (isOwner) {
+        const productCost = costs?.find(c => c.productId === p.productId)?.hpp ?? p.hpp ?? 0;
+        totalModal += (p.stock || 0) * productCost;
+      }
+    });
+
+    const lowStockPercent = totalSkus > 0 ? (lowStockCount / totalSkus) * 100 : 0;
+
+    return { totalModal, totalSkus, totalUnits, lowStockPercent };
+  }, [products, costs, isOwner]);
+
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   };
@@ -237,6 +263,81 @@ export default function Inventory() {
           </button>
         </div>
       </div>
+
+      {/* Inventory Summary Cards (Owner Only) */}
+      {isOwner && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm flex flex-col justify-between hover:border-blue-500 transition-all group">
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1.5">
+              <Scale size={14} className="text-blue-500" /> 
+              Total Modal (WAC)
+            </span>
+            <div>
+              <span className="text-2xl font-black text-slate-900 tabular-nums">
+                Rp {stats.totalModal.toLocaleString()}
+              </span>
+              <p className="text-[10px] text-slate-400 font-medium mt-1 italic">* Stok Terkini × Harga Beli</p>
+            </div>
+          </div>
+
+          <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm flex flex-col justify-between hover:border-indigo-500 transition-all">
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1.5">
+              <Package size={14} className="text-indigo-500" /> 
+              Varian Produk
+            </span>
+            <div>
+              <span className="text-2xl font-black text-slate-900 tabular-nums">
+                {stats.totalSkus.toLocaleString()}
+              </span>
+              <p className="text-[10px] text-slate-400 font-medium mt-1 uppercase tracking-tight">Total SKU Terdaftar</p>
+            </div>
+          </div>
+
+          <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm flex flex-col justify-between hover:border-emerald-500 transition-all">
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1.5">
+              <Layers size={14} className="text-emerald-500" /> 
+              Volume Unit Fisik
+            </span>
+            <div>
+              <span className="text-2xl font-black text-slate-900 tabular-nums">
+                {stats.totalUnits.toLocaleString()}
+              </span>
+              <p className="text-[10px] text-slate-400 font-medium mt-1 uppercase tracking-tight">Akumulasi Seluruh Stok</p>
+            </div>
+          </div>
+
+          <div className={`p-5 rounded-3xl border shadow-sm flex flex-col justify-between transition-all ${
+            stats.lowStockPercent > 20 
+              ? 'bg-rose-50 border-rose-200' 
+              : stats.lowStockPercent > 0 
+                ? 'bg-amber-50 border-amber-200' 
+                : 'bg-white border-slate-200'
+          }`}>
+            <span className={`text-[10px] font-black uppercase tracking-widest mb-2 flex items-center gap-1.5 ${
+              stats.lowStockPercent > 0 ? 'text-rose-600' : 'text-slate-400'
+            }`}>
+              <AlertCircle size={14} className={stats.lowStockPercent > 0 ? 'animate-pulse' : ''} /> 
+              Alert Restock
+            </span>
+            <div>
+              <span className={`text-2xl font-black tabular-nums ${
+                stats.lowStockPercent > 20 
+                  ? 'text-rose-700' 
+                  : stats.lowStockPercent > 0 
+                    ? 'text-amber-700' 
+                    : 'text-slate-900'
+              }`}>
+                {stats.lowStockPercent.toFixed(1)}%
+              </span>
+              <p className={`text-[10px] font-medium mt-1 ${
+                stats.lowStockPercent > 0 ? 'text-rose-600' : 'text-slate-400'
+              }`}>
+                Di bawah limit minimal
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Tab Navigation */}
       <div className="flex gap-4 border-b border-slate-200">

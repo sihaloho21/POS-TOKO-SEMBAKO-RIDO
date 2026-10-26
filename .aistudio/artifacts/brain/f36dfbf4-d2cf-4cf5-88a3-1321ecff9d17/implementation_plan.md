@@ -1,148 +1,76 @@
-# Sistem Investigasi & Penyelesaian Selisih Kas Laci Kasir (Cash Discrepancy & Staff Receivable)
+# Real-time Inventory Summary Cards
 
-Sistem investigasi dan audit bagi Owner untuk memeriksa selisih uang fisik di laci kasir serta mengeksekusi kebijakan pembebanan selisih yang tidak terselesaikan langsung ke kasir sebagai piutang karyawan (kasbon / tanggung jawab kasir).
+Add a high-visibility summary header to the Inventory Management page that provides real-time business metrics, including total capital investment (modal), SKU density, and stock health alerts.
 
----
-
-## User Review & Critical Decisions
+### User Review & Critical Decisions
 
 > [!IMPORTANT]
-> **Keputusan Kebijakan Toko yang Telah Dikonfirmasi:**
-> **Kebijakan Selisih Tak Terselesaikan**: Jika selisih kas fisik di laci kasir tidak ditemukan penyebab transaksinya, Owner menyetujui kebijakan: **Bebankan ke kasir atau catat piutang kasir (kasbon/tanggung jawab kasir)**.
+> The "Total Modal" calculation uses the **Weighted Average Cost (WAC/HPP)** stored in the `productCosts` table multiplied by the current `stock` level for each product. This data is only visible to the **OWNER** role to maintain financial confidentiality.
 
-### Rincian Kebijakan yang Diterapkan:
-1. **Pembebanan Otomatis ke Piutang Kasir**:
-   - Jika saat tutup shift kasir mengalami selisih minus (uang fisik lebih sedikit dari *Expected Cash*), dan investigasi transaksi tidak menemukan kekeliruan sistem/struk, Owner dapat mengklik tombol **"Bebankan ke Kasir (Catat Piutang Kasir)"**.
-   - Sistem secara otomatis membuat entri piutang karyawan (*Staff Receivable / Kasbon*) atas nama kasir yang bertugas pada shift tersebut.
-   - Status resolusi shift tercatat sebagai `CHARGED_TO_CASHIER`.
-2. **Audit Lengkap Sebelum Pembebanan**:
-   - Sebelum memutuskan pembebanan, Owner dibekali panel periksa detail:
-     - **Kalkulator Pecahan Fisik (*Denomination Counter*)**: Memastikan kasir tidak sekadar salah hitung lembaran uang Rp 100rb, 50rb, 20rb, dst.
-     - **Rekap Arus Kas Laci**: Modal Awal + Penjualan Tunai + Bayar Piutang Tunai - Kas Keluar - Retur Tunai.
-     - **Daftar Transaksi Shift**: Memeriksa struk yang dibatalkan, diskon khusus, atau transaksi cash.
-3. **Otorisasi Owner**:
-   - Setiap pembebanan selisih ke kasir membutuhkan otorisasi PIN Owner demi mencegah penyalahgunaan wewenang antar kasir.
+-   **Confirmed Position**: Displayed as a horizontal row of summary cards at the top of the Inventory page (header cards).
+-   **Confirmed Metrics**:
+    1.  **Total Modal (IDR)**: Sum of (Current Stock × HPP).
+    2.  **Total Item (SKU)**: Count of all registered products.
+    3.  **Total Physical Units**: Sum of all stock quantities (mixed Pcs/Kg).
+    4.  **Low Stock Alert**: Percentage of active products currently below their minimum stock threshold.
 
 ---
 
-## 1. Overview & Core Concept
+### 1. Overview & Core Concept
 
-### What It Does
-Ketika kasir melakukan penutupan shift (*Clock Out*):
-1. Kasir menghitung uang fisik di laci (dibantu lembar pecahan uang *Denomination Counter*).
-2. Jika ada selisih, kasir wajib mengisi alasan awal (*Discrepancy Reason*).
-3. Pada halaman **Riwayat & Performa Shift**, Owner melihat badge mencolok jika ada shift yang mengalami selisih belum terselesaikan (*Pending / Butuh Tindakan*).
-4. Owner membuka modal **Audit Laci Kasir**, meninjau arus kas dan struk.
-5. Jika selisih tidak dapat dijelaskan, Owner memilih aksi **Bebankan ke Kasir**:
-   - Sistem mencatat piutang kasir di modul Piutang (`receivables`).
-   - Saldo kas laci disesuaikan via `financeEvents` bertipe `ADJUSTMENT`.
-   - Jejak audit mencatat bahwa selisih telah diselesaikan dengan dibebankan ke kasir.
-
-### Target Audience & Persona
-- **Owner Toko Sembako**: Memastikan tidak ada kebocoran uang kas di laci kasir dan memiliki dasar pencatatan resmi saat memotong gaji atau menagih kasbon kasir.
-- **Kasir**: Memiliki transparansi data hitungan dan rincian transaksi sehingga tidak ada tuduhan sepihak tanpa dasar catatan.
-
-### Key Value
-- **Disiplin Kasir**: Kasir lebih berhati-hati dan teliti saat bertransaksi dan memberi uang kembalian.
-- **Pencatatan Finansial Akurat**: Selisih minus tidak dibiarkan menguap tanpa pertanggungjawaban di pembukuan toko.
+-   **What It Does**: It provides the business owner with an immediate financial snapshot of their warehouse value and operational health without needing to export reports or manually calculate spreadsheets.
+-   **Target Audience / Persona**: The Store Owner (Rido) during morning inventory checks or procurement planning.
+-   **Key Value**: Reduces the time to understand business liquidity tied up in stock and highlights immediate restock needs.
 
 ---
 
-## 2. User Experience & Visual Design
+### 2. User Experience & Visual Design
 
-### Alur Kerja Utama (User Flows)
-
-```
-[ Kasir Clock Out ] ──> Selisih Terdeteksi (Minus / Defisit)
-                               │
-                               ▼
-[ Riwayat Shift Owner ] ──> Badge "⚠️ Selisih Kas (Belum Selesai)"
-                               │
-                               ▼
-[ Klik "Audit Laci & Selesaikan" ]
-  │
-  ├─ Tab 1: Rekap Arus Kas (Modal Awal + Penjualan Tunai - Kas Keluar - Retur)
-  ├─ Tab 2: Cek Pecahan Uang Fisik (Denomination Sheet)
-  ├─ Tab 3: Riwayat Transaksi Shift (Filter Cash Only)
-  │
-  ▼
-[ Form Tindakan Owner ]
-  ├─ [★ PILIHAN UTAMA] "Bebankan ke Kasir (Catat Piutang/Kasbon)"
-  │    ├─ Input Catatan Kesepakatan (misal: "Potong gaji akhir bulan")
-  │    └─ Masukkan PIN Owner ──> Piutang Karyawan Terbuat Otomatis
-  │
-  └─ [ALTERNATIF] "Toleransi Toko" (Untuk selisih receh/kembalian bulat)
-```
-
-### Rincian Antarmuka (UI Components)
-
-1. **Tombol & Indikator di `ShiftHistory.tsx` & `ShiftReport.tsx`**:
-   - Kolom status rekonsiliasi yang interaktif.
-   - Jika `discrepancy < 0` dan belum diselesaikan: Tombol merah/amber tegas bertuliskan **"Periksa Selisih & Tindak Lanjut"**.
-   - Jika sudah dibebankan: Badge hijau tua bertuliskan **"✓ Dibebankan ke Kasir (Piutang Tercatat)"**.
-
-2. **Modal Audit & Resolusi (`CashDiscrepancyAuditModal.tsx`)**:
-   - Header jelas dengan nama kasir, jam mulai s/d tutup shift, dan total selisih kas.
-   - Komponen kalkulator lembaran uang (*Denomination Counter*) untuk verifikasi fisik.
-   - Kartu rincian formula arus kas warung.
-   - Panel tindakan pembebanan piutang dengan konfirmasi nominal, tanggal jatuh tempo potong kasbon, dan verifikasi PIN Owner.
+-   **Key User Flows**:
+    1.  User navigates to the **Inventory** tab.
+    2.  System instantly calculates totals from the local Dexie database.
+    3.  A row of 4 compact, high-density cards appears below the page title.
+    4.  The "Low Stock" card pulses or changes color (Amber to Red) if the percentage exceeds a critical threshold (e.g., >20% items low).
+-   **Visual Identity & Theme**:
+    -   *Aesthetic Direction*: Utilitarian Dashboard (SaaS style).
+    -   *Layout*: A responsive grid (`grid-cols-1 md:grid-cols-2 lg:grid-cols-4`) with standard container padding.
+    -   *Typographic Hierarchy*: Large tabular numerals for primary values (`text-2xl font-black tabular-nums`), small uppercase micro-labels for descriptions.
+-   **Interactive Feedback**: Subtle hover lift effects on cards; numeric values will animate/transition smoothly if stock changes occur while the page is open.
 
 ---
 
-## 3. Key Product Decisions & Trade-Offs
+### 3. Key Product Decisions & Trade-Offs
 
-### Keputusan 1: Mekanisme Pencatatan Piutang Karyawan
-- **Pendekatan Terpilih**: Mencatat entri piutang resmi ke dalam tabel `receivables` / pelanggan internal bertipe `KARYAWAN` (nama kasir bersangkutan).
-- **Alasan**: Terintegrasi langsung dengan menu **Buku Piutang / Pelunasan Hutang** yang sudah ada di aplikasi. Owner dapat memantau kapan kasir menyetor atau ketika gajian tiba dapat dipotong langsung secara transparan.
-
-### Keputusan 2: Pemisahan Event Audit Keuangan
-- **Pendekatan Terpilih**: Mengaitkan selisih shift dengan `FinanceEvent` bertipe `ADJUSTMENT` dan referensi `staffDebtId`.
-- **Alasan**: Laporan kas toko tetap seimbang (laci fisik disesuaikan dengan uang riil, sedangkan selisih dipindahkan ke akun Piutang Karyawan).
+-   **Decision 1: Real-time Calculation via useLiveQuery**
+    -   *Chosen Approach*: Perform the summation on the client-side using `useLiveQuery` results.
+    -   *Why*: Provides an "instant" feel where values update immediately as sales or adjustments happen.
+    -   *Alternatives Considered*: Server-side aggregation (too slow for a local-first PWA architecture).
+-   **Decision 2: Unit Normalization**
+    -   *Chosen Approach*: "Total Units" will be a raw sum of base units (e.g., 100 Pcs + 50 Kg = 150 units).
+    -   *Why*: Simplicity for a high-level summary. Detailed breakdowns remain available in the product table.
 
 ---
 
-## 4. Technical Architecture & Data Strategy
-
-### Diagram Sistem
+### 4. Technical Architecture & Data Strategy
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                 TUTUP SHIFT (ClockOutModal)                 │
-│  - Input uang fisik (dengan bantuan lembar pecahan uang)    │
-│  - Input alasan selisih kasir                               │
-└──────────────────────────────┬──────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│                   DATABASE LOKAL (Dexie.js)                 │
-│  - db.shifts: discrepancy, discrepancyReason, approvalStatus│
-│  - db.receivables: entri piutang kasir jika dibebankan      │
-│  - db.financeEvents: ADJUSTMENT saldo laci warung           │
-└──────────────────────────────┬──────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│             WORKBENCH INVESTIGASI & TINDAK LANJUT           │
-│             (CashDiscrepancyAuditModal.tsx)                 │
-│  - Menghitung ulang pecahan fisik bersama kasir             │
-│  - Mengecek mutasi struk & petty cash                       │
-│  - Eksekusi: "Bebankan ke Kasir (Catat Piutang)"            │
-│  - Meminta verifikasi PIN Owner                             │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│                    Inventory.tsx                        │
+│  ┌───────────────────────────────────────────────────┐  │
+│  │             Summary Stats (Memoized)              │  │
+│  │  [Modal]  [SKUs]  [Total Units]  [Low Stock %]    │  │
+│  └───────────────────────────────────────────────────┘  │
+│                          │                              │
+│            useLiveQuery(db.products)                    │
+│            useLiveQuery(db.productCosts)                │
+└──────────────────────────┬──────────────────────────────┘
+                           │
+                 Dexie (IndexedDB)
 ```
 
-### Rencana Langkah Pengerjaan (Execution Steps)
-
-1. **Step 1 - Service Layer**:
-   - Tambahkan fungsi `resolveDiscrepancyToStaffReceivable` di `ShiftService`:
-     - Memverifikasi PIN Owner.
-     - Membuat / mengaitkan profil kasir ke entri `receivables`.
-     - Mengubah status shift menjadi `CHARGED_TO_CASHIER` dan mencatat audit trail.
-2. **Step 2 - Denomination Helper di Tutup Shift**:
-   - Tambahkan kalkulator pecahan uang (lembar Rp 100k, 50k, 20k, 10k, 5k, 2k, 1k, koin) di modal penutupan shift.
-3. **Step 3 - Modal Audit & Tindak Lanjut Owner (`CashDiscrepancyAuditModal.tsx`)**:
-   - Tampilan periksa transaksi kas, breakdown expected cash, dan form pembebanan piutang kasir.
-4. **Step 4 - Integrasi UI di `ShiftHistory.tsx` & `ShiftReport.tsx`**:
-   - Tombol buka audit selisih, filter shift yang memiliki selisih kas, dan badge status resolusi.
-5. **Step 5 - Uji & Verifikasi Build**:
-   - Jalankan `compile_applet` dan `lint_applet` untuk memastikan seluruh fitur terintegrasi sempurna.
+-   **Data Model & State**:
+    -   `products`: Contains `stock`, `minimumStock`, `baseUnit`.
+    -   `productCosts`: Contains `hpp` (WAC) per `productId`.
+-   **Logic Mapping**:
+    -   The calculation will be wrapped in `useMemo` dependent on the `products` and `costs` arrays.
+    -   A helper component `<StatCard />` will be used to maintain visual consistency across the 4 metrics.

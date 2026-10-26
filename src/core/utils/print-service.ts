@@ -57,7 +57,7 @@ export class PrintService {
     const rawSettings = await db.settings.get('current');
     const settings: ReceiptSettings = {
       id: 'current',
-      storeName: (!rawSettings?.storeName || rawSettings.storeName === 'TOKO HARAPAN JAYA') ? 'TOKO SEMBAKO RIAMA' : rawSettings.storeName,
+      storeName: (!rawSettings?.storeName || rawSettings.storeName === 'TOKO HARAPAN JAYA') ? 'PAKET SEMBAKO' : rawSettings.storeName,
       address: rawSettings?.address || 'Jl. Raya Cikande No. 123',
       phone: rawSettings?.phone || '0812-3456-7890',
       footerMessage: rawSettings?.footerMessage || 'Terima kasih telah berbelanja!',
@@ -183,7 +183,7 @@ export class PrintService {
 
           <div class="center footer">
             <p style="white-space: pre-line;">${settings.footerMessage}</p>
-            <p style="margin-top: 10px; font-size: 0.7em;">Toko Sembako Riama</p>
+            <p style="margin-top: 10px; font-size: 0.7em;">PAKET SEMBAKO</p>
           </div>
 
           <script>
@@ -205,7 +205,7 @@ export class PrintService {
     const rawSettings = await db.settings.get('current');
     const settings: ReceiptSettings = {
       id: 'current',
-      storeName: (!rawSettings?.storeName || rawSettings.storeName === 'TOKO HARAPAN JAYA') ? 'TOKO SEMBAKO RIAMA' : rawSettings.storeName,
+      storeName: (!rawSettings?.storeName || rawSettings.storeName === 'TOKO HARAPAN JAYA') ? 'PAKET SEMBAKO' : rawSettings.storeName,
       address: rawSettings?.address || 'Jl. Raya Cikande No. 123',
       phone: rawSettings?.phone || '0812-3456-7890',
       footerMessage: rawSettings?.footerMessage || 'Terima kasih telah berbelanja!',
@@ -345,7 +345,7 @@ export class PrintService {
 
           <div class="center footer">
             <div>Dicetak: ${printedAtFormatted}</div>
-            <p style="margin-top: 6px; font-size: 0.75em;">*** LAPORAN RESMI TOKO SEMBAKO RIAMA ***</p>
+            <p style="margin-top: 6px; font-size: 0.75em;">*** LAPORAN RESMI PAKET SEMBAKO ***</p>
           </div>
 
           <script>

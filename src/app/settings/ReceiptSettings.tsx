@@ -21,7 +21,7 @@ import {
 
 const DEFAULT_SETTINGS: ReceiptSettingsType = {
   id: 'current',
-  storeName: 'TOKO SEMBAKO RIAMA',
+  storeName: 'PAKET SEMBAKO',
   address: 'Jl. Raya Cikande No. 123',
   phone: '0812-3456-7890',
   footerMessage: 'Terima kasih telah berbelanja!',
@@ -282,7 +282,7 @@ export default function ReceiptSettings() {
               
               <div className="text-center space-y-1 mt-4 italic">
                 <p className="whitespace-pre-line">{formData.footerMessage}</p>
-                <p className="mt-2 text-[8px] opacity-50">Toko Sembako Riama</p>
+                <p className="mt-2 text-[8px] opacity-50">PAKET SEMBAKO</p>
               </div>
             </div>
           </div>
