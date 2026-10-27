@@ -22,8 +22,14 @@ import {
   Sparkles,
   LogIn,
   LogOut,
-  ShieldAlert
+  ShieldAlert,
+  Copy,
+  ExternalLink,
+  AlertCircle,
+  Check,
+  HelpCircle
 } from 'lucide-react';
+import FirebaseAuthGuideModal from './FirebaseAuthGuideModal';
 import { CloudSyncService } from '@/core/services/cloud-sync-service';
 import { CloudAuthService, useCloudAuthStore } from '@/core/services/cloud-auth-service';
 import { auth } from '@/firebase/config';
@@ -52,17 +58,25 @@ export default function ReceiptSettings() {
   const [isPullingCloud, setIsPullingCloud] = useState(false);
   const [isPushingCloud, setIsPushingCloud] = useState(false);
   const [isConnectingGoogle, setIsConnectingGoogle] = useState(false);
+  const [unauthorizedDomain, setUnauthorizedDomain] = useState<string | null>(null);
+  const [copiedDomain, setCopiedDomain] = useState(false);
+  const [isGuideOpen, setIsGuideOpen] = useState(false);
+  const [guideInitialStep, setGuideInitialStep] = useState(1);
 
   const pendingQueueCount = useLiveQuery(() => db.syncQueue.where('status').anyOf(['PENDING', 'FAILED', 'SYNCING']).count());
 
   const handleConnectGoogle = async () => {
     setIsConnectingGoogle(true);
+    setUnauthorizedDomain(null);
     try {
       await CloudAuthService.loginWithGoogle(currentUser?.role || 'OWNER', currentUser?.name);
       addToast('Akun Google berhasil terhubung! Izin Cloud Firestore aktif.', 'success');
     } catch (err: any) {
-      if (err?.message?.includes('popup-closed-by-user')) {
+      if (err?.message?.includes('popup-closed-by-user') || err?.message?.includes('Login dibatalkan')) {
         addToast('Login Google dibatalkan.', 'info');
+      } else if (err?.message?.includes('Authorized Domains') || err?.message?.includes('unauthorized-domain')) {
+        setUnauthorizedDomain(window.location.hostname);
+        addToast('Domain belum terdaftar di Authorized Domains Firebase Console.', 'warning');
       } else {
         addToast(err?.message || 'Gagal menghubungkan Google Cloud.', 'error');
       }
@@ -71,20 +85,34 @@ export default function ReceiptSettings() {
     }
   };
 
+  const handleCopyDomain = () => {
+    const domain = window.location.hostname;
+    navigator.clipboard.writeText(domain);
+    setCopiedDomain(true);
+    addToast(`Domain ${domain} berhasil disalin!`, 'success');
+    setTimeout(() => setCopiedDomain(false), 3000);
+  };
+
   const handlePullCloud = async () => {
     setIsPullingCloud(true);
     try {
       if (!auth.currentUser) {
-        addToast('Menghubungkan akun Cloud...', 'info');
-        await CloudAuthService.loginWithGoogle(currentUser?.role || 'OWNER', currentUser?.name);
+        addToast('Menghubungkan ke Cloud Firestore...', 'info');
+        const user = await CloudAuthService.ensureAuthenticated(currentUser?.role || 'OWNER', currentUser?.name);
+        if (!user) {
+          await CloudAuthService.loginWithGoogle(currentUser?.role || 'OWNER', currentUser?.name);
+        }
       }
       const stats = await CloudSyncService.pullAllFromCloud(currentUser?.userId, deviceId);
       addToast(`Sinkronisasi Sukses! ${stats.totalDocs} data telah diselaraskan dari Cloud.`, 'success');
       setTimeout(() => window.location.reload(), 1500);
     } catch (err: any) {
       console.error(err);
-      if (err?.message?.includes('popup-closed-by-user')) {
-        addToast('Login Google dibatalkan. Hubungkan Google agar dapat menarik data Cloud.', 'error');
+      if (err?.message?.includes('popup-closed-by-user') || err?.message?.includes('Login dibatalkan')) {
+        addToast('Login Google dibatalkan.', 'error');
+      } else if (err?.message?.includes('Authorized Domains')) {
+        setUnauthorizedDomain(window.location.hostname);
+        addToast('Daftarkan domain di Firebase Console untuk melanjutkan.', 'warning');
       } else {
         addToast(err?.message || 'Gagal menarik data dari Cloud.', 'error');
       }
@@ -97,8 +125,11 @@ export default function ReceiptSettings() {
     setIsPushingCloud(true);
     try {
       if (!auth.currentUser) {
-        addToast('Menghubungkan akun Cloud...', 'info');
-        await CloudAuthService.loginWithGoogle(currentUser?.role || 'OWNER', currentUser?.name);
+        addToast('Menghubungkan ke Cloud Firestore...', 'info');
+        const user = await CloudAuthService.ensureAuthenticated(currentUser?.role || 'OWNER', currentUser?.name);
+        if (!user) {
+          await CloudAuthService.loginWithGoogle(currentUser?.role || 'OWNER', currentUser?.name);
+        }
       }
       const res = await CloudSyncService.pushAllPendingQueue();
       if (res.remainingCount === 0) {
@@ -108,8 +139,11 @@ export default function ReceiptSettings() {
       }
     } catch (err: any) {
       console.error(err);
-      if (err?.message?.includes('popup-closed-by-user')) {
-        addToast('Login Google dibatalkan. Hubungkan Google agar dapat mengunggah antrian.', 'error');
+      if (err?.message?.includes('popup-closed-by-user') || err?.message?.includes('Login dibatalkan')) {
+        addToast('Login Google dibatalkan.', 'error');
+      } else if (err?.message?.includes('Authorized Domains')) {
+        setUnauthorizedDomain(window.location.hostname);
+        addToast('Daftarkan domain di Firebase Console untuk melanjutkan.', 'warning');
       } else {
         addToast(err?.message || 'Gagal mengunggah antrian ke Cloud.', 'error');
       }
@@ -332,6 +366,75 @@ export default function ReceiptSettings() {
                   </button>
                 )}
 
+                {/* Unauthorized Domain Helper Box */}
+                {unauthorizedDomain && (
+                  <div className="p-4 bg-amber-500/15 border border-amber-400/40 rounded-xl space-y-3 text-left">
+                    <div className="flex items-start gap-2 text-amber-300">
+                      <AlertCircle size={16} className="shrink-0 mt-0.5" />
+                      <div>
+                        <h5 className="font-bold text-xs uppercase tracking-wide">Domain Belum Diizinkan di Firebase</h5>
+                        <p className="text-[11px] text-amber-200/90 leading-relaxed mt-0.5">
+                          Firebase Auth memerlukan domain aplikasi ini didaftarkan di Authorized Domains agar login Google dapat berjalan.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-950/70 p-2.5 rounded-lg border border-white/10 flex items-center justify-between gap-2">
+                      <code className="text-[11px] font-mono text-emerald-300 truncate select-all">
+                        {unauthorizedDomain}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={handleCopyDomain}
+                        className="shrink-0 flex items-center gap-1 px-2.5 py-1 bg-white/15 hover:bg-white/25 text-white rounded text-[10px] font-bold uppercase transition-all cursor-pointer"
+                        title="Salin nama domain"
+                      >
+                        {copiedDomain ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                        <span>{copiedDomain ? 'Tersalin' : 'Salin'}</span>
+                      </button>
+                    </div>
+
+                    <div className="space-y-1.5 text-[10px] text-slate-300">
+                      <p className="font-bold text-white uppercase text-[9px] tracking-wider">Langkah Pendaftaran (1 Menit):</p>
+                      <ol className="list-decimal pl-4 space-y-1 text-slate-300">
+                        <li>Buka Firebase Console Authentication Settings.</li>
+                        <li>Gulir ke bawah ke bagian <strong>Authorized domains</strong> lalu klik <strong>Add domain</strong>.</li>
+                        <li>Tempel domain di atas lalu klik <strong>Save</strong>.</li>
+                      </ol>
+                    </div>
+
+                    <a
+                      href="https://console.firebase.google.com/project/gen-lang-client-0877581905/authentication/settings"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full flex items-center justify-center gap-1.5 py-2 px-3 bg-white/20 hover:bg-white/30 text-white font-bold text-[10px] uppercase tracking-wider rounded-lg transition-all shadow cursor-pointer text-center"
+                    >
+                      <span>Buka Firebase Console Settings</span>
+                      <ExternalLink size={12} />
+                    </a>
+
+                    <button
+                      type="button"
+                      onClick={() => { setGuideInitialStep(2); setIsGuideOpen(true); }}
+                      className="w-full flex items-center justify-center gap-1.5 py-2 px-3 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-[10px] uppercase tracking-wider rounded-lg transition-all shadow cursor-pointer text-center"
+                    >
+                      <Sparkles size={12} />
+                      <span>Buka Wizard Panduan Lengkap</span>
+                    </button>
+                  </div>
+                )}
+
+                <div className="pt-1">
+                  <button
+                    type="button"
+                    onClick={() => { setGuideInitialStep(1); setIsGuideOpen(true); }}
+                    className="w-full flex items-center justify-center gap-1.5 py-2 px-3 bg-white/10 hover:bg-white/15 text-amber-300 hover:text-amber-200 border border-amber-400/30 rounded-xl font-bold text-[10px] uppercase tracking-wider transition-all cursor-pointer"
+                  >
+                    <HelpCircle size={13} />
+                    <span>Panduan Setup Firebase &amp; OAuth Client</span>
+                  </button>
+                </div>
+
                 <div className="space-y-2">
                   <button 
                     onClick={handlePullCloud}
@@ -438,6 +541,13 @@ export default function ReceiptSettings() {
           <span className="font-bold text-sm uppercase tracking-widest">Pengaturan Berhasil Disimpan</span>
         </div>
       )}
+
+      {/* Interactive Firebase & OAuth Setup Guide Modal */}
+      <FirebaseAuthGuideModal 
+        isOpen={isGuideOpen} 
+        onClose={() => setIsGuideOpen(false)} 
+        initialStep={guideInitialStep} 
+      />
     </div>
   );
 }

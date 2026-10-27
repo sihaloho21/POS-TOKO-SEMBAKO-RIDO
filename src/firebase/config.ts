@@ -1,16 +1,23 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, initializeAuth, indexedDBLocalPersistence } from 'firebase/auth';
+import { 
+  getAuth, 
+  initializeAuth, 
+  indexedDBLocalPersistence, 
+  browserLocalPersistence, 
+  browserPopupRedirectResolver 
+} from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 
-// Use indexedDB persistence with fallback for better iframe compatibility
+// Use indexedDB persistence with fallback and popupRedirectResolver for iframe & popup compatibility
 let authInstance;
 try {
   authInstance = initializeAuth(app, {
-    persistence: indexedDBLocalPersistence
+    persistence: [indexedDBLocalPersistence, browserLocalPersistence],
+    popupRedirectResolver: browserPopupRedirectResolver
   });
 } catch {
   authInstance = getAuth(app);

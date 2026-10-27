@@ -222,6 +222,17 @@ export class SyncEngine {
     }
   }
 
+  /**
+   * Flushes and pushes all queue items, returning processedCount and remainingCount.
+   */
+  static async flushQueue(): Promise<{ processedCount: number; remainingCount: number }> {
+    const res = await this.forcePushAll();
+    return {
+      processedCount: res.success,
+      remainingCount: res.remaining
+    };
+  }
+
   static async manualRetry(queueId: number): Promise<boolean> {
     const item = await localDb.syncQueue.get(queueId);
     if (!item) return false;

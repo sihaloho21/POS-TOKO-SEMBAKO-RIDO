@@ -4,6 +4,7 @@ import {
   signInAnonymously, 
   signOut, 
   onAuthStateChanged,
+  browserPopupRedirectResolver,
   type User as FirebaseUser 
 } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
@@ -77,7 +78,7 @@ export class CloudAuthService {
   }
 
   /**
-   * Signs in using Google Popup provider.
+   * Signs in using Google Popup provider with browserPopupRedirectResolver.
    */
   static async loginWithGoogle(role: UserRole = 'OWNER', name?: string): Promise<FirebaseUser> {
     const store = useCloudAuthStore.getState();
@@ -87,15 +88,24 @@ export class CloudAuthService {
     try {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' });
-      const cred = await signInWithPopup(auth, provider);
+      // Pass browserPopupRedirectResolver explicitly to prevent auth/argument-error
+      const cred = await signInWithPopup(auth, provider, browserPopupRedirectResolver);
       
       await this.ensureUserDoc(cred.user, role, name);
       store.setFirebaseUser(cred.user);
       return cred.user;
     } catch (err: any) {
-      const msg = err?.message || 'Gagal login dengan akun Google';
-      store.setCloudError(msg);
-      throw new Error(`Gagal menghubungkan Google Cloud: ${msg}`);
+      console.error('Google Sign-In Error:', err);
+      let userFriendlyMsg = err?.message || 'Gagal login dengan akun Google';
+      if (err?.code === 'auth/popup-blocked') {
+        userFriendlyMsg = 'Jendela pop-up login Google diblokir oleh browser. Harap izinkan pop-up (Allow pop-ups) pada browser Anda.';
+      } else if (err?.code === 'auth/popup-closed-by-user') {
+        userFriendlyMsg = 'Login dibatalkan (jendela pop-up ditutup sebelum selesai).';
+      } else if (err?.code === 'auth/unauthorized-domain') {
+        userFriendlyMsg = 'Domain aplikasi ini belum terdaftar di Firebase Console > Authentication > Settings > Authorized Domains.';
+      }
+      store.setCloudError(userFriendlyMsg);
+      throw new Error(userFriendlyMsg);
     } finally {
       store.setIsAuthenticating(false);
     }
