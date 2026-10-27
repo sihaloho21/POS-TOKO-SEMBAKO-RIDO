@@ -332,10 +332,15 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
               </div>
 
               {pendingSyncCount !== undefined && pendingSyncCount > 0 && (
-                <div className="flex items-center gap-1.5 border-r border-slate-200 pr-3 text-[10px] font-bold text-blue-600 animate-pulse">
+                <button
+                  type="button"
+                  onClick={() => isOwner && onTabChange('system-health')}
+                  className={`flex items-center gap-1.5 border-r border-slate-200 pr-3 text-[10px] font-bold text-blue-600 animate-pulse ${isOwner ? 'hover:underline cursor-pointer' : ''}`}
+                  title={isOwner ? "Ada antrian data lokal. Klik untuk buka System Health & Push Sync" : "Antrian sync aktif"}
+                >
                   <RefreshCw size={12} className="animate-spin-slow" />
                   SYNC: {pendingSyncCount}
-                </div>
+                </button>
               )}
 
               {conflictCount !== undefined && conflictCount > 0 && (

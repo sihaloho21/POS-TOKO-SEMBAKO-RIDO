@@ -9,7 +9,8 @@ export class BackupService {
       'transactions', 'receivables', 'receivablePayments', 'purchases', 
       'financeEvents', 'stockMovements', 'auditLogs', 'conflicts', 
       'notifications', 'shifts', 'stockOpnames', 'digitalServices', 
-      'loyaltyEvents', 'settings', 'productCosts', 'paymentMethods'
+      'loyaltyEvents', 'settings', 'productCosts', 'paymentMethods',
+      'payLaterBills', 'payLaterInstallments'
     ];
 
     for (const table of tables) {

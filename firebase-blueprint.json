@@ -280,6 +280,8 @@
     "receivables": { "schema": "Receivable", "description": "Customer debts" },
     "receivablePayments": { "schema": "ReceivablePayment", "description": "Receivable installment payments" },
     "purchases": { "schema": "Purchase", "description": "Supplier purchases" },
+    "payLaterBills": { "schema": "Purchase", "description": "ShopeePayLater supplier bills" },
+    "payLaterInstallments": { "schema": "ReceivablePayment", "description": "PayLater installment schedules" },
     "financeEvents": { "schema": "FinanceEvent", "description": "Financial ledger" },
     "stockMovements": { "schema": "StockMovement", "description": "Inventory ledger" },
     "auditLogs": { "schema": "AuditLog", "description": "Audit trails" },

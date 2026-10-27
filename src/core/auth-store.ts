@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { User } from './types';
 import { db } from './database';
 import { auth } from '../firebase/config';
-import { signInAnonymously } from 'firebase/auth';
+import { CloudAuthService } from './services/cloud-auth-service';
 
 interface AuthState {
   currentUser: User | null;
@@ -21,14 +21,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   initializeAuth: async () => {
     try {
-      // Attempt anonymous sign-in to satisfy authenticated Firestore rules if enabled
-      if (!auth.currentUser) {
-        await signInAnonymously(auth).catch(err => {
-          console.warn('Anonymous Auth is disabled or restricted in Firebase Console:', err?.code || err?.message || err);
-        });
-      }
+      await CloudAuthService.ensureAuthenticated();
     } catch (error) {
-      console.warn('Firebase Auth initialize warning:', error);
+      console.warn('Cloud Auth initialize warning:', error);
     }
   },
 
@@ -36,23 +31,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // 1. Local Check
     const user = await db.users.filter(u => u.pinHash === pin).first();
     if (user) {
-      // 2. Firebase Check
-      await get().initializeAuth();
-      
       set({ currentUser: user, isAuthenticated: true });
       
-      // 3. Ensure user doc exists in Firestore for rules (isKasir/isOwner)
-      if (auth.currentUser) {
-        await db.syncQueue.add({
-          entityType: 'users',
-          entityId: auth.currentUser.uid, // Map local session to Firebase Auth UID
-          action: 'UPDATE',
-          payload: { ...user, userId: auth.currentUser.uid },
-          status: 'PENDING',
-          retryCount: 0,
-          createdAt: new Date().toISOString()
-        });
-      }
+      // 2. Ensure cloud session has user doc ready for Firestore rules
+      await CloudAuthService.ensureAuthenticated(user.role as any, user.name).catch(() => {});
 
       return true;
     }

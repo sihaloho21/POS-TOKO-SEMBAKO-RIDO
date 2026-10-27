@@ -129,6 +129,8 @@ service cloud.firestore {
     match /receivables/{id} { allow read: if isKasir(); allow write: if isKasir(); }
     match /receivablePayments/{id} { allow read: if isKasir(); allow write: if isKasir(); }
     match /purchases/{id} { allow read, write: if isWarehouse(); }
+    match /payLaterBills/{id} { allow read, write: if isWarehouse() || isKasir(); }
+    match /payLaterInstallments/{id} { allow read, write: if isWarehouse() || isKasir(); }
     match /conflicts/{id} { allow read, write: if isManager() || isKasir(); }
     match /notifications/{id} { allow read, write: if isKasir(); }
     match /shifts/{id} { allow read, write: if isKasir(); }

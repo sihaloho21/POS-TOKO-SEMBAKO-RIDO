@@ -25,20 +25,22 @@ import {
   Layers,
   ArrowDownRight,
   AlertOctagon,
-  FileText
+  FileText,
+  CloudUpload
 } from 'lucide-react';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { PerformanceTracker, usePerformanceTracker, type PerformanceSummary } from '@/core/services/performance-tracker';
+import { SyncEngine } from '@/core/sync-engine';
 import { useToastStore } from '@/core/toast-store';
 import { format } from 'date-fns';
 
-function HealthItem({ icon, label, status, detail, color }: any) {
+function HealthItem({ icon, label, status, detail, color, action }: any) {
   const StatusIcon = status === 'OK' || status === 'PASS' ? CheckCircle2 : status === 'WARNING' ? AlertTriangle : XCircle;
   const statusColor = status === 'OK' || status === 'PASS' ? 'text-emerald-500' : status === 'WARNING' ? 'text-amber-500' : 'text-red-500';
   const bgColor = status === 'OK' || status === 'PASS' ? 'bg-emerald-50' : status === 'WARNING' ? 'bg-amber-50' : 'bg-red-50';
 
   return (
-    <div className="flex items-center justify-between p-4 bg-white border border-slate-200 rounded-2xl shadow-sm group hover:shadow-md transition-all">
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-white border border-slate-200 rounded-2xl shadow-sm group hover:shadow-md transition-all gap-3">
       <div className="flex items-center gap-4">
         <div className={`p-3 rounded-xl ${color} bg-opacity-10 ${color.replace('text', 'bg')}`}>
           {icon}
@@ -48,9 +50,12 @@ function HealthItem({ icon, label, status, detail, color }: any) {
           <p className="text-xs text-slate-400 font-medium">{detail}</p>
         </div>
       </div>
-      <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full ${bgColor} ${statusColor} text-[10px] font-black uppercase tracking-widest`}>
-        <StatusIcon size={14} />
-        {status}
+      <div className="flex items-center gap-2 self-end sm:self-center">
+        {action}
+        <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full ${bgColor} ${statusColor} text-[10px] font-black uppercase tracking-widest`}>
+          <StatusIcon size={14} />
+          {status}
+        </div>
       </div>
     </div>
   );
@@ -64,12 +69,69 @@ export default function SystemHealth() {
   const [report, setReport] = useState<IntegrityReport | null>(null);
   const [isChecking, setIsChecking] = useState(false);
   const [isRunningBenchmark, setIsRunningBenchmark] = useState(false);
-  const [activePerfTab, setActivePerfTab] = useState<'BOTTLENECKS' | 'TRANSACTIONS' | 'SYNC_LOGS'>('BOTTLENECKS');
+  const [activePerfTab, setActivePerfTab] = useState<'BOTTLENECKS' | 'SYNC_QUEUE' | 'TRANSACTIONS' | 'SYNC_LOGS'>('BOTTLENECKS');
+  const [isPushingSync, setIsPushingSync] = useState(false);
+  const [retryingQueueId, setRetryingQueueId] = useState<number | null>(null);
+  const [isClearingSynced, setIsClearingSynced] = useState(false);
   
   const pendingSync = useLiveQuery(() => db.syncQueue.where('status').anyOf(['PENDING', 'FAILED', 'SYNCING']).count());
   const conflictCount = useLiveQuery(() => db.conflicts.where('status').equals('PENDING').count());
   const auditCount = useLiveQuery(() => db.auditLogs.count());
   const productCount = useLiveQuery(() => db.products.count());
+  const syncQueueList = useLiveQuery(() => db.syncQueue.orderBy('createdAt').reverse().limit(50).toArray());
+
+  const handleManualSyncPush = async () => {
+    if (!isOnline) {
+      addToast('Perangkat sedang offline. Sambungkan internet untuk mengunggah ke Cloud Firestore.', 'error');
+      return;
+    }
+
+    setIsPushingSync(true);
+    addToast('Memulai push antrian data lokal ke cloud Firestore (tanpa jeda interval)...', 'info');
+
+    try {
+      const res = await SyncEngine.forcePushAll();
+      if (res.total === 0) {
+        addToast('Semua data lokal telah tersinkronisasi sempurna dengan Cloud Firestore! (Antrian kosong)', 'success');
+      } else if (res.failed === 0) {
+        addToast(`Berhasil push ${res.success} data ke Cloud Firestore tanpa menunggu interval!`, 'success');
+      } else {
+        addToast(`Tersinkron ${res.success} dari ${res.total} item. (${res.failed} gagal dicoba ulang).`, 'warning');
+      }
+    } catch (err: any) {
+      addToast(err?.message || 'Gagal melakukan push sync ke cloud.', 'error');
+    } finally {
+      setIsPushingSync(false);
+    }
+  };
+
+  const handleManualRetryItem = async (queueId: number) => {
+    setRetryingQueueId(queueId);
+    try {
+      const ok = await SyncEngine.manualRetry(queueId);
+      if (ok) {
+        addToast(`Item antrian #${queueId} berhasil diunggah ke cloud!`, 'success');
+      } else {
+        addToast(`Item antrian #${queueId} gagal diunggah, silakan periksa koneksi internet.`, 'error');
+      }
+    } catch (err: any) {
+      addToast(err?.message || 'Gagal retry item.', 'error');
+    } finally {
+      setRetryingQueueId(null);
+    }
+  };
+
+  const handleClearSynced = async () => {
+    setIsClearingSynced(true);
+    try {
+      const count = await SyncEngine.clearSyncedLogs();
+      addToast(`${count} log antrian berstatus SYNCED berhasil dibersihkan dari penyimpanan lokal.`, 'info');
+    } catch (err: any) {
+      addToast('Gagal membersihkan log sync.', 'error');
+    } finally {
+      setIsClearingSynced(false);
+    }
+  };
 
   const runCheck = async () => {
     setIsChecking(true);
@@ -125,6 +187,15 @@ export default function SystemHealth() {
           <p className="text-slate-500 text-sm font-medium">Monitoring real-time latensi proses transaksi, sinkronisasi cloud, dan deteksi bottleneck sistem.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={handleManualSyncPush}
+            disabled={isPushingSync}
+            className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-500 transition-all shadow-md shadow-indigo-200 disabled:opacity-50 cursor-pointer"
+            title="Push semua antrian data lokal ke Cloud Firestore tanpa menunggu interval"
+          >
+            <CloudUpload size={16} className={isPushingSync ? 'animate-bounce' : ''} />
+            <span>{isPushingSync ? 'Mengunggah ke Cloud...' : `Push Sync Queue (${pendingSync || 0})`}</span>
+          </button>
           <button 
             onClick={runCheck}
             disabled={isChecking}
@@ -169,6 +240,17 @@ export default function SystemHealth() {
           status={pendingSync === 0 ? 'OK' : 'WARNING'}
           detail={`${pendingSync || 0} antrian tertunda (${perf.syncSuccessRate}% success rate)`}
           color="text-indigo-600"
+          action={
+            <button
+              onClick={handleManualSyncPush}
+              disabled={isPushingSync}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-[10px] font-black uppercase tracking-wider shadow-sm shadow-indigo-200 transition-all cursor-pointer disabled:opacity-50"
+              title="Push antrian data lokal ke cloud Firestore sekarang tanpa jeda interval"
+            >
+              <CloudUpload size={13} className={isPushingSync ? 'animate-bounce' : ''} />
+              <span>{isPushingSync ? 'Pushing...' : 'Push ke Cloud'}</span>
+            </button>
+          }
         />
         <HealthItem 
           icon={<AlertTriangle size={20} />}
@@ -329,7 +411,7 @@ export default function SystemHealth() {
 
         {/* Sub-Tabs for Bottlenecks, Transaction Log, and Sync Log */}
         <div className="space-y-4">
-          <div className="flex bg-slate-100 p-1.5 rounded-2xl gap-2 w-full sm:w-max">
+          <div className="flex bg-slate-100 p-1.5 rounded-2xl gap-2 w-full sm:w-max flex-wrap">
             <button
               onClick={() => setActivePerfTab('BOTTLENECKS')}
               className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
@@ -340,6 +422,17 @@ export default function SystemHealth() {
             >
               <AlertTriangle size={15} />
               <span>Diagnosa Bottleneck ({perf.bottlenecks.length})</span>
+            </button>
+            <button
+              onClick={() => setActivePerfTab('SYNC_QUEUE')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                activePerfTab === 'SYNC_QUEUE'
+                  ? 'bg-white text-indigo-600 shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Layers size={15} />
+              <span>Sync Queue Status ({pendingSync || 0})</span>
             </button>
             <button
               onClick={() => setActivePerfTab('TRANSACTIONS')}
@@ -364,6 +457,163 @@ export default function SystemHealth() {
               <span>Log Latensi Sync ({perf.recentSyncs.length})</span>
             </button>
           </div>
+
+          {/* TAB: SYNC QUEUE STATUS & MANUAL OFFLINE-FIRST PUSH */}
+          {activePerfTab === 'SYNC_QUEUE' && (
+            <div className="space-y-4">
+              <div className="bg-gradient-to-r from-indigo-900 via-slate-900 to-indigo-950 rounded-2xl p-6 text-white border border-indigo-500/20 shadow-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div className="space-y-1 max-w-xl">
+                  <div className="flex items-center gap-2">
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-indigo-500/30 text-indigo-200 border border-indigo-400/30">
+                      Local-First Architecture
+                    </span>
+                    <span className="text-xs font-bold text-slate-300">
+                      Auto-sync: tiap 10 detik
+                    </span>
+                  </div>
+                  <h4 className="text-base font-black uppercase tracking-tight text-white">
+                    Antrian Sinkronisasi Data Lokal ke Cloud Firestore
+                  </h4>
+                  <p className="text-xs text-slate-300 font-medium leading-relaxed">
+                    Setiap transaksi, barang kulakan, pergerakan stok, dan data pelanggan langsung tersimpan di database lokal browser. Klik tombol di samping untuk <strong>langsung push data ke Cloud Firestore secara instan tanpa menunggu interval waktu</strong>.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <button
+                    onClick={handleManualSyncPush}
+                    disabled={isPushingSync}
+                    className="flex items-center gap-2 px-5 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-black text-xs uppercase tracking-wider transition-all shadow-lg shadow-indigo-600/30 disabled:opacity-50 cursor-pointer"
+                  >
+                    <CloudUpload size={16} className={isPushingSync ? 'animate-bounce' : ''} />
+                    <span>{isPushingSync ? 'Sedang Mengunggah...' : `Push Semua Sekarang (${pendingSync || 0})`}</span>
+                  </button>
+
+                  <button
+                    onClick={handleClearSynced}
+                    disabled={isClearingSynced}
+                    className="flex items-center gap-1.5 px-3.5 py-3 bg-white/10 hover:bg-white/20 text-slate-200 rounded-xl font-bold text-xs uppercase tracking-wider transition-all border border-white/10 cursor-pointer"
+                    title="Bersihkan log data yang telah sukses tersinkronisasi (SYNCED)"
+                  >
+                    <Trash2 size={14} />
+                    <span>Bersihkan SYNCED</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Table of Sync Queue items */}
+              <div className="border border-slate-200 rounded-2xl overflow-hidden bg-white">
+                <div className="p-4 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
+                  <div className="flex items-center gap-2">
+                    <Layers size={16} className="text-indigo-600" />
+                    <h5 className="font-bold text-slate-800 text-xs uppercase tracking-wider">
+                      Daftar Entitas dalam Antrian (50 Terakhir)
+                    </h5>
+                  </div>
+                  <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-slate-200 text-slate-700">
+                    Total Pending: {pendingSync || 0}
+                  </span>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-50/70 text-slate-400 text-[10px] uppercase tracking-widest font-black border-b border-slate-100">
+                        <th className="px-4 py-3">Queue ID</th>
+                        <th className="px-4 py-3">Waktu Antri</th>
+                        <th className="px-4 py-3">Entitas</th>
+                        <th className="px-4 py-3">ID Dokumen</th>
+                        <th className="px-4 py-3">Aksi</th>
+                        <th className="px-4 py-3">Percobaan</th>
+                        <th className="px-4 py-3">Status</th>
+                        <th className="px-4 py-3 text-right">Opsi</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {!syncQueueList || syncQueueList.length === 0 ? (
+                        <tr>
+                          <td colSpan={8} className="px-4 py-12 text-center text-slate-400 font-bold">
+                            <div className="flex flex-col items-center gap-2">
+                              <CheckCircle2 size={32} className="text-emerald-500 opacity-60" />
+                              <p className="text-xs font-bold text-slate-600">Tidak ada data dalam antrian sync.</p>
+                              <p className="text-[11px] text-slate-400">Seluruh data lokal telah tersinkronisasi atau belum ada transaksi baru.</p>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : (
+                        syncQueueList.map((item) => {
+                          const isRetrying = retryingQueueId === item.queueId;
+                          return (
+                            <tr key={item.queueId} className="hover:bg-slate-50/70 transition-colors">
+                              <td className="px-4 py-3 font-mono font-bold text-slate-500">
+                                #{item.queueId}
+                              </td>
+                              <td className="px-4 py-3 font-mono text-[11px] text-slate-500 whitespace-nowrap">
+                                {item.createdAt ? format(new Date(item.createdAt), 'dd/MM HH:mm:ss') : '-'}
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className="text-[10px] font-black px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 uppercase font-mono">
+                                  {item.entityType}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 font-mono text-slate-700 font-bold truncate max-w-[120px]" title={item.entityId}>
+                                {item.entityId}
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className={`text-[9px] font-black px-2 py-0.5 rounded uppercase ${
+                                  item.action === 'CREATE'
+                                    ? 'bg-emerald-50 text-emerald-700'
+                                    : item.action === 'UPDATE'
+                                    ? 'bg-blue-50 text-blue-700'
+                                    : 'bg-rose-50 text-rose-700'
+                                }`}>
+                                  {item.action}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 font-mono text-slate-600">
+                                {item.retryCount}x
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className={`inline-flex items-center gap-1 text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                                  item.status === 'SYNCED'
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : item.status === 'SYNCING'
+                                    ? 'bg-blue-100 text-blue-800'
+                                    : item.status === 'FAILED'
+                                    ? 'bg-rose-100 text-rose-800'
+                                    : 'bg-amber-100 text-amber-800'
+                                }`}>
+                                  {item.status === 'SYNCING' && <RefreshCw size={10} className="animate-spin" />}
+                                  {item.status}
+                                </span>
+                                {item.lastError && (
+                                  <p className="text-[10px] text-rose-600 mt-1 max-w-[200px] truncate" title={item.lastError}>
+                                    {item.lastError}
+                                  </p>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-right">
+                                {item.status !== 'SYNCED' && (
+                                  <button
+                                    onClick={() => handleManualRetryItem(item.queueId!)}
+                                    disabled={isRetrying || isPushingSync}
+                                    className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer disabled:opacity-50"
+                                    title="Paksa upload item ini ke Cloud Firestore"
+                                  >
+                                    {isRetrying ? '...' : 'Upload'}
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* TAB 1: BOTTLENECK DIAGNOSIS CARDS */}
           {activePerfTab === 'BOTTLENECKS' && (

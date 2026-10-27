@@ -16,8 +16,19 @@ import {
   Layout,
   Database,
   Download,
-  RefreshCw
+  RefreshCw,
+  CloudDownload,
+  CloudUpload,
+  Sparkles,
+  LogIn,
+  LogOut,
+  ShieldAlert
 } from 'lucide-react';
+import { CloudSyncService } from '@/core/services/cloud-sync-service';
+import { CloudAuthService, useCloudAuthStore } from '@/core/services/cloud-auth-service';
+import { auth } from '@/firebase/config';
+import { useAuthStore } from '@/core/auth-store';
+import { useDeviceId } from '@/core/device-store';
 
 const DEFAULT_SETTINGS: ReceiptSettingsType = {
   id: 'current',
@@ -32,9 +43,80 @@ const DEFAULT_SETTINGS: ReceiptSettingsType = {
 
 export default function ReceiptSettings() {
   const { addToast } = useToastStore();
+  const { currentUser } = useAuthStore();
+  const { firebaseUser, isCloudConnected } = useCloudAuthStore();
+  const deviceId = useDeviceId();
   const [formData, setFormData] = useState<ReceiptSettingsType>(DEFAULT_SETTINGS);
   const [isSaving, setIsSaving] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [isPullingCloud, setIsPullingCloud] = useState(false);
+  const [isPushingCloud, setIsPushingCloud] = useState(false);
+  const [isConnectingGoogle, setIsConnectingGoogle] = useState(false);
+
+  const pendingQueueCount = useLiveQuery(() => db.syncQueue.where('status').anyOf(['PENDING', 'FAILED', 'SYNCING']).count());
+
+  const handleConnectGoogle = async () => {
+    setIsConnectingGoogle(true);
+    try {
+      await CloudAuthService.loginWithGoogle(currentUser?.role || 'OWNER', currentUser?.name);
+      addToast('Akun Google berhasil terhubung! Izin Cloud Firestore aktif.', 'success');
+    } catch (err: any) {
+      if (err?.message?.includes('popup-closed-by-user')) {
+        addToast('Login Google dibatalkan.', 'info');
+      } else {
+        addToast(err?.message || 'Gagal menghubungkan Google Cloud.', 'error');
+      }
+    } finally {
+      setIsConnectingGoogle(false);
+    }
+  };
+
+  const handlePullCloud = async () => {
+    setIsPullingCloud(true);
+    try {
+      if (!auth.currentUser) {
+        addToast('Menghubungkan akun Cloud...', 'info');
+        await CloudAuthService.loginWithGoogle(currentUser?.role || 'OWNER', currentUser?.name);
+      }
+      const stats = await CloudSyncService.pullAllFromCloud(currentUser?.userId, deviceId);
+      addToast(`Sinkronisasi Sukses! ${stats.totalDocs} data telah diselaraskan dari Cloud.`, 'success');
+      setTimeout(() => window.location.reload(), 1500);
+    } catch (err: any) {
+      console.error(err);
+      if (err?.message?.includes('popup-closed-by-user')) {
+        addToast('Login Google dibatalkan. Hubungkan Google agar dapat menarik data Cloud.', 'error');
+      } else {
+        addToast(err?.message || 'Gagal menarik data dari Cloud.', 'error');
+      }
+    } finally {
+      setIsPullingCloud(false);
+    }
+  };
+
+  const handlePushQueue = async () => {
+    setIsPushingCloud(true);
+    try {
+      if (!auth.currentUser) {
+        addToast('Menghubungkan akun Cloud...', 'info');
+        await CloudAuthService.loginWithGoogle(currentUser?.role || 'OWNER', currentUser?.name);
+      }
+      const res = await CloudSyncService.pushAllPendingQueue();
+      if (res.remainingCount === 0) {
+        addToast(`Seluruh ${res.processedCount} antrian berhasil diunggah ke Cloud!`, 'success');
+      } else {
+        addToast(`${res.processedCount} terunggah. Tersisa ${res.remainingCount} antrian.`, 'info');
+      }
+    } catch (err: any) {
+      console.error(err);
+      if (err?.message?.includes('popup-closed-by-user')) {
+        addToast('Login Google dibatalkan. Hubungkan Google agar dapat mengunggah antrian.', 'error');
+      } else {
+        addToast(err?.message || 'Gagal mengunggah antrian ke Cloud.', 'error');
+      }
+    } finally {
+      setIsPushingCloud(false);
+    }
+  };
 
   const existingSettings = useLiveQuery(() => db.settings.get('current'));
 
@@ -206,6 +288,67 @@ export default function ReceiptSettings() {
                   <button className="w-full flex items-center justify-center gap-2 px-6 py-4 bg-slate-100 border border-slate-200 text-slate-500 rounded-xl font-black text-xs uppercase tracking-widest hover:bg-slate-200 transition-all">
                     <RefreshCw size={18} />
                     Restore From Backup
+                  </button>
+                </div>
+              </div>
+
+              {/* Cloud Sync Multi-Perangkat */}
+              <div className="p-6 bg-gradient-to-br from-indigo-900 via-slate-900 to-indigo-950 rounded-2xl border border-indigo-500/30 text-white space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <CloudDownload size={18} className="text-indigo-400" />
+                    <h4 className="text-xs font-black uppercase tracking-tight text-white">Cloud Sync (PC & Laptop)</h4>
+                  </div>
+                  <span className="text-[9px] font-black tracking-widest text-emerald-300 bg-emerald-500/20 border border-emerald-400/30 px-2 py-0.5 rounded-md flex items-center gap-1 uppercase">
+                    <Sparkles size={9} /> Firestore
+                  </span>
+                </div>
+                
+                <p className="text-[10px] text-slate-300 font-medium leading-relaxed">
+                  Sinkronkan data secara langsung tanpa perlu kirim file ZIP. Gunakan tombol di bawah pada laptop untuk menarik data terbaru dari PC kasir.
+                </p>
+
+                {/* Cloud Auth Status */}
+                {isCloudConnected ? (
+                  <div className="p-3 bg-emerald-500/15 border border-emerald-400/30 rounded-xl flex items-center justify-between text-xs">
+                    <span className="text-emerald-300 font-bold truncate max-w-[200px]">
+                      ✓ {firebaseUser?.email || 'Cloud Terhubung'}
+                    </span>
+                    <button 
+                      onClick={() => CloudAuthService.logout()}
+                      className="text-[10px] text-slate-400 hover:text-rose-300 font-bold uppercase tracking-wider transition-colors"
+                    >
+                      Putuskan
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={handleConnectGoogle}
+                    disabled={isConnectingGoogle}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl font-black text-xs uppercase tracking-wider transition-all shadow-md cursor-pointer disabled:opacity-50"
+                  >
+                    <LogIn size={14} />
+                    <span>{isConnectingGoogle ? 'Menghubungkan...' : 'Hubungkan Akun Google'}</span>
+                  </button>
+                )}
+
+                <div className="space-y-2">
+                  <button 
+                    onClick={handlePullCloud}
+                    disabled={isPullingCloud}
+                    className="w-full flex items-center justify-center gap-2 px-6 py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-black text-xs uppercase tracking-widest transition-all shadow-md shadow-indigo-600/30 disabled:opacity-50 cursor-pointer"
+                  >
+                    <CloudDownload size={16} className={isPullingCloud ? 'animate-bounce' : ''} />
+                    <span>{isPullingCloud ? 'Menarik Data...' : 'Tarik Data dari Cloud'}</span>
+                  </button>
+
+                  <button 
+                    onClick={handlePushQueue}
+                    disabled={isPushingCloud || (pendingQueueCount === 0)}
+                    className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-white/10 hover:bg-white/15 text-slate-200 border border-white/10 rounded-xl font-black text-xs uppercase tracking-widest transition-all disabled:opacity-40 cursor-pointer"
+                  >
+                    <CloudUpload size={16} className={isPushingCloud ? 'animate-spin' : ''} />
+                    <span>{isPushingCloud ? 'Mengunggah...' : `Unggah Antrian (${pendingQueueCount || 0})`}</span>
                   </button>
                 </div>
               </div>
