@@ -527,3 +527,50 @@ export interface BonusCategory {
   createdAt: string;
   updatedAt?: string;
 }
+
+export type PrepOrderStatus = 'PENDING' | 'IN_PROGRESS' | 'READY' | 'COMPLETED' | 'CANCELLED';
+export type PrepOrderPriority = 'NORMAL' | 'URGENT' | 'VIP_EVENT';
+export type PrepPaymentStatus = 'UNPAID' | 'DOWN_PAYMENT' | 'PAID';
+export type PrepCuttingStyle = 'UTUH' | 'BELAH_BAKAR' | 'POTONG_2' | 'POTONG_3' | 'POTONG_4' | 'KERAT_GORENG' | 'FILLET' | 'CUSTOM';
+
+export interface PrepOrderItem {
+  itemId: string;
+  productName: string;
+  productId?: string;
+  weightKg: number;
+  sizeSpec: string; // e.g. "1 kg 2-3 ekor", "Jumbo (1 ekor/kg)", "4-5 ekor/kg"
+  cleanScale: boolean; // Bersihkan Sisik
+  cleanGills: boolean; // Buang Insang
+  cleanGut: boolean; // Buang Isi Perut
+  cuttingStyle: PrepCuttingStyle;
+  customCuttingNotes?: string;
+  packagingNotes?: string;
+  estimatedPrice?: number;
+}
+
+export interface PrepOrder {
+  orderId: string;
+  orderNumber: string; // e.g. "SPK-20261029-001"
+  customerId?: string;
+  customerName: string;
+  customerPhone?: string;
+  customerAddress?: string;
+  scheduledDate: string; // YYYY-MM-DD
+  scheduledTime: string; // HH:mm
+  priority: PrepOrderPriority;
+  status: PrepOrderStatus;
+  items: PrepOrderItem[];
+  totalWeightKg: number;
+  totalEstimatedPrice: number;
+  paymentStatus: PrepPaymentStatus;
+  downPaymentAmount?: number;
+  generalNotes?: string;
+  assignedStaffName?: string;
+  startedAt?: string;
+  readyAt?: string;
+  completedAt?: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+

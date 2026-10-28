@@ -74,8 +74,9 @@ export default function FirebaseAuthGuideModal({ isOpen, onClose, initialStep = 
   // Standard domains for this environment
   const recommendedDomains = [
     currentHost,
-    'ais-dev-an4p4gzyz3nefxyi333ezl-546940543044.asia-east1.run.app',
-    'ais-pre-an4p4gzyz3nefxyi333ezl-546940543044.asia-east1.run.app'
+    'ais-dev-szbpzi2lvtrsak5aozfftn-688145430200.asia-southeast1.run.app',
+    'ais-pre-szbpzi2lvtrsak5aozfftn-688145430200.asia-southeast1.run.app',
+    'localhost'
   ].filter((d, i, arr) => d && arr.indexOf(d) === i);
 
   const handleCopy = (text: string, keyName: string) => {

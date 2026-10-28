@@ -139,5 +139,6 @@ service cloud.firestore {
     match /loyaltyEvents/{id} { allow read: if isKasir(); allow write: if isKasir(); }
     match /payrolls/{id} { allow read, write: if isOwner(); }
     match /bonusCategories/{id} { allow read: if isSignedIn(); allow write: if isOwner(); }
+    match /prepOrders/{id} { allow read, write: if isKasir() || isWarehouse() || isManager() || isOwner(); }
   }
 }

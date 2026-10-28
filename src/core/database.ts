@@ -24,7 +24,8 @@ import type {
   PayLaterInstallment,
   SyncQueueItem,
   PayrollRecord,
-  BonusCategory
+  BonusCategory,
+  PrepOrder
 } from './types';
 
 export class LocalDatabase extends Dexie {
@@ -52,6 +53,7 @@ export class LocalDatabase extends Dexie {
   payLaterInstallments!: Table<PayLaterInstallment>;
   payrolls!: Table<PayrollRecord>;
   bonusCategories!: Table<BonusCategory>;
+  prepOrders!: Table<PrepOrder>;
   settings!: Table<any>;
   syncQueue!: Table<SyncQueueItem>;
 
@@ -99,6 +101,10 @@ export class LocalDatabase extends Dexie {
     this.version(11).stores({
       payrolls: 'id, employeeId, periodYear, periodMonth, paymentDate, isBackdated, createdAt',
       bonusCategories: 'id, name, isActive, isSystem'
+    });
+
+    this.version(12).stores({
+      prepOrders: 'orderId, orderNumber, customerId, scheduledDate, status, priority, paymentStatus, createdAt'
     });
   }
 }

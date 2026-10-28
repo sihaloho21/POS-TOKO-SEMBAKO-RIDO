@@ -30,7 +30,8 @@ import {
   FileText,
   ArrowUpRight,
   ArrowDownRight,
-  BadgePercent
+  BadgePercent,
+  CalendarClock
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -46,6 +47,7 @@ import {
 } from 'recharts';
 import { ProductModal } from './ProductModal';
 import { StockHistory } from './StockHistory';
+import { PrepScheduleBoard } from './prep/PrepScheduleBoard';
 import type { Product, ProductCost, StockMovement, Supplier } from '@/core/types';
 import { useAuthStore } from '@/core/auth-store';
 import { useToastStore } from '@/core/toast-store';
@@ -68,8 +70,8 @@ export default function FishManagement() {
   const { addToast } = useToastStore();
   const isOwner = currentUser?.role === 'OWNER';
   
-  // Navigation Tabs: STOCK, DEATH_LOG, WAC_HISTORY, SUPPLIERS
-  const [activeTab, setActiveTab] = useState<'STOCK' | 'DEATH_LOG' | 'WAC_HISTORY' | 'SUPPLIERS'>('STOCK');
+  // Navigation Tabs: STOCK, SCHEDULE, DEATH_LOG, WAC_HISTORY, SUPPLIERS
+  const [activeTab, setActiveTab] = useState<'STOCK' | 'SCHEDULE' | 'DEATH_LOG' | 'WAC_HISTORY' | 'SUPPLIERS'>('STOCK');
   const [search, setSearch] = useState('');
   
   // Modals
@@ -610,7 +612,7 @@ export default function FishManagement() {
       <div className="flex border-b border-slate-200 gap-2 overflow-x-auto custom-scrollbar">
         <button
           onClick={() => setActiveTab('STOCK')}
-          className={`px-5 py-3 font-black text-xs uppercase tracking-wider border-b-2 transition-all flex items-center gap-2 whitespace-nowrap ${
+          className={`px-5 py-3 font-black text-xs uppercase tracking-wider border-b-2 transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
             activeTab === 'STOCK' 
               ? 'border-blue-600 text-blue-600 bg-blue-50/50 rounded-t-2xl' 
               : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -618,6 +620,18 @@ export default function FishManagement() {
         >
           <FishIcon size={16} />
           Daftar Stok Ikan & WAC
+        </button>
+
+        <button
+          onClick={() => setActiveTab('SCHEDULE')}
+          className={`px-5 py-3 font-black text-xs uppercase tracking-wider border-b-2 transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            activeTab === 'SCHEDULE' 
+              ? 'border-indigo-600 text-indigo-600 bg-indigo-50/50 rounded-t-2xl' 
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <CalendarClock size={16} />
+          Jadwal &amp; To-Do List Olah Ikan
         </button>
 
         <button
@@ -846,6 +860,11 @@ export default function FishManagement() {
             </table>
           </div>
         </div>
+      )}
+
+      {/* TAB: JADWAL & TO-DO LIST OLAH IKAN */}
+      {activeTab === 'SCHEDULE' && (
+        <PrepScheduleBoard />
       )}
 
       {/* TAB 2: DEATH LOG & DAILY PROFIT REPORT */}

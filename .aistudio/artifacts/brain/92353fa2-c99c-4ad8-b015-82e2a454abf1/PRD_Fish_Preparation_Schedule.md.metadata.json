@@ -1,0 +1,6 @@
+{
+  "summary":  "Product Requirements Document (PRD) untuk Fitur Jadwal Pemesanan & To-Do List Pengolahan Ikan (Fish Pre-Order & Preparation Schedule) Toko Sembako Riama.\nMencakup:\n- Penjadwalan tanggal, bulan, tahun, dan target jam selesai/ambil\n- Rincian komoditas ikan (Nila, Mas, Gurame, Lele, Patin, dll) dan bobot (kg)\n- Spesifikasi grading ukuran (berapa ekor per kg)\n- Instruksi pengolahan: dibersihkan sisik/insang, dibuang kotoran, jenis potongan (potong 2/3/belah punggung/fillet), ikan hidup/oksigen\n- Status alur pengerjaan to-do list (Menunggu, Dikerjakan, Siap Ambil, Selesai)\n- Cetak tiket kerja pengerjaan lapak ikan & integrasi POS kasir",
+  "updatedAt":  "2026-10-28T15:22:54.653104365Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}
