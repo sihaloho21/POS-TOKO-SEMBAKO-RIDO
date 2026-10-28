@@ -1,0 +1,6 @@
+{
+  "summary":  "Product Requirements Document (PRD) untuk Modul Penggajian Karyawan (Payroll Management) Toko Sembako Riama.\nMencakup:\n- Penentuan Gaji Pokok & Bonus secara manual oleh Owner\n- Pengelolaan dinamis kategori bonus (Kebersihan, Penjualan Ikan, Digital, Disiplin, Lembur, dll)\n- Hak akses eksklusif role OWNER\n- Fitur input manual gaji periode lampau (Backdated Historical Payroll Entry) tanpa merusak saldo kas berjalan\n- Skema data Dexie & Firestore, skenario penggunaan, cetak slip gaji, dan tahapan rilis",
+  "updatedAt":  "2026-10-28T13:56:11.117794376Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}

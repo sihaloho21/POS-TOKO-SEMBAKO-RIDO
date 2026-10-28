@@ -30,7 +30,8 @@ import {
   Receipt,
   Store,
   CheckCircle2,
-  AlertOctagon
+  AlertOctagon,
+  Banknote
 } from 'lucide-react';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { db } from '@/core/database';
@@ -210,6 +211,7 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
     { id: 'supplier-return', label: 'Supplier Return', icon: <Archive size={18} />, disabled: !isOwner },
     { id: 'receivables', label: 'Receivables & Kasbon', icon: <CreditCard size={18} />, badge: overdueKasbonCount > 0 ? overdueKasbonCount : undefined, disabled: !isOwner },
     { id: 'finance', label: 'Finance', icon: <TrendingUp size={18} />, disabled: !isOwner },
+    ...(isOwner ? [{ id: 'payroll', label: 'Penggajian Karyawan', icon: <Banknote size={18} /> }] : []),
     { id: 'audit', label: 'Audit Log', icon: <ShieldCheck size={18} />, disabled: !isOwner },
     { id: 'conflicts', label: 'Conflicts & Approvals', icon: <AlertTriangle size={18} />, badge: totalConflictsAndApprovals, disabled: !isOwner },
     { id: 'system-health', label: 'System Health', icon: <Activity size={18} />, disabled: !isOwner },

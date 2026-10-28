@@ -22,7 +22,9 @@ import type {
   LoyaltyEvent,
   PayLaterBill,
   PayLaterInstallment,
-  SyncQueueItem 
+  SyncQueueItem,
+  PayrollRecord,
+  BonusCategory
 } from './types';
 
 export class LocalDatabase extends Dexie {
@@ -48,6 +50,8 @@ export class LocalDatabase extends Dexie {
   loyaltyEvents!: Table<LoyaltyEvent>;
   payLaterBills!: Table<PayLaterBill>;
   payLaterInstallments!: Table<PayLaterInstallment>;
+  payrolls!: Table<PayrollRecord>;
+  bonusCategories!: Table<BonusCategory>;
   settings!: Table<any>;
   syncQueue!: Table<SyncQueueItem>;
 
@@ -90,6 +94,11 @@ export class LocalDatabase extends Dexie {
 
     this.version(10).stores({
       transactions: 'transactionId, receiptNumber, type, status, cashierId, deviceId, shiftId, clientTimestamp, originalTransactionId, customerId, receivableId'
+    });
+
+    this.version(11).stores({
+      payrolls: 'id, employeeId, periodYear, periodMonth, paymentDate, isBackdated, createdAt',
+      bonusCategories: 'id, name, isActive, isSystem'
     });
   }
 }

@@ -10,7 +10,6 @@ import {
 import { SummaryCards } from './SummaryCards';
 import { LowStockBanner } from './LowStockBanner';
 import { SalesTrendChart } from './SalesTrendChart';
-import { InventoryProjectionsWidget } from './InventoryProjectionsWidget';
 import { VisualAnalyticsSection } from './VisualAnalyticsSection';
 import { OutstandingDebtWidget } from './OutstandingDebtWidget';
 import { useToastStore } from '@/core/toast-store';
@@ -87,13 +86,7 @@ export default function Dashboard({ onTabChange }: { onTabChange: (tab: string) 
 
       <VisualAnalyticsSection transactions={transactions || []} />
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2">
-          <SalesTrendChart transactions={transactions || []} />
-        </div>
-
-        <InventoryProjectionsWidget onNavigate={() => onTabChange('inventory')} />
-      </div>
+      <SalesTrendChart transactions={transactions || []} />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="bg-slate-900 p-8 rounded-3xl text-white relative overflow-hidden flex flex-col min-h-[400px]">

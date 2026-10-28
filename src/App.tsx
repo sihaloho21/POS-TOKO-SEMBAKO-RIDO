@@ -21,6 +21,7 @@ import Purchases from './app/purchases/Purchases';
 import Suppliers from './app/suppliers/Suppliers';
 import Receivables from './app/receivables/Receivables';
 import Settings from './app/settings/Settings';
+import PayrollManagement from './app/payroll/PayrollManagement';
 import TransactionHistory from './app/transactions/TransactionHistory';
 import KasirDashboard from './app/dashboard/KasirDashboard';
 import ToastContainer from './app/components/ToastContainer';
@@ -123,6 +124,8 @@ export default function App() {
         return <BundleManagement />;
       case 'finance':
         return <Finance />;
+      case 'payroll':
+        return <PayrollManagement onNavigate={setCurrentTab} />;
       case 'customers':
         return <Customers />;
       case 'digital':

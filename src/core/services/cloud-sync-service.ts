@@ -126,6 +126,10 @@ export class CloudSyncService {
    * Immediately flushes and pushes all pending sync queue items to Firestore.
    */
   static async pushAllPendingQueue(): Promise<{ processedCount: number; remainingCount: number }> {
-    return await SyncEngine.flushQueue();
+    const res = await SyncEngine.forcePushAll();
+    return {
+      processedCount: res.success,
+      remainingCount: res.remaining
+    };
   }
 }

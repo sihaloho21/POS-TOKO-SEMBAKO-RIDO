@@ -486,3 +486,44 @@ export interface PayLaterInstallment {
   moneyStorageId?: 'WARUNG' | 'IKAN' | 'UANG_DIGITAL';
   financeEventId?: string;
 }
+
+export interface PayrollBonusItem {
+  categoryId: string;
+  categoryName: string;
+  amount: number;
+  notes?: string;
+}
+
+export type PayrollPaymentMethod = 'CASH_WARUNG' | 'CASH_IKAN' | 'TRANSFER' | 'DIGITAL';
+
+export interface PayrollRecord {
+  id: string;
+  employeeId?: string;
+  employeeName: string;
+  periodMonth: number; // 1 - 12
+  periodYear: number;
+  paymentDate: string; // YYYY-MM-DD
+  baseSalary: number;
+  bonuses: PayrollBonusItem[];
+  totalBonus: number;
+  deductions: number;
+  totalAmount: number; // baseSalary + totalBonus - deductions
+  paymentMethod: PayrollPaymentMethod;
+  notes?: string;
+  isBackdated: boolean;
+  affectCashBalance: boolean;
+  financeEventId?: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BonusCategory {
+  id: string;
+  name: string;
+  description?: string;
+  isSystem: boolean;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
