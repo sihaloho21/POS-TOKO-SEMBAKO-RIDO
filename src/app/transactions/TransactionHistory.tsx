@@ -265,6 +265,43 @@ export default function TransactionHistory() {
         )}
       </div>
 
+      {/* Help Panel: Explanation of Void, Return, Refund (User Request 2) */}
+      <div className="bg-white border border-slate-200 rounded-3xl p-6 grid grid-cols-1 md:grid-cols-3 gap-6 shadow-3xs">
+        <div className="space-y-2 border-r border-slate-100 pr-2 last:border-r-0">
+          <div className="flex items-center gap-2 text-rose-600 font-black text-[10px] uppercase tracking-widest">
+            <RotateCcw size={14} />
+            VOID
+          </div>
+          <h4 className="text-xs font-black text-slate-900 uppercase tracking-tight">Pembatalan Struk Salah Input</h4>
+          <p className="text-[11px] text-slate-500 leading-relaxed font-medium">
+            Gunakan jika terjadi kesalahan fatal (salah input barang/nominal) dan struk harus dibatalkan sepenuhnya. 
+            <span className="block mt-1 font-bold text-slate-700">Efek: Stok kembali ke gudang, saldo kas laci dibatalkan (dipulihkan).</span>
+          </p>
+        </div>
+        <div className="space-y-2 border-r border-slate-100 pr-2 last:border-r-0">
+          <div className="flex items-center gap-2 text-purple-600 font-black text-[10px] uppercase tracking-widest">
+            <Undo2 size={14} />
+            RETURN
+          </div>
+          <h4 className="text-xs font-black text-slate-900 uppercase tracking-tight">Retur Barang dari Pelanggan</h4>
+          <p className="text-[11px] text-slate-500 leading-relaxed font-medium">
+            Gunakan jika pelanggan mengembalikan barang (misal: ikan mati, barang cacat). Anda dapat memilih barang spesifik dan mengatur apakah barang masuk stok lagi atau tidak.
+            <span className="block mt-1 font-bold text-slate-700">Efek: Membuat nota retur baru, stok gudang bertambah otomatis jika di-restock.</span>
+          </p>
+        </div>
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 text-emerald-600 font-black text-[10px] uppercase tracking-widest">
+            <Wallet size={14} />
+            REFUND
+          </div>
+          <h4 className="text-xs font-black text-slate-900 uppercase tracking-tight">Pengembalian Uang Pelanggan</h4>
+          <p className="text-[11px] text-slate-500 leading-relaxed font-medium">
+            Tindakan mengembalikan dana fisik ke pelanggan. Bisa dilakukan parsial (misal beli 10 bungkus, retur 2 bungkus, uang 2 bungkus dikembalikan).
+            <span className="block mt-1 font-bold text-slate-700">Efek: Saldo kas toko berkurang sesuai nominal uang yang dikembalikan ke pelanggan.</span>
+          </p>
+        </div>
+      </div>
+
       {/* Filter and Search Bar */}
       <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row gap-4 justify-between items-center">
         <div className="relative w-full md:w-96">

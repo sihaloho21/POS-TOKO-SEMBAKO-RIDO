@@ -205,6 +205,7 @@ export function PayrollInputModal({
         'success'
       );
 
+      resetForm();
       onSuccess?.();
       onClose();
     } catch (err: any) {
@@ -213,6 +214,18 @@ export function PayrollInputModal({
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const resetForm = () => {
+    setSelectedStaffId('');
+    setCustomEmployeeName('');
+    setIsManualEmployee(false);
+    setBaseSalary('');
+    setBonuses([]);
+    setDeductions('0');
+    setNotes('');
+    // Keep month/year/date as is or reset to current? Usually keep is fine for bulk entry, 
+    // but maybe reset to current is safer.
   };
 
   return (

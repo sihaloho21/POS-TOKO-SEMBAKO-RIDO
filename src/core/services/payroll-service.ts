@@ -74,6 +74,22 @@ export class PayrollService {
     };
 
     await db.bonusCategories.put(data);
+
+    // Queue for cloud sync
+    try {
+      await db.syncQueue.put({
+        entityType: 'bonusCategories',
+        entityId: id,
+        payload: data,
+        action: 'CREATE', // Merge handles CREATE/UPDATE
+        status: 'PENDING',
+        retryCount: 0,
+        createdAt: now
+      });
+    } catch (e) {
+      console.warn('Could not enqueue bonus category sync:', e);
+    }
+
     return id;
   }
 
@@ -87,6 +103,24 @@ export class PayrollService {
       isActive: !cat.isActive,
       updatedAt: new Date().toISOString()
     });
+
+    // Queue for cloud sync
+    try {
+      const updated = await db.bonusCategories.get(id);
+      if (updated) {
+        await db.syncQueue.put({
+          entityType: 'bonusCategories',
+          entityId: id,
+          payload: updated,
+          action: 'UPDATE',
+          status: 'PENDING',
+          retryCount: 0,
+          createdAt: new Date().toISOString()
+        });
+      }
+    } catch (e) {
+      console.warn('Could not enqueue bonus category toggle sync:', e);
+    }
   }
 
   /**
@@ -97,9 +131,40 @@ export class PayrollService {
     if (!cat) return;
     if (cat.isSystem) {
       // Just deactivate system categories rather than hard delete
-      await db.bonusCategories.update(id, { isActive: false, updatedAt: new Date().toISOString() });
+      const updatedAt = new Date().toISOString();
+      await db.bonusCategories.update(id, { isActive: false, updatedAt });
+      
+      try {
+        const updated = await db.bonusCategories.get(id);
+        if (updated) {
+          await db.syncQueue.put({
+            entityType: 'bonusCategories',
+            entityId: id,
+            payload: updated,
+            action: 'UPDATE',
+            status: 'PENDING',
+            retryCount: 0,
+            createdAt: updatedAt
+          });
+        }
+      } catch (e) {
+        console.warn('Could not enqueue bonus category deactivate sync:', e);
+      }
     } else {
       await db.bonusCategories.delete(id);
+      try {
+        await db.syncQueue.put({
+          entityType: 'bonusCategories',
+          entityId: id,
+          payload: { id },
+          action: 'DELETE',
+          status: 'PENDING',
+          retryCount: 0,
+          createdAt: new Date().toISOString()
+        });
+      } catch (e) {
+        console.warn('Could not enqueue bonus category delete sync:', e);
+      }
     }
   }
 
@@ -155,6 +220,19 @@ export class PayrollService {
       };
 
       await db.financeEvents.put(financeEvent);
+      try {
+        await db.syncQueue.put({
+          entityType: 'financeEvents',
+          entityId: financeEventId,
+          payload: financeEvent,
+          action: 'CREATE',
+          status: 'PENDING',
+          retryCount: 0,
+          createdAt: now
+        });
+      } catch (e) {
+        console.warn('Could not enqueue payroll finance event sync:', e);
+      }
     }
 
     const record: PayrollRecord = {
@@ -189,12 +267,9 @@ export class PayrollService {
     // Queue for cloud sync
     try {
       await db.syncQueue.put({
-        entityType: 'TRANSACTION', // Sync engine compatible
+        entityType: 'payrolls', // Sync engine compatible
         entityId: payrollId,
-        payload: {
-          type: 'PAYROLL',
-          ...record
-        },
+        payload: record,
         action: 'CREATE',
         status: 'PENDING',
         retryCount: 0,
@@ -216,9 +291,31 @@ export class PayrollService {
 
     if (record.financeEventId) {
       await db.financeEvents.delete(record.financeEventId);
+      try {
+        await db.syncQueue.put({
+          entityType: 'financeEvents',
+          entityId: record.financeEventId,
+          payload: { financeEventId: record.financeEventId },
+          action: 'DELETE',
+          status: 'PENDING',
+          retryCount: 0,
+          createdAt: new Date().toISOString()
+        });
+      } catch (e) {}
     }
 
     await db.payrolls.delete(payrollId);
+    try {
+      await db.syncQueue.put({
+        entityType: 'payrolls',
+        entityId: payrollId,
+        payload: { id: payrollId },
+        action: 'DELETE',
+        status: 'PENDING',
+        retryCount: 0,
+        createdAt: new Date().toISOString()
+      });
+    } catch (e) {}
   }
 
   /**

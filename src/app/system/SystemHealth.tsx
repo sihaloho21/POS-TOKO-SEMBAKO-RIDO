@@ -33,6 +33,7 @@ import { PerformanceTracker, usePerformanceTracker, type PerformanceSummary } fr
 import { SyncEngine } from '@/core/sync-engine';
 import { useToastStore } from '@/core/toast-store';
 import { format } from 'date-fns';
+import FirebaseAuthGuideModal from '../settings/FirebaseAuthGuideModal';
 
 function HealthItem({ icon, label, status, detail, color, action }: any) {
   const StatusIcon = status === 'OK' || status === 'PASS' ? CheckCircle2 : status === 'WARNING' ? AlertTriangle : XCircle;
@@ -73,6 +74,7 @@ export default function SystemHealth() {
   const [isPushingSync, setIsPushingSync] = useState(false);
   const [retryingQueueId, setRetryingQueueId] = useState<number | null>(null);
   const [isClearingSynced, setIsClearingSynced] = useState(false);
+  const [isAuthGuideOpen, setIsAuthGuideOpen] = useState(false);
   
   const pendingSync = useLiveQuery(() => db.syncQueue.where('status').anyOf(['PENDING', 'FAILED', 'SYNCING']).count());
   const conflictCount = useLiveQuery(() => db.conflicts.where('status').equals('PENDING').count());
@@ -216,6 +218,13 @@ export default function SystemHealth() {
               <SearchCheck size={16} />
             )}
             {isChecking ? 'Checking...' : 'Run Integrity Check'}
+          </button>
+          <button 
+            onClick={() => setIsAuthGuideOpen(true)}
+            className="flex items-center gap-2 px-5 py-2.5 bg-white text-slate-700 border border-slate-200 rounded-2xl font-bold text-xs uppercase tracking-widest hover:bg-slate-50 transition-all shadow-sm cursor-pointer"
+          >
+            <ShieldCheck size={16} className="text-amber-500" />
+            <span>Setup Cloud Auth</span>
           </button>
         </div>
       </div>
@@ -854,6 +863,12 @@ export default function SystemHealth() {
           </p>
         </div>
       </div>
+
+      {/* Firebase Auth Interactive Guide Modal (User Request 5) */}
+      <FirebaseAuthGuideModal
+        isOpen={isAuthGuideOpen}
+        onClose={() => setIsAuthGuideOpen(false)}
+      />
     </div>
   );
 }
