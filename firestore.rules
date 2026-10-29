@@ -23,28 +23,41 @@ service cloud.firestore {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
-    function getUserData(uid) {
-      return get(/databases/$(database)/documents/users/$(uid)).data;
+    function userDocExists(uid) {
+      return exists(/databases/$(database)/documents/users/$(uid));
     }
 
     function isOwner() {
-      let user = getUserData(request.auth.uid);
-      return isSignedIn() && user != null && user.role == 'OWNER';
+      return isSignedIn() && (
+        request.auth.uid == 'pmSaKqfRHRXwJqiV7DWRQvpIIhz2' ||
+        request.auth.token.email == 'ridohaloho1@gmail.com' ||
+        (userDocExists(request.auth.uid) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'OWNER')
+      );
     }
 
     function isManager() {
-      let user = getUserData(request.auth.uid);
-      return isSignedIn() && user != null && (user.role == 'MANAGER' || user.role == 'OWNER');
+      return isOwner() || (
+        isSignedIn() && userDocExists(request.auth.uid) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['MANAGER', 'OWNER']
+      );
     }
 
     function isKasir() {
-      let user = getUserData(request.auth.uid);
-      return isSignedIn() && user != null && (user.role == 'KASIR' || user.role == 'MANAGER' || user.role == 'OWNER');
+      return isOwner() || isManager() || (
+        isSignedIn() && (
+          !userDocExists(request.auth.uid) ||
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['KASIR', 'MANAGER', 'OWNER']
+        )
+      );
     }
 
     function isWarehouse() {
-      let user = getUserData(request.auth.uid);
-      return isSignedIn() && user != null && (user.role == 'WAREHOUSE' || user.role == 'MANAGER' || user.role == 'OWNER');
+      return isOwner() || isManager() || (
+        isSignedIn() && (
+          !userDocExists(request.auth.uid) ||
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['WAREHOUSE', 'MANAGER', 'OWNER']
+        )
+      );
     }
 
     // --- Validation Blueprints ---
@@ -83,9 +96,9 @@ service cloud.firestore {
     }
 
     match /products/{productId} {
-      allow read: if isKasir() || isWarehouse();
-      allow create: if isKasir() || isManager() || isWarehouse();
-      allow update: if isKasir() || isManager() || isWarehouse();
+      allow read: if isKasir() || isWarehouse() || isOwner();
+      allow create, update: if isKasir() || isManager() || isWarehouse() || isOwner();
+      allow delete: if isKasir() || isManager() || isWarehouse() || isOwner();
     }
 
     match /productCosts/{productId} {
@@ -93,9 +106,9 @@ service cloud.firestore {
     }
 
     match /customers/{customerId} {
-      allow read: if isKasir();
-      allow create: if isKasir() && isValidId(customerId);
-      allow update: if isKasir() && isValidId(customerId);
+      allow read: if isKasir() || isOwner();
+      allow create, update: if isKasir() && isValidId(customerId);
+      allow delete: if isKasir() || isOwner();
     }
 
     match /transactions/{transactionId} {

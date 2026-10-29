@@ -133,6 +133,15 @@ export default function SystemHealth() {
     }
   };
 
+  const handleDeleteQueueItem = async (queueId: number) => {
+    try {
+      await SyncEngine.deleteQueueItem(queueId);
+      addToast(`Item antrian #${queueId} telah dihapus dari antrian.`, 'info');
+    } catch (err: any) {
+      addToast('Gagal menghapus item antrian: ' + (err?.message || ''), 'error');
+    }
+  };
+
   const runCheck = async () => {
     setIsChecking(true);
     try {
@@ -593,16 +602,25 @@ export default function SystemHealth() {
                                 )}
                               </td>
                               <td className="px-4 py-3 text-right">
-                                {item.status !== 'SYNCED' && (
+                                <div className="flex items-center justify-end gap-1.5">
+                                  {item.status !== 'SYNCED' && (
+                                    <button
+                                      onClick={() => handleManualRetryItem(item.queueId!)}
+                                      disabled={isRetrying || isPushingSync}
+                                      className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer disabled:opacity-50"
+                                      title="Paksa upload item ini ke Cloud Firestore"
+                                    >
+                                      {isRetrying ? '...' : 'Upload'}
+                                    </button>
+                                  )}
                                   <button
-                                    onClick={() => handleManualRetryItem(item.queueId!)}
-                                    disabled={isRetrying || isPushingSync}
-                                    className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer disabled:opacity-50"
-                                    title="Paksa upload item ini ke Cloud Firestore"
+                                    onClick={() => handleDeleteQueueItem(item.queueId!)}
+                                    className="p-1 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-md transition-colors cursor-pointer"
+                                    title="Hapus dari antrian lokal"
                                   >
-                                    {isRetrying ? '...' : 'Upload'}
+                                    <Trash2 size={13} />
                                   </button>
-                                )}
+                                </div>
                               </td>
                             </tr>
                           );

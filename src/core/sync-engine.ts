@@ -255,4 +255,8 @@ export class SyncEngine {
     }
     return ids.length;
   }
+
+  static async deleteQueueItem(queueId: number): Promise<void> {
+    await localDb.syncQueue.delete(queueId);
+  }
 }
