@@ -23,6 +23,7 @@ import Receivables from './app/receivables/Receivables';
 import Settings from './app/settings/Settings';
 import PayrollManagement from './app/payroll/PayrollManagement';
 import TransactionHistory from './app/transactions/TransactionHistory';
+import ConsignmentPage from './app/consignment/ConsignmentPage';
 import KasirDashboard from './app/dashboard/KasirDashboard';
 import ToastContainer from './app/components/ToastContainer';
 import { ErrorBoundary } from './app/components/ErrorBoundary';
@@ -80,6 +81,7 @@ export default function App() {
     'audit',
     'conflicts',
     'system-health',
+    'consignment',
     'settings'
   ];
 
@@ -150,6 +152,8 @@ export default function App() {
         return <AuditLog />;
       case 'system-health':
         return <SystemHealth />;
+      case 'consignment':
+        return <ConsignmentPage />;
       case 'settings':
         return <Settings />;
       default:

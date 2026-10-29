@@ -25,7 +25,10 @@ import type {
   SyncQueueItem,
   PayrollRecord,
   BonusCategory,
-  PrepOrder
+  PrepOrder,
+  ConsignmentItem,
+  ConsignmentArrival,
+  ConsignmentSettlement
 } from './types';
 
 export class LocalDatabase extends Dexie {
@@ -56,6 +59,9 @@ export class LocalDatabase extends Dexie {
   prepOrders!: Table<PrepOrder>;
   settings!: Table<any>;
   syncQueue!: Table<SyncQueueItem>;
+  consignmentItems!: Table<ConsignmentItem>;
+  consignmentArrivals!: Table<ConsignmentArrival>;
+  consignmentSettlements!: Table<ConsignmentSettlement>;
 
   constructor() {
     super('HarapanJayaDB');
@@ -105,6 +111,12 @@ export class LocalDatabase extends Dexie {
 
     this.version(12).stores({
       prepOrders: 'orderId, orderNumber, customerId, scheduledDate, status, priority, paymentStatus, createdAt'
+    });
+
+    this.version(13).stores({
+      consignmentItems: 'id, supplierId, status',
+      consignmentArrivals: 'id, itemId, timestamp',
+      consignmentSettlements: 'id, itemId, timestamp'
     });
   }
 }

@@ -573,4 +573,36 @@ export interface PrepOrder {
   createdAt: string;
   updatedAt: string;
 }
+export interface ConsignmentItem {
+  id: string;
+  name: string;
+  supplierId: string;
+  costPrice: number; // Harga modal dari sales (e.g. 1500)
+  salePrice: number; // Harga ecer (e.g. 2000)
+  currentStock: number;
+  totalSold: number;
+  status: 'ACTIVE' | 'INACTIVE';
+  lastSettlementAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
 
+export interface ConsignmentArrival {
+  id: string;
+  itemId: string;
+  qty: number;
+  timestamp: string;
+}
+
+export interface ConsignmentSettlement {
+  id: string;
+  itemId: string;
+  previousStock: number;
+  addedStock: number; // Stock that arrived in this period
+  remainingStock: number;
+  soldQty: number;
+  totalPayment: number; // soldQty * costPrice
+  totalProfit: number; // soldQty * (salePrice - costPrice)
+  financeEventId: string;
+  timestamp: string;
+}

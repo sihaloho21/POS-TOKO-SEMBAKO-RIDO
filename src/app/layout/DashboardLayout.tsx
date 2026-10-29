@@ -214,6 +214,7 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
     ...(isOwner ? [{ id: 'payroll', label: 'Penggajian Karyawan', icon: <Banknote size={18} /> }] : []),
     { id: 'audit', label: 'Audit Log', icon: <ShieldCheck size={18} />, disabled: !isOwner },
     { id: 'conflicts', label: 'Conflicts & Approvals', icon: <AlertTriangle size={18} />, badge: totalConflictsAndApprovals, disabled: !isOwner },
+    { id: 'consignment', label: 'Titipan Barang (Bagi Hasil)', icon: <TrendingUp size={18} />, disabled: !isOwner },
     { id: 'system-health', label: 'System Health', icon: <Activity size={18} />, disabled: !isOwner },
     { id: 'settings', label: 'Settings', icon: <Settings size={18} />, disabled: !isOwner },
   ];

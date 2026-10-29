@@ -267,6 +267,39 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["entityType", "entityId", "action", "payload", "status", "createdAt"]
+    },
+    "ConsignmentItem": {
+      "title": "Consignment Item",
+      "description": "Items held on consignment",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "supplierId": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["ACTIVE", "INACTIVE"] }
+      },
+      "required": ["id", "supplierId", "status"]
+    },
+    "ConsignmentArrival": {
+      "title": "Consignment Arrival",
+      "description": "Records of consignment stock arrival",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "itemId": { "type": "string", "maxLength": 128 },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "itemId", "timestamp"]
+    },
+    "ConsignmentSettlement": {
+      "title": "Consignment Settlement",
+      "description": "Records of consignment payments/settlements",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "itemId": { "type": "string", "maxLength": 128 },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "itemId", "timestamp"]
     }
   },
   "firestore": {
@@ -291,6 +324,9 @@
     "stockOpnames": { "schema": "StockOpname", "description": "Stock takes" },
     "digitalServices": { "schema": "DigitalService", "description": "Digital service records" },
     "loyaltyEvents": { "schema": "LoyaltyEvent", "description": "Loyalty program history" },
-    "syncQueue": { "schema": "SyncQueueItem", "description": "Cloud sync queue" }
+    "syncQueue": { "schema": "SyncQueueItem", "description": "Cloud sync queue" },
+    "consignmentItems": { "schema": "ConsignmentItem", "description": "Consignment items" },
+    "consignmentArrivals": { "schema": "ConsignmentArrival", "description": "Consignment stock arrivals" },
+    "consignmentSettlements": { "schema": "ConsignmentSettlement", "description": "Consignment settlements" }
   }
 }

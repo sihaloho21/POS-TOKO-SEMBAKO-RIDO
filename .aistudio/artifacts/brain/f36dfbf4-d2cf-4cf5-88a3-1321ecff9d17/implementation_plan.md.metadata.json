@@ -1,6 +1,6 @@
 {
-  "summary":  "PRD for ShopeePayLater integration in Procurement module. Includes tenor selection (1x or 3x installments), automatic due date calculation (25th of next month), and dedicated tracking of bills and repayments.",
-  "updatedAt":  "2026-10-26T11:56:00.507127283Z",
+  "summary":  "PRD for the updated Sales Consignment (Titipan Barang) feature with reset logic and profit tracking.",
+  "updatedAt":  "2026-10-29T09:16:00.525360466Z",
   "requestFeedback":  true,
   "userFacing":  true
 }
