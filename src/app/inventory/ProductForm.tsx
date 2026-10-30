@@ -242,6 +242,7 @@ export function ProductForm({ product, initialProductType, initialBaseUnit, onSa
               }}
             >
               <option value="SEMBAKO">SEMBAKO / WARUNG</option>
+              <option value="FRUIT">BUAH SEGAR (KG / PCS) 🍎</option>
               <option value="FISH">IKAN HIDUP / SEGAR (KG)</option>
               <option value="GENERAL">UMUM / LAINNYA</option>
             </select>

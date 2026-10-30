@@ -417,7 +417,7 @@ export default function Inventory() {
                 ))}
               </div>
               <div className="flex bg-white border border-slate-200 rounded-xl p-1 shadow-sm overflow-hidden shrink-0">
-                {['ALL', 'SEMBAKO', 'FISH', 'BUNDLE'].map(type => (
+                {['ALL', 'SEMBAKO', 'FRUIT', 'FISH', 'BUNDLE'].map(type => (
                   <button
                     key={type}
                     onClick={() => setFilterType(type)}
@@ -425,7 +425,7 @@ export default function Inventory() {
                       filterType === type ? 'bg-blue-600 text-white shadow-lg' : 'bg-transparent text-slate-500 hover:text-slate-700'
                     }`}
                   >
-                    {type}
+                    {type === 'FRUIT' ? 'BUAH 🍎' : type}
                   </button>
                 ))}
               </div>

@@ -98,7 +98,7 @@ service cloud.firestore {
     match /products/{productId} {
       allow read: if isKasir() || isWarehouse() || isOwner();
       allow create, update: if isKasir() || isManager() || isWarehouse() || isOwner();
-      allow delete: if isKasir() || isManager() || isWarehouse() || isOwner();
+      allow delete: if isOwner();
     }
 
     match /productCosts/{productId} {

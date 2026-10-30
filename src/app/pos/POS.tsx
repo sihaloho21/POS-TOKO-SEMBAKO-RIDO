@@ -38,7 +38,8 @@ import {
   Sparkles,
   Wallet,
   Calendar,
-  History
+  History,
+  Apple
 } from 'lucide-react';
 import { addDays, format } from 'date-fns';
 import { CameraBarcodeScanner } from '@/components/CameraBarcodeScanner';
@@ -48,7 +49,7 @@ import { SalesHistory } from './SalesHistory';
 import { LoyaltyEngine } from '@/core/loyalty-engine';
 import { formatMultiUnitBreakdown, getProductAvailableUnits } from '@/core/utils/unit-helper';
 import { motion, AnimatePresence } from 'motion/react';
-import type { Product, TransactionItem, Customer, Transaction, Bundle, GajianTempoType } from '@/core/types';
+import type { Product, TransactionItem, Customer, Transaction, Bundle, GajianTempoType, MoneyStorageId } from '@/core/types';
 import { calculateGajianDueDate, formatGajianDueDateLabel } from '@/core/utils/gajian-tempo';
 import { v4 as uuidv4 } from 'uuid';
 import { ShiftService } from '@/core/services/shift-service';
@@ -64,34 +65,106 @@ import ClockInModal from '@/app/shift/ClockInModal';
 
 export function WeightModal({ product, onConfirm, onClose }: { product: Product, onConfirm: (kg: number) => void, onClose: () => void }) {
   const [weight, setWeight] = useState('');
+  const isFruit = product.productType === 'FRUIT' || product.categoryId === 'BUAH';
+  const numericWeight = Number(weight) || 0;
+  const estimatedSubtotal = Math.round(numericWeight * product.normalPrice);
+
+  const addPreset = (delta: number) => {
+    const cur = Number(weight) || 0;
+    const next = Math.max(0, Number((cur + delta).toFixed(2)));
+    setWeight(next.toString());
+  };
+
+  const setExact = (val: number) => {
+    setWeight(val.toString());
+  };
   
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-      <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white rounded-3xl p-8 w-full max-w-sm shadow-2xl">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white"><Weight size={20} /></div>
+      <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white rounded-3xl p-6 sm:p-8 w-full max-w-sm shadow-2xl border border-slate-200">
+        <div className="flex items-center gap-3 mb-4">
+          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-white shadow-md ${isFruit ? 'bg-emerald-600 shadow-emerald-200' : 'bg-blue-600 shadow-blue-200'}`}>
+            {isFruit ? <Apple size={24} /> : <Weight size={24} />}
+          </div>
           <div>
-            <h3 className="font-black text-slate-900 uppercase tracking-tight">{product.name}</h3>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Masukkan Berat (KG)</p>
+            <h3 className="font-black text-slate-900 text-base uppercase tracking-tight">{product.name}</h3>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+              Timbangan Kasir ({product.baseUnit || 'KG'}) • Rp {product.normalPrice.toLocaleString()}/kg
+            </p>
           </div>
         </div>
-        <input 
-          autoFocus
-          type="number" step="0.01"
-          className="w-full text-4xl font-black text-center py-6 bg-slate-50 border-2 border-slate-200 rounded-2xl focus:border-blue-500 outline-none tabular-nums mb-6"
-          placeholder="0.00"
-          value={weight ?? ''}
-          onChange={(e) => setWeight(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && onConfirm(Number(weight))}
-        />
-        <div className="flex gap-3">
-          <button onClick={onClose} className="flex-1 py-4 font-bold text-slate-500 uppercase tracking-widest hover:bg-slate-50 rounded-xl transition-all">Batal</button>
-          <button 
-            onClick={() => onConfirm(Number(weight))}
-            disabled={!weight || Number(weight) <= 0}
-            className="flex-1 py-4 bg-blue-600 text-white font-black uppercase tracking-widest rounded-xl hover:bg-blue-500 shadow-lg shadow-blue-200 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none transition-all"
+
+        {/* Input Berat */}
+        <div className="relative mb-3">
+          <input 
+            autoFocus
+            type="number" 
+            step="0.01"
+            className="w-full text-4xl font-black text-center py-4 bg-slate-50 border-2 border-slate-200 rounded-2xl focus:border-emerald-500 outline-none tabular-nums"
+            placeholder="0.00"
+            value={weight ?? ''}
+            onChange={(e) => setWeight(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && numericWeight > 0 && onConfirm(numericWeight)}
+          />
+          <span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm font-black text-slate-400">
+            {product.baseUnit || 'KG'}
+          </span>
+        </div>
+
+        {/* Live Subtotal Preview */}
+        {numericWeight > 0 && (
+          <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl mb-4 text-center">
+            <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider block">Estimasi Total Harga</span>
+            <span className="text-xl font-black text-emerald-800 tabular-nums">
+              Rp {estimatedSubtotal.toLocaleString()}
+            </span>
+          </div>
+        )}
+
+        {/* Quick Timbangan Presets */}
+        <div className="mb-4 space-y-1.5">
+          <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">Tombol Pintas Berat Cepat:</span>
+          <div className="grid grid-cols-4 gap-1.5">
+            {[0.25, 0.5, 1.0, 2.0].map((kg) => (
+              <button
+                key={kg}
+                type="button"
+                onClick={() => addPreset(kg)}
+                className="py-1.5 bg-slate-100 hover:bg-emerald-100 hover:text-emerald-800 text-slate-700 rounded-lg text-xs font-black transition-colors"
+              >
+                +{kg} kg
+              </button>
+            ))}
+          </div>
+          <div className="grid grid-cols-4 gap-1.5 pt-1">
+            {[0.5, 1.0, 1.5, 2.0].map((kg) => (
+              <button
+                key={`exact-${kg}`}
+                type="button"
+                onClick={() => setExact(kg)}
+                className="py-1 bg-slate-50 hover:bg-slate-200 text-slate-600 rounded-lg text-[10px] font-bold transition-colors"
+              >
+                ={kg} kg
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => setWeight('')}
+            className="w-full py-1 text-slate-400 hover:text-rose-600 text-[10px] font-bold transition-colors text-center"
           >
-            Konfirmasi
+            Reset / Bersihkan (C)
+          </button>
+        </div>
+
+        <div className="flex gap-2">
+          <button onClick={onClose} className="flex-1 py-3 font-bold text-xs text-slate-500 uppercase tracking-widest hover:bg-slate-50 rounded-xl transition-all">Batal</button>
+          <button 
+            onClick={() => onConfirm(numericWeight)}
+            disabled={!weight || numericWeight <= 0}
+            className="flex-1 py-3 bg-emerald-600 text-white font-black text-xs uppercase tracking-widest rounded-xl hover:bg-emerald-500 shadow-lg shadow-emerald-200 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none transition-all cursor-pointer"
+          >
+            Masukkan Cart
           </button>
         </div>
       </motion.div>
@@ -103,6 +176,7 @@ export default function POS() {
   const { currentUser } = useAuthStore();
   const { addToast } = useToastStore();
   const [search, setSearch] = useState('');
+  const [selectedCategoryTab, setSelectedCategoryTab] = useState<'ALL' | 'FRUIT' | 'FISH' | 'BUNDLE' | 'SEMBAKO'>('ALL');
   const [cart, setCart] = useState<TransactionItem[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
@@ -110,7 +184,7 @@ export default function POS() {
   
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [transactionType, setTransactionType] = useState<'SALE' | 'GAJIAN'>('SALE');
-  const [moneyStorageId, setMoneyStorageId] = useState<'WARUNG' | 'IKAN' | 'UANG_DIGITAL'>('WARUNG');
+  const [moneyStorageId, setMoneyStorageId] = useState<MoneyStorageId>('WARUNG');
   const [activeGajianTempoType, setActiveGajianTempoType] = useState<GajianTempoType>('TANGGAL_6_7');
   const [activeGajianDay, setActiveGajianDay] = useState<number>(7);
   
@@ -257,15 +331,22 @@ export default function POS() {
   }, [cart, selectedCustomer, transactionType, isPaymentModalOpen, isQuickAddProductOpen, isHeldModalOpen, isGajianApprovalOpen, isSalesHistoryModalOpen, weightProduct, overrideStockPrompt, isQuickSaleOpen, isClockInModalOpen]);
 
   const products = useLiveQuery(
-    () => db.products.filter(p => 
-      p.status === 'ACTIVE' && (
+    () => db.products.filter(p => {
+      if (p.status !== 'ACTIVE') return false;
+      if (selectedCategoryTab === 'FRUIT' && p.productType !== 'FRUIT') return false;
+      if (selectedCategoryTab === 'FISH' && p.productType !== 'FISH') return false;
+      if (selectedCategoryTab === 'BUNDLE' && p.productType !== 'BUNDLE') return false;
+      if (selectedCategoryTab === 'SEMBAKO' && (p.productType === 'FRUIT' || p.productType === 'FISH' || p.productType === 'BUNDLE')) return false;
+
+      return (
+        !search ||
         p.name.toLowerCase().includes(search.toLowerCase()) || 
         p.barcode.includes(search) ||
         !!(p.sku && p.sku.includes(search)) ||
         Boolean(p.conversionRules && p.conversionRules.some(r => r.barcode && r.barcode.includes(search)))
-      )
-    ).toArray(),
-    [search]
+      );
+    }).toArray(),
+    [search, selectedCategoryTab]
   );
 
   const customers = useLiveQuery(() => db.customers.toArray());
@@ -382,7 +463,8 @@ export default function POS() {
   }, [selectedCustomer, transactionType]);
 
   const addToCart = (product: Product, qtyOrKg?: number, preferredUnit?: string) => {
-    if (product.productType === 'FISH' && qtyOrKg === undefined) {
+    const isWeightedItem = product.productType === 'FISH' || product.productType === 'FRUIT' || (product.baseUnit === 'KG' && !product.productType);
+    if (isWeightedItem && qtyOrKg === undefined) {
       setWeightProduct(product);
       return;
     }
@@ -401,7 +483,8 @@ export default function POS() {
     const existing = cart.find(item => item.productId === product.productId && item.unit === targetUnit);
     
     if (existing) {
-      const newTotalQty = product.productType === 'FISH'
+      const isWeighted = product.productType === 'FISH' || product.productType === 'FRUIT' || targetUnit === 'KG';
+      const newTotalQty = isWeighted
         ? Number((existing.quantity + quantity).toFixed(2))
         : existing.quantity + quantity;
       setCart(cart.map(item => 
@@ -426,7 +509,9 @@ export default function POS() {
       }]);
     }
 
-    if (product.productType === 'FISH' && cart.length === 0) {
+    if (product.productType === 'FRUIT' && (cart.length === 0 || moneyStorageId === 'WARUNG')) {
+      setMoneyStorageId('BUAH');
+    } else if (product.productType === 'FISH' && (cart.length === 0 || moneyStorageId === 'WARUNG')) {
       setMoneyStorageId('IKAN');
     }
     
@@ -436,7 +521,8 @@ export default function POS() {
   const updateQuantity = (productId: string, delta: number, unit?: string) => {
     setCart(cart.map(item => {
       if (item.productId === productId && (!unit || item.unit === unit)) {
-        const step = item.unit === 'KG' ? (delta > 0 ? 0.5 : -0.5) : delta;
+        const isKg = item.unit === 'KG';
+        const step = isKg ? (delta > 0 ? 0.25 : -0.25) : delta;
         const newQty = Math.max(0, Number((item.quantity + step).toFixed(2)));
         if (newQty <= 0) return null;
         return { ...item, quantity: newQty, subtotal: Math.round(newQty * item.unitPrice) };
@@ -1315,6 +1401,32 @@ export default function POS() {
                 )}
               </div>
             )}
+            {/* Quick Category Filter Tabs */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 pt-1 border-t border-slate-100 custom-scrollbar">
+              {[
+                { id: 'ALL', label: 'Semua', icon: '🛒' },
+                { id: 'FRUIT', label: 'Buah Segar', icon: '🍎' },
+                { id: 'FISH', label: 'Ikan Hidup', icon: '🐟' },
+                { id: 'BUNDLE', label: 'Paket Sembako', icon: '📦' },
+                { id: 'SEMBAKO', label: 'Sembako & Toko', icon: '🌾' },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setSelectedCategoryTab(tab.id as any)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-black shrink-0 flex items-center gap-1.5 transition-all cursor-pointer ${
+                    selectedCategoryTab === tab.id
+                      ? tab.id === 'FRUIT'
+                        ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-200'
+                        : 'bg-blue-600 text-white shadow-sm shadow-blue-200'
+                      : 'bg-white hover:bg-slate-100 text-slate-600 border border-slate-200'
+                  }`}
+                >
+                  <span>{tab.icon}</span>
+                  <span>{tab.label}</span>
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Product Grid - Compact High-Density View */}
@@ -1323,6 +1435,7 @@ export default function POS() {
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-2">
                 {products.map((product) => {
                   const isBundle = product.productType === 'BUNDLE';
+                  const isFruit = product.productType === 'FRUIT' || product.categoryId === 'BUAH';
                   const availableBundles = isBundle ? (bundleStocks[product.productId] ?? 0) : 0;
 
                   return (
@@ -1337,16 +1450,24 @@ export default function POS() {
                           addToCart(product);
                         }
                       }}
-                      className="group flex flex-col p-2 bg-white border border-slate-100 rounded-xl hover:border-blue-500 hover:shadow-md transition-all text-left relative overflow-hidden cursor-pointer select-none"
+                      className="group flex flex-col p-2 bg-white border border-slate-100 rounded-xl hover:border-emerald-500 hover:shadow-md transition-all text-left relative overflow-hidden cursor-pointer select-none"
                     >
-                      {isBundle && (
+                      {isBundle ? (
                         <span className="absolute top-1.5 right-1.5 text-[7px] font-black uppercase tracking-wider bg-indigo-600 text-white px-1 py-0.5 rounded shadow-sm z-10">
                           PAKET
                         </span>
-                      )}
+                      ) : isFruit ? (
+                        <span className="absolute top-1.5 right-1.5 text-[7px] font-black uppercase tracking-wider bg-emerald-600 text-white px-1 py-0.5 rounded shadow-sm z-10">
+                          BUAH
+                        </span>
+                      ) : null}
 
-                      <div className="w-full aspect-square bg-slate-50 rounded-lg mb-1.5 flex items-center justify-center text-slate-300 group-hover:text-blue-500 transition-colors">
-                        {product.productType === 'FISH' ? (
+                      <div className="w-full aspect-square bg-slate-50 rounded-lg mb-1.5 flex items-center justify-center text-slate-300 group-hover:text-emerald-500 transition-colors">
+                        {isFruit ? (
+                          <span className="text-2xl">
+                            {product.name.toLowerCase().includes('jeruk') ? '🍊' : product.name.toLowerCase().includes('mangga') ? '🥭' : '🍎'}
+                          </span>
+                        ) : product.productType === 'FISH' ? (
                           <Weight size={24} />
                         ) : isBundle ? (
                           <Layers size={24} className="text-indigo-500 group-hover:text-indigo-600" />
@@ -1994,6 +2115,37 @@ export default function POS() {
                 )}
               </div>
             )}
+
+            {/* Money Storage Destination Selector */}
+            <div className="mb-4 pt-3 border-t border-slate-100">
+              <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1.5">
+                Alokasi Kantong Kas (Storage Keuangan):
+              </label>
+              <div className="grid grid-cols-4 gap-1.5">
+                {[
+                  { id: 'WARUNG', label: 'Kas Warung', icon: '🏪' },
+                  { id: 'BUAH', label: 'Kas Buah', icon: '🍎' },
+                  { id: 'IKAN', label: 'Kas Ikan', icon: '🐟' },
+                  { id: 'UANG_DIGITAL', label: 'Digital', icon: '📱' },
+                ].map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => setMoneyStorageId(s.id as MoneyStorageId)}
+                    className={`py-2 px-1 rounded-xl text-[10px] font-black border text-center transition-all cursor-pointer ${
+                      moneyStorageId === s.id
+                        ? s.id === 'BUAH'
+                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm shadow-emerald-200'
+                          : 'bg-blue-600 text-white border-blue-600 shadow-sm shadow-blue-200'
+                        : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span className="block text-xs">{s.icon}</span>
+                    <span className="truncate block mt-0.5">{s.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
 
             <div className="flex gap-2">
               <button

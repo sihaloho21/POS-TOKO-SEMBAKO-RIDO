@@ -99,8 +99,20 @@ export default function ClockOutModal({ isOpen, shiftId, onClose, onSuccess }: C
 
   if (!isOpen) return null;
   
-  // Only show the empty state if we are NOT in success mode (where we show the share modal)
-  if (!isSuccess && (!targetShift || !metrics)) {
+  if (!targetShift || !metrics) {
+    if (isSuccess && closingMetricsForShare) {
+      return (
+        <ShiftClosingShareModal
+          isOpen={showShareModal}
+          metrics={closingMetricsForShare}
+          onClose={() => {
+            setShowShareModal(false);
+            if (onSuccess) onSuccess();
+            onClose();
+          }}
+        />
+      );
+    }
     return (
       <div className="fixed inset-0 z-[260] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
         <div className="bg-white p-8 rounded-3xl flex flex-col items-center gap-4">

@@ -29,7 +29,7 @@ export default function StockOpname() {
   const [isCreating, setIsCreating] = useState(false);
   const [activeOpnameId, setActiveOpnameId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  const [filterType, setFilterType] = useState<'ALL' | 'FISH' | 'SEMBAKO'>('ALL');
+  const [filterType, setFilterType] = useState<'ALL' | 'FRUIT' | 'FISH' | 'SEMBAKO'>('ALL');
   const [isFinalizeModalOpen, setIsFinalizeModalOpen] = useState(false);
   const [ownerPin, setOwnerPin] = useState('');
   const [pinError, setPinError] = useState('');
@@ -178,8 +178,17 @@ export default function StockOpname() {
               </button>
               <button
                 type="button"
+                onClick={() => setFilterType('FRUIT')}
+                className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                  filterType === 'FRUIT' ? 'bg-teal-600 text-white shadow-xs' : 'bg-white text-slate-600 border border-slate-200'
+                }`}
+              >
+                Buah Segar (KG) 🍎
+              </button>
+              <button
+                type="button"
                 onClick={() => setFilterType('FISH')}
-                className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all ${
+                className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
                   filterType === 'FISH' ? 'bg-emerald-600 text-white shadow-xs' : 'bg-white text-slate-600 border border-slate-200'
                 }`}
               >

@@ -1,12 +1,13 @@
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '../database';
-import type { FinanceEvent, ReceivablePayment, SyncQueueItem } from '../types';
+import type { FinanceEvent, ReceivablePayment, SyncQueueItem, MoneyStorageId } from '../types';
 import { AuditEngine } from '../audit-engine';
 
 export interface LedgerBalances {
   WARUNG: number;
   IKAN: number;
   UANG_DIGITAL: number;
+  BUAH: number;
   TOTAL: number;
   [key: string]: number;
 }
@@ -20,7 +21,7 @@ export interface RecordReceivablePaymentParams {
   receivableId: string;
   amount: number;
   paymentMethodId: string;
-  moneyStorageId: 'WARUNG' | 'IKAN' | 'UANG_DIGITAL';
+  moneyStorageId: MoneyStorageId;
   paymentDate?: string;
   notes?: string;
 }
@@ -36,7 +37,7 @@ export interface RecordReceivablePaymentResult {
 
 export interface AddFinanceTransactionParams {
   amount: number;
-  storageId: 'WARUNG' | 'IKAN' | 'UANG_DIGITAL';
+  storageId: MoneyStorageId;
   direction?: 'IN' | 'OUT';
   referenceId: string;
   referenceType?: FinanceEvent['referenceType'];
@@ -113,8 +114,8 @@ export class FinanceService {
   }
 
   /**
-   * Computes current derived ledger balances across all three money storages
-   * (WARUNG, IKAN, UANG_DIGITAL) directly from immutable FinanceEvent entries.
+   * Computes current derived ledger balances across all money storages
+   * (WARUNG, IKAN, UANG_DIGITAL, BUAH) directly from immutable FinanceEvent entries.
    */
   static async getLedgerBalances(): Promise<LedgerBalances> {
     const allEvents = await db.financeEvents.toArray();
@@ -122,6 +123,7 @@ export class FinanceService {
       WARUNG: 0,
       IKAN: 0,
       UANG_DIGITAL: 0,
+      BUAH: 0,
       TOTAL: 0
     };
 
@@ -134,7 +136,7 @@ export class FinanceService {
       }
     }
 
-    balances.TOTAL = balances.WARUNG + balances.IKAN + balances.UANG_DIGITAL;
+    balances.TOTAL = (balances.WARUNG || 0) + (balances.IKAN || 0) + (balances.UANG_DIGITAL || 0) + (balances.BUAH || 0);
     return balances;
   }
 
@@ -143,7 +145,7 @@ export class FinanceService {
    */
   static async recordLedgerEntry(params: {
     amount: number;
-    storageId: 'WARUNG' | 'IKAN' | 'UANG_DIGITAL';
+    storageId: MoneyStorageId;
     direction: 'IN' | 'OUT';
     referenceId: string;
     referenceType: FinanceEvent['referenceType'];

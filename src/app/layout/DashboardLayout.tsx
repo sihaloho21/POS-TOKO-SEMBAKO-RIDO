@@ -31,7 +31,8 @@ import {
   Store,
   CheckCircle2,
   AlertOctagon,
-  Banknote
+  Banknote,
+  Apple
 } from 'lucide-react';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { db } from '@/core/database';
@@ -204,6 +205,7 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
     { id: 'digital', label: 'Digital Services', icon: <Smartphone size={18} /> },
     { id: 'inventory', label: 'Inventory', icon: <Package size={18} />, disabled: !isOwner },
     { id: 'fish', label: 'Fish Management', icon: <Fish size={18} />, disabled: !isOwner },
+    { id: 'fruit', label: 'Penjualan Buah', icon: <Apple size={18} />, disabled: !isOwner },
     { id: 'bundles', label: 'Bundles & Packages', icon: <Layers size={18} /> },
     { id: 'stock-opname', label: 'Stock Opname / Count', icon: <ClipboardList size={18} /> },
     { id: 'suppliers', label: 'Suppliers', icon: <Truck size={18} />, disabled: !isOwner },

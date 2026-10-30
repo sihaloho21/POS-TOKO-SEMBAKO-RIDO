@@ -28,6 +28,9 @@ const ADJUSTMENT_REASONS: StockAdjustmentReason[] = [
   'Hilang',
   'Kadaluarsa',
   'Ikan mati/tidak layak jual',
+  'Buah busuk / rusak',
+  'Susut timbangan alami',
+  'Sortir afkir',
   'Kesalahan stok opname',
   'Salah Input',
   'Lainnya'

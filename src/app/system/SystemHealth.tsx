@@ -34,6 +34,7 @@ import { SyncEngine } from '@/core/sync-engine';
 import { useToastStore } from '@/core/toast-store';
 import { format } from 'date-fns';
 import FirebaseAuthGuideModal from '../settings/FirebaseAuthGuideModal';
+import SecurityRuleAdvisorModal from './SecurityRuleAdvisorModal';
 
 function HealthItem({ icon, label, status, detail, color, action }: any) {
   const StatusIcon = status === 'OK' || status === 'PASS' ? CheckCircle2 : status === 'WARNING' ? AlertTriangle : XCircle;
@@ -75,6 +76,8 @@ export default function SystemHealth() {
   const [retryingQueueId, setRetryingQueueId] = useState<number | null>(null);
   const [isClearingSynced, setIsClearingSynced] = useState(false);
   const [isAuthGuideOpen, setIsAuthGuideOpen] = useState(false);
+  const [isSecurityAdvisorOpen, setIsSecurityAdvisorOpen] = useState(false);
+  const [selectedErrorContext, setSelectedErrorContext] = useState<string | null>(null);
   
   const pendingSync = useLiveQuery(() => db.syncQueue.where('status').anyOf(['PENDING', 'FAILED', 'SYNCING']).count());
   const conflictCount = useLiveQuery(() => db.conflicts.where('status').equals('PENDING').count());
@@ -516,6 +519,18 @@ export default function SystemHealth() {
                     <Trash2 size={14} />
                     <span>Bersihkan SYNCED</span>
                   </button>
+
+                  <button
+                    onClick={() => {
+                      setSelectedErrorContext(null);
+                      setIsSecurityAdvisorOpen(true);
+                    }}
+                    className="flex items-center gap-1.5 px-3.5 py-3 bg-indigo-500/30 hover:bg-indigo-500/40 text-indigo-200 rounded-xl font-bold text-xs uppercase tracking-wider transition-all border border-indigo-400/30 cursor-pointer"
+                    title="Buka saran konfigurasi Firestore Security Rules untuk RBAC"
+                  >
+                    <ShieldCheck size={14} />
+                    <span>Saran Aturan RBAC</span>
+                  </button>
                 </div>
               </div>
 
@@ -605,9 +620,24 @@ export default function SystemHealth() {
                                   {item.status}
                                 </span>
                                 {item.lastError && (
-                                  <p className="text-[10px] text-rose-600 mt-1 max-w-[200px] truncate" title={item.lastError}>
-                                    {item.lastError}
-                                  </p>
+                                  <div className="mt-1 space-y-1">
+                                    <p className="text-[10px] text-rose-600 max-w-[200px] truncate" title={item.lastError}>
+                                      {item.lastError}
+                                    </p>
+                                    {(item.lastError.includes('Missing or insufficient permissions') || item.lastError.includes('permission-denied')) && (
+                                      <button
+                                        onClick={() => {
+                                          setSelectedErrorContext(item.lastError || null);
+                                          setIsSecurityAdvisorOpen(true);
+                                        }}
+                                        className="inline-flex items-center gap-1 text-[9px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-1.5 py-0.5 rounded cursor-pointer transition-colors"
+                                        title="Buka saran perbaikan Security Rule untuk error ini"
+                                      >
+                                        <ShieldCheck size={10} />
+                                        <span>Solusi Rule</span>
+                                      </button>
+                                    )}
+                                  </div>
                                 )}
                               </td>
                               <td className="px-4 py-3 text-right">
@@ -868,6 +898,16 @@ export default function SystemHealth() {
       <FirebaseAuthGuideModal
         isOpen={isAuthGuideOpen}
         onClose={() => setIsAuthGuideOpen(false)}
+      />
+
+      {/* Security Rule Advisor Modal */}
+      <SecurityRuleAdvisorModal
+        isOpen={isSecurityAdvisorOpen}
+        onClose={() => {
+          setIsSecurityAdvisorOpen(false);
+          setSelectedErrorContext(null);
+        }}
+        errorContext={selectedErrorContext}
       />
     </div>
   );

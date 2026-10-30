@@ -11,7 +11,7 @@ export interface User {
   updatedAt: string;
 }
 
-export type ProductType = 'SEMBAKO' | 'FISH' | 'SIDE_PRODUCT' | 'DIGITAL' | 'BUNDLE' | 'PACKAGE';
+export type ProductType = 'SEMBAKO' | 'FISH' | 'FRUIT' | 'SIDE_PRODUCT' | 'DIGITAL' | 'BUNDLE' | 'PACKAGE';
 
 export interface UnitConversion {
   fromUnit: string;
@@ -136,6 +136,8 @@ export interface TransactionItem {
   bundleComponentsSnapshot?: TransactionBundleComponentSnapshot[];
 }
 
+export type MoneyStorageId = 'WARUNG' | 'IKAN' | 'UANG_DIGITAL' | 'BUAH';
+
 export interface Transaction {
   transactionId: string;
   receiptNumber: string;
@@ -150,7 +152,7 @@ export interface Transaction {
   discount: number; 
   total: number;
   paymentMethodId: string;
-  moneyStorageId: 'WARUNG' | 'IKAN' | 'UANG_DIGITAL';
+  moneyStorageId: MoneyStorageId;
   loyaltyPointsEarned: number;
   clientTimestamp: string;
   serverTimestamp?: string;
@@ -186,7 +188,7 @@ export interface ReceivablePayment {
   receivableId: string;
   amount: number;
   paymentMethodId: string;
-  moneyStorageId: 'WARUNG' | 'IKAN' | 'UANG_DIGITAL';
+  moneyStorageId: MoneyStorageId;
   userId: string;
   timestamp: string;
   paymentDate?: string;
@@ -217,7 +219,7 @@ export interface PurchaseItem {
 export interface FinanceEvent {
   financeEventId: string;
   amount: number;
-  storageId: 'WARUNG' | 'IKAN' | 'UANG_DIGITAL';
+  storageId: MoneyStorageId;
   direction: 'IN' | 'OUT';
   referenceId: string;
   referenceType: 'TRANSACTION' | 'PURCHASE' | 'RECEIVABLE_PAYMENT' | 'ADJUSTMENT' | 'EXPENSE' | 'CAPITAL' | 'PRIVE' | 'INTERNAL_TRANSFER' | 'SERVICE_REVENUE' | 'MDR_COST' | 'VOID' | 'RETURN';
@@ -252,6 +254,9 @@ export type StockAdjustmentReason =
   | 'Hilang'
   | 'Kadaluarsa'
   | 'Ikan mati/tidak layak jual'
+  | 'Buah busuk / rusak'
+  | 'Susut timbangan alami'
+  | 'Sortir afkir'
   | 'Kesalahan stok opname'
   | 'Salah Input'
   | 'Lainnya';
@@ -265,7 +270,7 @@ export interface StockMovement {
   qty: number;
   unit: string;
   baseQty: number;
-  segmentId: 'WARUNG' | 'IKAN' | string;
+  segmentId: 'WARUNG' | 'IKAN' | 'BUAH' | string;
   clientTimestamp: string;
   serverTimestamp?: string | null;
   deviceId: string;

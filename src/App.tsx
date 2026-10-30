@@ -12,6 +12,7 @@ import AuditLog from './app/audit/AuditLog';
 import DigitalServices from './app/digital/DigitalServices';
 import BundleManagement from './app/inventory/BundleManagement';
 import FishManagement from './app/inventory/FishManagement';
+import FruitManagement from './app/inventory/FruitManagement';
 import ConflictCenter from './app/conflicts/ConflictCenter';
 import Shift from './app/shift/Shift';
 import ShiftHistory from './app/shift/ShiftHistory';
@@ -53,6 +54,11 @@ export default function App() {
       FishService.ensureMinimalFishProducts(currentUser?.userId).catch(err => console.warn('Fish products init error:', err));
     });
 
+    // Ensure minimal fruit products exist (Mangga Arum Manis & Jeruk Berastagi)
+    import('./core/services/fruit-service').then(({ FruitService }) => {
+      FruitService.ensureMinimalFruitProducts(currentUser?.userId).catch(err => console.warn('Fruit products init error:', err));
+    });
+
     // Check low stock
     ProductService.checkLowStock().catch(err => console.warn('checkLowStock failed:', err));
     const stockInterval = setInterval(() => {
@@ -73,6 +79,7 @@ export default function App() {
   const OWNER_ONLY_MODULES = [
     'inventory',
     'fish',
+    'fruit',
     'suppliers',
     'purchases',
     'supplier-return',
@@ -122,6 +129,8 @@ export default function App() {
         return <Inventory />;
       case 'fish':
         return <FishManagement />;
+      case 'fruit':
+        return <FruitManagement />;
       case 'bundles':
         return <BundleManagement />;
       case 'finance':

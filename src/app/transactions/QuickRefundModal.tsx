@@ -3,7 +3,7 @@ import { db } from '@/core/database';
 import { useAuthStore } from '@/core/auth-store';
 import { TransactionEngine } from '@/core/transaction-engine';
 import { PrintService } from '@/core/utils/print-service';
-import type { Transaction } from '@/core/types';
+import type { Transaction, MoneyStorageId } from '@/core/types';
 import { 
   RotateCcw, 
   X, 
@@ -61,7 +61,7 @@ export function QuickRefundModal({
   const [customReason, setCustomReason] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
   const [refundPaymentMethod, setRefundPaymentMethod] = useState<string>('TUNAI');
-  const [refundStorageId, setRefundStorageId] = useState<'WARUNG' | 'IKAN' | 'UANG_DIGITAL'>('WARUNG');
+  const [refundStorageId, setRefundStorageId] = useState<MoneyStorageId>('WARUNG');
 
   // PIN Authorization for Cashier/Staff
   const [supervisorPin, setSupervisorPin] = useState<string>('');
@@ -664,6 +664,7 @@ export function QuickRefundModal({
                     className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 outline-none focus:border-purple-500"
                   >
                     <option value="WARUNG">Kas Utama Warung</option>
+                    <option value="BUAH">Kas Buah Segar 🍎</option>
                     <option value="IKAN">Kas Ikan Segar</option>
                     <option value="UANG_DIGITAL">Kas Digital / Bank</option>
                   </select>

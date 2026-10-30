@@ -37,15 +37,15 @@ export default function Finance() {
   // Prive / Capital / Expense Modal State
   const [isPriveModalOpen, setIsPriveModalOpen] = useState(false);
   const [entryType, setEntryType] = useState<'CAPITAL' | 'PRIVE' | 'EXPENSE'>('CAPITAL');
-  const [entryStorage, setEntryStorage] = useState<'WARUNG' | 'IKAN' | 'UANG_DIGITAL'>('WARUNG');
+  const [entryStorage, setEntryStorage] = useState<'WARUNG' | 'IKAN' | 'UANG_DIGITAL' | 'BUAH'>('WARUNG');
   const [entryAmount, setEntryAmount] = useState('');
   const [entryDesc, setEntryDesc] = useState('');
   const [isSubmittingEntry, setIsSubmittingEntry] = useState(false);
 
   // Internal Transfer Modal State
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
-  const [fromStorage, setFromStorage] = useState<'WARUNG' | 'IKAN' | 'UANG_DIGITAL'>('WARUNG');
-  const [toStorage, setToStorage] = useState<'WARUNG' | 'IKAN' | 'UANG_DIGITAL'>('UANG_DIGITAL');
+  const [fromStorage, setFromStorage] = useState<'WARUNG' | 'IKAN' | 'UANG_DIGITAL' | 'BUAH'>('WARUNG');
+  const [toStorage, setToStorage] = useState<'WARUNG' | 'IKAN' | 'UANG_DIGITAL' | 'BUAH'>('BUAH');
   const [transferAmount, setTransferAmount] = useState('');
   const [transferNotes, setTransferNotes] = useState('');
   const [isSubmittingTransfer, setIsSubmittingTransfer] = useState(false);
@@ -204,6 +204,8 @@ export default function Finance() {
 
     let fishDeathLossRp = 0;
     let fishDeathLossKg = 0;
+    let fruitLossRp = 0;
+    let fruitLossKg = 0;
     let otherLossRp = 0;
 
     for (const m of movements) {
@@ -213,12 +215,15 @@ export default function Finance() {
       if (m.movementType === 'FISH_DEAD_OUT' || (m.segmentId === 'IKAN' && m.reason?.toLowerCase().includes('ikan mati'))) {
         fishDeathLossKg += qty;
         fishDeathLossRp += (qty * cost);
+      } else if (m.segmentId === 'BUAH' || m.reason?.toLowerCase().includes('buah')) {
+        fruitLossKg += qty;
+        fruitLossRp += (qty * cost);
       } else if (['DAMAGED_OUT', 'LOST_OUT', 'EXPIRED_OUT'].includes(m.movementType)) {
         otherLossRp += (qty * cost);
       }
     }
 
-    const totalStockLossRp = fishDeathLossRp + otherLossRp;
+    const totalStockLossRp = fishDeathLossRp + fruitLossRp + otherLossRp;
     const netProfit = grossProfit - totalStockLossRp - operationalExpense;
 
     return {
@@ -229,6 +234,8 @@ export default function Finance() {
       grossProfit,
       fishDeathLossKg,
       fishDeathLossRp,
+      fruitLossKg,
+      fruitLossRp,
       otherLossRp,
       totalStockLossRp,
       netProfit
@@ -259,15 +266,19 @@ export default function Finance() {
       </div>
 
       {/* Storage Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          { id: 'WARUNG', label: 'Kas Warung', color: 'bg-blue-500', text: 'text-blue-600' },
-          { id: 'IKAN', label: 'Kas Ikan', color: 'bg-emerald-500', text: 'text-emerald-600' },
-          { id: 'UANG_DIGITAL', label: 'Kas Uang Digital', color: 'bg-purple-500', text: 'text-purple-600' },
+          { id: 'WARUNG', label: 'Kas Warung', color: 'bg-blue-500', text: 'text-blue-600', icon: '🏪' },
+          { id: 'BUAH', label: 'Kas Buah', color: 'bg-teal-500', text: 'text-teal-600', icon: '🍎' },
+          { id: 'IKAN', label: 'Kas Ikan', color: 'bg-emerald-500', text: 'text-emerald-600', icon: '🐟' },
+          { id: 'UANG_DIGITAL', label: 'Kas Uang Digital', color: 'bg-purple-500', text: 'text-purple-600', icon: '📱' },
         ].map((s) => (
-          <div key={s.id} className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm relative overflow-hidden group">
+          <div key={s.id} className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm relative overflow-hidden group">
             <div className={`absolute top-0 right-0 w-24 h-24 ${s.color} opacity-[0.03] rounded-bl-full`} />
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{s.label}</p>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{s.label}</p>
+              <span className="text-base">{s.icon}</span>
+            </div>
             <p className={`text-2xl font-black ${s.text} tabular-nums`}>
               Rp {balances?.[s.id]?.toLocaleString() || 0}
             </p>
@@ -350,7 +361,7 @@ export default function Finance() {
           <div className="flex items-center gap-2">
             <Filter size={16} className="text-slate-400" />
             <div className="flex gap-1">
-              {['ALL', 'WARUNG', 'IKAN', 'UANG_DIGITAL'].map(s => (
+              {['ALL', 'WARUNG', 'BUAH', 'IKAN', 'UANG_DIGITAL'].map(s => (
                 <button 
                   key={s}
                   onClick={() => setFilterStorage(s)}
@@ -358,7 +369,7 @@ export default function Finance() {
                     filterStorage === s ? 'bg-slate-900 text-white shadow-lg' : 'bg-white text-slate-500 border border-slate-200'
                   }`}
                 >
-                  {s}
+                  {s === 'BUAH' ? '🍎 BUAH' : s}
                 </button>
               ))}
             </div>
@@ -487,19 +498,19 @@ export default function Finance() {
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1.5">
                   Pilih Penyimpanan Kas (Storage)
                 </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {(['WARUNG', 'IKAN', 'UANG_DIGITAL'] as const).map((s) => (
+                <div className="grid grid-cols-4 gap-2">
+                  {(['WARUNG', 'BUAH', 'IKAN', 'UANG_DIGITAL'] as const).map((s) => (
                     <button
                       type="button"
                       key={s}
                       onClick={() => setEntryStorage(s)}
                       className={`py-2 rounded-xl text-[10px] font-black uppercase tracking-wider border transition-all ${
                         entryStorage === s
-                          ? 'bg-blue-600 border-blue-600 text-white'
+                          ? s === 'BUAH' ? 'bg-teal-600 border-teal-600 text-white' : 'bg-blue-600 border-blue-600 text-white'
                           : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
                       }`}
                     >
-                      {s.replace('_', ' ')}
+                      {s === 'BUAH' ? '🍎 BUAH' : s.replace('_', ' ')}
                     </button>
                   ))}
                 </div>
@@ -589,6 +600,7 @@ export default function Finance() {
                     className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-xs text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="WARUNG">Kas Warung</option>
+                    <option value="BUAH">Kas Buah 🍎</option>
                     <option value="IKAN">Kas Ikan</option>
                     <option value="UANG_DIGITAL">Kas Uang Digital</option>
                   </select>
@@ -599,11 +611,12 @@ export default function Finance() {
                     Ke Kas (IN)
                   </label>
                   <select
-                    value={toStorage ?? 'WARUNG'}
+                    value={toStorage ?? 'BUAH'}
                     onChange={(e) => setToStorage(e.target.value as any)}
                     className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-xs text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="WARUNG">Kas Warung</option>
+                    <option value="BUAH">Kas Buah 🍎</option>
                     <option value="IKAN">Kas Ikan</option>
                     <option value="UANG_DIGITAL">Kas Uang Digital</option>
                   </select>

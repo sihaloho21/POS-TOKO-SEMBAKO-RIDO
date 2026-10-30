@@ -8,7 +8,8 @@ import type {
   SyncQueueItem,
   Receivable,
   Customer,
-  Product
+  Product,
+  MoneyStorageId
 } from './types';
 import { addDays } from 'date-fns';
 import { AuditEngine } from './audit-engine';
@@ -30,7 +31,7 @@ export class TransactionEngine {
     items: TransactionItem[];
     discount: number; 
     paymentMethodId: string;
-    moneyStorageId: 'WARUNG' | 'IKAN' | 'UANG_DIGITAL';
+    moneyStorageId: MoneyStorageId;
     type: 'SALE' | 'GAJIAN';
     allowInsufficientStock?: boolean;
     allowStoreClosedOverride?: boolean;
@@ -173,7 +174,7 @@ export class TransactionEngine {
           baseQty,
           referenceId: transactionId,
           transactionId,
-          segmentId: params.moneyStorageId === 'IKAN' ? 'IKAN' : 'WARUNG',
+          segmentId: (product.productType === 'FRUIT' || params.moneyStorageId === 'BUAH') ? 'BUAH' : (params.moneyStorageId === 'IKAN' ? 'IKAN' : 'WARUNG'),
           reason: 'SALE_OUT',
           costSnapshot: product.hpp,
           userId: params.cashierId,
@@ -676,7 +677,7 @@ export class TransactionEngine {
       bundleComponentsSnapshot?: any[];
     }[];
     refundAmount: number;
-    refundStorageId: 'WARUNG' | 'IKAN' | 'UANG_DIGITAL';
+    refundStorageId: MoneyStorageId;
     refundPaymentMethod: string;
     notes?: string;
   }): Promise<Transaction> {
