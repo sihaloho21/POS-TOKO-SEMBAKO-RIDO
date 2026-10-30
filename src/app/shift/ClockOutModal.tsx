@@ -22,11 +22,13 @@ import {
   PlusCircle,
   Clock,
   Smartphone,
-  Calculator
+  Calculator,
+  Wallet
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
 import { CashDenominationCounter } from './CashDenominationCounter';
+import ShiftClosingShareModal from './ShiftClosingShareModal';
 
 interface ClockOutModalProps {
   isOpen: boolean;
@@ -40,6 +42,7 @@ export default function ClockOutModal({ isOpen, shiftId, onClose, onSuccess }: C
   const { addToast } = useToastStore();
   const deviceId = getDeviceId();
 
+  const [targetShift, setTargetShift] = useState<any>(null);
   const [metrics, setMetrics] = useState<ShiftClosingMetrics | null>(null);
   const [actualCashInput, setActualCashInput] = useState<string>('');
   const [discrepancyReason, setDiscrepancyReason] = useState<string>('');
@@ -47,57 +50,66 @@ export default function ClockOutModal({ isOpen, shiftId, onClose, onSuccess }: C
   const [endNotes, setEndNotes] = useState<string>('');
   const [threshold, setThreshold] = useState<number>(25000);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [showDenominations, setShowDenominations] = useState<boolean>(false);
   const [cashDenominations, setCashDenominations] = useState<Record<string, number>>({});
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [closingMetricsForShare, setClosingMetricsForShare] = useState<ShiftClosingMetrics | null>(null);
 
-  // Fetch target shift
-  const targetShift = useLiveQuery(async () => {
-    if (!isOpen) return null;
-    if (shiftId) {
-      return db.shifts.get(shiftId);
-    }
-    return ShiftService.getCurrentShift(deviceId, currentUser?.userId);
-  }, [isOpen, shiftId, deviceId, currentUser?.userId]);
-
-  // Load metrics when target shift is available
-  useEffect(() => {
-    if (!targetShift || !isOpen) return;
-
-    let isMounted = true;
-    ShiftService.getShiftClosingMetrics(targetShift.shiftId)
-      .then((res) => {
-        if (isMounted) {
-          setMetrics(res);
-          // Set initial input to expected cash or empty
-          if (actualCashInput === '') {
-            setActualCashInput(res.expectedCash.toString());
-          }
-        }
-      })
-      .catch((err) => {
-        console.error('Error fetching closing metrics:', err);
-      });
-
-    StoreStatusService.getDiscrepancyThreshold().then((t) => {
-      if (isMounted) setThreshold(t);
-    });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [targetShift?.shiftId, isOpen]);
-
-  // Reset states on open
+  // Initial fetch of shift and metrics
   useEffect(() => {
     if (isOpen) {
-      setErrorMsg('');
+      const init = async () => {
+        try {
+          let s;
+          if (shiftId) {
+            s = await db.shifts.get(shiftId);
+          } else {
+            s = await ShiftService.getCurrentShift(deviceId, currentUser?.userId);
+          }
+
+          if (s) {
+            setTargetShift(s);
+            const m = await ShiftService.getShiftClosingMetrics(s.shiftId);
+            setMetrics(m);
+            setActualCashInput(m.expectedCash.toString());
+            
+            const t = await StoreStatusService.getDiscrepancyThreshold();
+            setThreshold(t);
+          }
+        } catch (err) {
+          console.error('Error initializing clock out modal:', err);
+          setErrorMsg('Gagal memuat data shift.');
+        }
+      };
+      init();
+    } else {
+      // Reset states on close
+      setTargetShift(null);
+      setMetrics(null);
+      setActualCashInput('');
       setDiscrepancyReason('');
       setOwnerPin('');
+      setIsSuccess(false);
+      setShowShareModal(false);
+      setErrorMsg('');
     }
-  }, [isOpen]);
+  }, [isOpen, shiftId, deviceId, currentUser?.userId]);
 
-  if (!isOpen || !targetShift || !metrics) return null;
+  if (!isOpen) return null;
+  
+  // Only show the empty state if we are NOT in success mode (where we show the share modal)
+  if (!isSuccess && (!targetShift || !metrics)) {
+    return (
+      <div className="fixed inset-0 z-[260] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="bg-white p-8 rounded-3xl flex flex-col items-center gap-4">
+          <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+          <p className="font-black text-slate-900 uppercase tracking-tight">Memuat Data Shift...</p>
+        </div>
+      </div>
+    );
+  }
 
   const actualCashNum = Number(actualCashInput) || 0;
   const discrepancy = actualCashNum - metrics.expectedCash;
@@ -134,7 +146,7 @@ export default function ClockOutModal({ isOpen, shiftId, onClose, onSuccess }: C
         approvedOwnerName = owner.name;
       }
 
-      await ShiftService.clockOut({
+      const updatedShift = await ShiftService.clockOut({
         shiftId: targetShift.shiftId,
         actualCash: actualCashNum,
         discrepancyReason: discrepancyReason.trim(),
@@ -146,8 +158,19 @@ export default function ClockOutModal({ isOpen, shiftId, onClose, onSuccess }: C
       });
 
       addToast('Shift berhasil ditutup dan kas direkonsiliasi!', 'success');
-      if (onSuccess) onSuccess();
-      onClose();
+      
+      // Store metrics for share modal and show it
+      setClosingMetricsForShare({
+        ...metrics,
+        shift: updatedShift
+      });
+      
+      // Mark as success to transition UI
+      setIsSuccess(true);
+      setShowShareModal(true);
+
+      // We do NOT call onSuccess() here yet, because it might unmount this component
+      // We will call it when the user closes the share modal.
     } catch (err: any) {
       setErrorMsg(err.message || 'Gagal menutup shift.');
     } finally {
@@ -157,308 +180,372 @@ export default function ClockOutModal({ isOpen, shiftId, onClose, onSuccess }: C
 
   return (
     <div className="fixed inset-0 z-[260] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95, y: 15 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.95, y: 15 }}
-        className="bg-white rounded-3xl max-w-2xl w-full p-6 sm:p-8 shadow-2xl border border-slate-200 relative my-8"
-      >
-        {/* Header */}
-        <div className="flex justify-between items-start pb-5 border-b border-slate-100">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 bg-rose-600 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-rose-200">
-              <Lock size={24} />
-            </div>
-            <div>
-              <h3 className="font-black text-slate-900 text-xl uppercase tracking-tight">
-                Clock Out / Closing Kasir
-              </h3>
-              <div className="flex flex-wrap items-center gap-2 mt-1 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                <span>Shift ID: {targetShift.shiftId.slice(-8).toUpperCase()}</span>
-                <span>•</span>
-                <span className="flex items-center gap-1">
-                  <Smartphone size={12} /> {deviceId}
-                </span>
-                <span>•</span>
-                <span className="flex items-center gap-1">
-                  <Clock size={12} /> Mulai: {format(new Date(targetShift.startTime), 'HH:mm')}
-                </span>
-              </div>
-            </div>
-          </div>
-          <button
-            onClick={onClose}
-            className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
+      <AnimatePresence mode="wait">
+        {!isSuccess && (
+          <motion.div
+            key="clock-out-form"
+            initial={{ opacity: 0, scale: 0.95, y: 15 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 15 }}
+            className="bg-white rounded-3xl max-w-2xl w-full p-6 sm:p-8 shadow-2xl border border-slate-200 relative my-8"
           >
-            <X size={20} />
-          </button>
-        </div>
-
-        {/* Content Body */}
-        <div className="py-6 space-y-6 max-h-[calc(85vh-160px)] overflow-y-auto pr-1">
-          {/* Metrics Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-            <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-2xl">
-              <div className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">
-                <Banknote size={12} /> Modal Awal
-              </div>
-              <p className="text-lg font-black text-slate-900 tabular-nums">
-                Rp {targetShift.startingCash.toLocaleString()}
-              </p>
-              <div className="flex flex-col text-[9px] font-bold text-slate-400 mt-0.5">
-                <span>Lembar: Rp {(targetShift.startingCashBills || 0).toLocaleString()}</span>
-                <span>Koin: Rp {(targetShift.startingCashCoins || 0).toLocaleString()}</span>
-              </div>
-            </div>
-
-            <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-2xl">
-              <div className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">
-                <Receipt size={12} /> Transaksi
-              </div>
-              <p className="text-xl font-black text-slate-900 tabular-nums">
-                {metrics.transactionCount}
-              </p>
-              <span className="text-[10px] font-bold text-slate-400">Total struk selesai</span>
-            </div>
-
-            <div className="p-3.5 bg-blue-50/70 border border-blue-200/60 rounded-2xl">
-              <div className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-blue-600 mb-1">
-                <TrendingUp size={12} /> Omzet
-              </div>
-              <p className="text-xl font-black text-blue-900 tabular-nums">
-                Rp {metrics.omzet.toLocaleString()}
-              </p>
-              <span className="text-[10px] font-bold text-blue-500">Total penjualan</span>
-            </div>
-
-            <div className="p-3.5 bg-emerald-50/70 border border-emerald-200/60 rounded-2xl">
-              <div className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-emerald-600 mb-1">
-                <PlusCircle size={12} /> Cash In
-              </div>
-              <p className="text-xl font-black text-emerald-900 tabular-nums">
-                Rp {metrics.cashIn.toLocaleString()}
-              </p>
-              <span className="text-[10px] font-bold text-emerald-600">Modal + Kas Tunai</span>
-            </div>
-
-            <div className="p-3.5 bg-rose-50/70 border border-rose-200/60 rounded-2xl">
-              <div className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-rose-600 mb-1">
-                <MinusCircle size={12} /> Cash Out
-              </div>
-              <p className="text-xl font-black text-rose-900 tabular-nums">
-                Rp {metrics.cashOut.toLocaleString()}
-              </p>
-              <span className="text-[10px] font-bold text-rose-500">Pengeluaran kasir</span>
-            </div>
-          </div>
-
-          {/* Payment Breakdown Cards */}
-          <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-[11px] font-black uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
-                <CreditCard size={14} /> Rincian Metode Pembayaran (Payment Breakdown)
-              </span>
-              <span className="text-[10px] font-bold text-slate-400">
-                Modal Awal: Rp {targetShift.startingCash.toLocaleString()} 
-                { (targetShift.startingCashBills || targetShift.startingCashCoins) ? (
-                  <span className="ml-1 opacity-70">
-                    (L: Rp {(targetShift.startingCashBills || 0).toLocaleString()}, K: Rp {(targetShift.startingCashCoins || 0).toLocaleString()})
-                  </span>
-                ) : null }
-              </span>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-              {Object.entries(metrics.paymentBreakdown).map(([method, amt]) => (
-                <div key={method} className="bg-white p-2.5 rounded-xl border border-slate-200 text-center">
-                  <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block mb-0.5">
-                    {method}
-                  </span>
-                  <span className="text-xs font-black text-slate-900 tabular-nums">
-                    Rp {amt.toLocaleString()}
-                  </span>
+            {/* Header */}
+            <div className="flex justify-between items-start pb-5 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 bg-rose-600 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-rose-200">
+                  <Lock size={24} />
                 </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Cash Calculation & Actual Input */}
-          <div className="bg-gradient-to-br from-indigo-50/50 to-blue-50/40 p-5 rounded-2xl border border-blue-100 space-y-4">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
-              <div>
-                <span className="text-[10px] font-black uppercase tracking-wider text-blue-600 block">
-                  Expected Cash (Uang Kas Yang Diharapkan)
-                </span>
-                <p className="text-2xl font-black text-slate-900 tabular-nums">
-                  Rp {metrics.expectedCash.toLocaleString()}
-                </p>
-                <p className="text-[10px] font-medium text-slate-400">
-                  (Modal Rp {targetShift.startingCash.toLocaleString()} + Tunai Rp {metrics.cashSales.toLocaleString()} - Pengeluaran Rp {metrics.cashOut.toLocaleString()})
-                </p>
-              </div>
-
-              <div className="w-full sm:w-60">
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-700 block">
-                    Input Uang Fisik (Laci) *
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => setShowDenominations(!showDenominations)}
-                    className="text-[10px] font-black uppercase text-indigo-600 hover:text-indigo-800 flex items-center gap-1 transition-colors"
-                  >
-                    <Calculator size={11} />
-                    {showDenominations ? 'Tutup Hitung' : 'Hitung Pecahan'}
-                  </button>
-                </div>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-slate-400 text-sm">Rp</span>
-                  <input
-                    type="number"
-                    autoFocus
-                    placeholder="0"
-                    value={actualCashInput ?? ''}
-                    onChange={(e) => setActualCashInput(e.target.value)}
-                    className="w-full pl-9 pr-3 py-3 bg-white border-2 border-blue-400 rounded-xl text-lg font-black text-slate-900 tabular-nums outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Cash Denomination Calculator (Collapsible) */}
-            {showDenominations && (
-              <div className="pt-2">
-                <CashDenominationCounter
-                  counts={cashDenominations}
-                  onChange={(counts, total) => {
-                    setCashDenominations(counts);
-                    setActualCashInput(total.toString());
-                  }}
-                />
-              </div>
-            )}
-
-            {/* Live Discrepancy Preview */}
-            <div className={`p-4 rounded-xl border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 ${
-              discrepancy === 0
-                ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
-                : discrepancy > 0
-                ? 'bg-blue-50 border-blue-300 text-blue-900'
-                : 'bg-rose-50 border-rose-300 text-rose-900'
-            }`}>
-              <div className="flex items-center gap-2">
-                {discrepancy === 0 ? (
-                  <CheckCircle size={18} className="text-emerald-600 shrink-0" />
-                ) : (
-                  <AlertTriangle size={18} className={discrepancy > 0 ? 'text-blue-600 shrink-0' : 'text-rose-600 shrink-0'} />
-                )}
                 <div>
-                  <span className="font-bold text-xs">Status Selisih (Discrepancy):</span>
-                  <span className="font-black text-sm ml-2 tabular-nums">
-                    {discrepancy === 0
-                      ? '✓ PAS / SESUAI (Rp 0)'
-                      : `${discrepancy > 0 ? '+Rp ' : '-Rp '}${Math.abs(discrepancy).toLocaleString()} (${discrepancy > 0 ? 'SURPLUS / LEBIH' : 'DEFISIT / KURANG'})`}
-                  </span>
+                  <h3 className="font-black text-slate-900 text-xl uppercase tracking-tight">
+                    Clock Out / Closing Kasir
+                  </h3>
+                  <div className="flex flex-wrap items-center gap-2 mt-1 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                    <span>Shift ID: {targetShift.shiftId.slice(-8).toUpperCase()}</span>
+                    <span>•</span>
+                    <span className="flex items-center gap-1">
+                      <Smartphone size={12} /> {deviceId}
+                    </span>
+                    <span>•</span>
+                    <span className="flex items-center gap-1">
+                      <Clock size={12} /> Mulai: {format(new Date(targetShift.startTime), 'HH:mm')}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={onClose}
+                className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Content Body */}
+            <div className="py-6 space-y-6 max-h-[calc(85vh-160px)] overflow-y-auto pr-1">
+              {/* Metrics Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-2xl">
+                  <div className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">
+                    <Banknote size={12} /> Modal Awal
+                  </div>
+                  <p className="text-lg font-black text-slate-900 tabular-nums">
+                    Rp {targetShift.startingCash.toLocaleString()}
+                  </p>
+                  <div className="flex flex-col text-[9px] font-bold text-slate-400 mt-0.5">
+                    <span>Lembar: Rp {(targetShift.startingCashBills || 0).toLocaleString()}</span>
+                    <span>Koin: Rp {(targetShift.startingCashCoins || 0).toLocaleString()}</span>
+                  </div>
+                </div>
+
+                <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-2xl">
+                  <div className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">
+                    <Receipt size={12} /> Transaksi
+                  </div>
+                  <p className="text-xl font-black text-slate-900 tabular-nums">
+                    {metrics.transactionCount}
+                  </p>
+                  <span className="text-[10px] font-bold text-slate-400">Total struk selesai</span>
+                </div>
+
+                <div className="p-3.5 bg-blue-50/70 border border-blue-200/60 rounded-2xl">
+                  <div className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-blue-600 mb-1">
+                    <TrendingUp size={12} /> Omzet
+                  </div>
+                  <p className="text-xl font-black text-blue-900 tabular-nums">
+                    Rp {metrics.omzet.toLocaleString()}
+                  </p>
+                  <span className="text-[10px] font-bold text-blue-500">Total penjualan</span>
+                </div>
+
+                <div className="p-3.5 bg-emerald-50/70 border border-emerald-200/60 rounded-2xl">
+                  <div className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-emerald-600 mb-1">
+                    <PlusCircle size={12} /> Cash In
+                  </div>
+                  <p className="text-xl font-black text-emerald-900 tabular-nums">
+                    Rp {metrics.cashIn.toLocaleString()}
+                  </p>
+                  <span className="text-[10px] font-bold text-emerald-600">Modal + Kas Tunai</span>
+                </div>
+
+                <div className="p-3.5 bg-rose-50/70 border border-rose-200/60 rounded-2xl">
+                  <div className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-rose-600 mb-1">
+                    <MinusCircle size={12} /> Cash Out
+                  </div>
+                  <p className="text-xl font-black text-rose-900 tabular-nums">
+                    Rp {metrics.cashOut.toLocaleString()}
+                  </p>
+                  <span className="text-[10px] font-bold text-rose-500">Pengeluaran kasir</span>
                 </div>
               </div>
 
-              {hasDiscrepancy && (
-                <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded ${
-                  requiresOwnerApproval ? 'bg-rose-200 text-rose-800' : 'bg-amber-200 text-amber-800'
-                }`}>
-                  {requiresOwnerApproval ? 'Butuh Approval Owner' : 'Dalam Batas Toleransi'}
-                </span>
-              )}
-            </div>
-          </div>
+              {/* Payment Breakdown Cards */}
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-[11px] font-black uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+                    <CreditCard size={14} /> Rincian Metode Pembayaran (Payment Breakdown)
+                  </span>
+                  <span className="text-[10px] font-bold text-slate-400">
+                    Modal Awal: Rp {targetShift.startingCash.toLocaleString()} 
+                    { (targetShift.startingCashBills || targetShift.startingCashCoins) ? (
+                      <span className="ml-1 opacity-70">
+                        (L: Rp {(targetShift.startingCashBills || 0).toLocaleString()}, K: Rp {(targetShift.startingCashCoins || 0).toLocaleString()})
+                      </span>
+                    ) : null }
+                  </span>
+                </div>
 
-          {/* Discrepancy Reason Input (Required when discrepancy !== 0) */}
-          {hasDiscrepancy && (
-            <div className="p-4 bg-amber-50/80 border border-amber-200 rounded-2xl space-y-3">
-              <div>
-                <label className="text-[11px] font-black uppercase tracking-wider text-amber-900 block mb-1">
-                  Alasan Selisih Kasir / Reason (Wajib Diisi) *
-                </label>
-                <textarea
-                  rows={2}
-                  value={discrepancyReason ?? ''}
-                  onChange={(e) => setDiscrepancyReason(e.target.value)}
-                  placeholder="Contoh: Salah pengembalian uang receh struk #42, uang kembalian sobek diganti..."
-                  className="w-full p-3 bg-white border border-amber-300 rounded-xl text-xs font-semibold text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500 resize-none shadow-sm"
-                />
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                  {Object.entries(metrics.paymentBreakdown).map(([method, amt]) => (
+                    <div key={method} className="bg-white p-2.5 rounded-xl border border-slate-200 text-center">
+                      <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block mb-0.5">
+                        {method}
+                      </span>
+                      <span className="text-xs font-black text-slate-900 tabular-nums">
+                        Rp {amt.toLocaleString()}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
 
-              {/* Owner Approval Section when discrepancy > threshold */}
-              {requiresOwnerApproval && (
-                <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl space-y-2">
-                  <div className="flex items-center gap-2 text-rose-800 text-xs font-bold">
-                    <ShieldCheck size={16} className="text-rose-600 shrink-0" />
-                    <span>Otorisasi PIN Owner Diperlukan (Batas Toleransi: Rp {threshold.toLocaleString()})</span>
+              {/* Storage Breakdown Cards */}
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-[11px] font-black uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+                    <Wallet size={14} className="text-blue-500" /> Omzet per Storage Keuangan
+                  </span>
+                  <span className="text-[10px] font-bold text-slate-400 italic">* Berdasarkan kategori transaksi</span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="bg-white p-3 rounded-xl border border-slate-200 text-center shadow-sm">
+                    <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block mb-0.5">
+                      WARUNG
+                    </span>
+                    <span className="text-sm font-black text-slate-900 tabular-nums">
+                      Rp {(metrics.storageBreakdown['WARUNG'] || 0).toLocaleString()}
+                    </span>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <div className="relative flex-1">
-                      <KeyRound size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <div className="bg-white p-3 rounded-xl border border-slate-200 text-center shadow-sm">
+                    <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block mb-0.5">
+                      IKAN
+                    </span>
+                    <span className="text-sm font-black text-blue-700 tabular-nums">
+                      Rp {(metrics.storageBreakdown['IKAN'] || 0).toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="bg-white p-3 rounded-xl border border-slate-200 text-center shadow-sm">
+                    <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block mb-0.5">
+                      DIGITAL
+                    </span>
+                    <span className="text-sm font-black text-emerald-700 tabular-nums">
+                      Rp {(metrics.storageBreakdown['UANG_DIGITAL'] || 0).toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Cash Calculation & Actual Input */}
+              <div className="bg-gradient-to-br from-indigo-50/50 to-blue-50/40 p-5 rounded-2xl border border-blue-100 space-y-4">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                  <div>
+                    <span className="text-[10px] font-black uppercase tracking-wider text-blue-600 block">
+                      Expected Cash (Uang Kas Yang Diharapkan)
+                    </span>
+                    <p className="text-2xl font-black text-slate-900 tabular-nums">
+                      Rp {metrics.expectedCash.toLocaleString()}
+                    </p>
+                    <p className="text-[10px] font-medium text-slate-400">
+                      (Modal Rp {targetShift.startingCash.toLocaleString()} + Tunai Rp {metrics.cashSales.toLocaleString()} - Pengeluaran Rp {metrics.cashOut.toLocaleString()})
+                    </p>
+                  </div>
+
+                  <div className="w-full sm:w-60">
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[10px] font-black uppercase tracking-wider text-slate-700 block">
+                        Input Uang Fisik (Laci) *
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setShowDenominations(!showDenominations)}
+                        className="text-[10px] font-black uppercase text-indigo-600 hover:text-indigo-800 flex items-center gap-1 transition-colors"
+                      >
+                        <Calculator size={11} />
+                        {showDenominations ? 'Tutup Hitung' : 'Hitung Pecahan'}
+                      </button>
+                    </div>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-slate-400 text-sm">Rp</span>
                       <input
-                        type="password"
-                        maxLength={6}
-                        placeholder="Masukkan 6 Digit PIN Owner"
-                        value={ownerPin ?? ''}
-                        onChange={(e) => setOwnerPin(e.target.value)}
-                        className="w-full pl-9 pr-3 py-2.5 bg-white border border-rose-300 rounded-xl text-center font-black tracking-widest text-slate-900 outline-none focus:ring-2 focus:ring-rose-500 text-sm shadow-sm"
+                        type="number"
+                        autoFocus
+                        placeholder="0"
+                        value={actualCashInput ?? ''}
+                        onChange={(e) => setActualCashInput(e.target.value)}
+                        className="w-full pl-9 pr-3 py-3 bg-white border-2 border-blue-400 rounded-xl text-lg font-black text-slate-900 tabular-nums outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
                       />
                     </div>
                   </div>
-                  <p className="text-[10px] text-slate-500 italic">
-                    * Penyesuaian selisih akan dicatat sebagai rekonsiliasi kas terpisah dan tidak mengubah transaksi penjualan di buku besar (ledger).
-                  </p>
+                </div>
+
+                {/* Cash Denomination Calculator (Collapsible) */}
+                {showDenominations && (
+                  <div className="pt-2">
+                    <CashDenominationCounter
+                      counts={cashDenominations}
+                      onChange={(counts, total) => {
+                        setCashDenominations(counts);
+                        setActualCashInput(total.toString());
+                      }}
+                    />
+                  </div>
+                )}
+
+                {/* Live Discrepancy Preview */}
+                <div className={`p-4 rounded-xl border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 ${
+                  discrepancy === 0
+                    ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                    : discrepancy > 0
+                    ? 'bg-blue-50 border-blue-300 text-blue-900'
+                    : 'bg-rose-50 border-rose-300 text-rose-900'
+                }`}>
+                  <div className="flex items-center gap-2">
+                    {discrepancy === 0 ? (
+                      <CheckCircle size={18} className="text-emerald-600 shrink-0" />
+                    ) : (
+                      <AlertTriangle size={18} className={discrepancy > 0 ? 'text-blue-600 shrink-0' : 'text-rose-600 shrink-0'} />
+                    )}
+                    <div>
+                      <span className="font-bold text-xs">Status Selisih (Discrepancy):</span>
+                      <span className="font-black text-sm ml-2 tabular-nums">
+                        {discrepancy === 0
+                          ? '✓ PAS / SESUAI (Rp 0)'
+                          : `${discrepancy > 0 ? '+Rp ' : '-Rp '}${Math.abs(discrepancy).toLocaleString()} (${discrepancy > 0 ? 'SURPLUS / LEBIH' : 'DEFISIT / KURANG'})`}
+                      </span>
+                    </div>
+                  </div>
+
+                  {hasDiscrepancy && (
+                    <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded ${
+                      requiresOwnerApproval ? 'bg-rose-200 text-rose-800' : 'bg-amber-200 text-amber-800'
+                    }`}>
+                      {requiresOwnerApproval ? 'Butuh Approval Owner' : 'Dalam Batas Toleransi'}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Discrepancy Reason Input (Required when discrepancy !== 0) */}
+              {hasDiscrepancy && (
+                <div className="p-4 bg-amber-50/80 border border-amber-200 rounded-2xl space-y-3">
+                  <div>
+                    <label className="text-[11px] font-black uppercase tracking-wider text-amber-900 block mb-1">
+                      Alasan Selisih Kasir / Reason (Wajib Diisi) *
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={discrepancyReason ?? ''}
+                      onChange={(e) => setDiscrepancyReason(e.target.value)}
+                      placeholder="Contoh: Salah pengembalian uang receh struk #42, uang kembalian sobek diganti..."
+                      className="w-full p-3 bg-white border border-amber-300 rounded-xl text-xs font-semibold text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500 resize-none shadow-sm"
+                    />
+                  </div>
+
+                  {/* Owner Approval Section when discrepancy > threshold */}
+                  {requiresOwnerApproval && (
+                    <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl space-y-2">
+                      <div className="flex items-center gap-2 text-rose-800 text-xs font-bold">
+                        <ShieldCheck size={16} className="text-rose-600 shrink-0" />
+                        <span>Otorisasi PIN Owner Diperlukan (Batas Toleransi: Rp {threshold.toLocaleString()})</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="relative flex-1">
+                          <KeyRound size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                          <input
+                            type="password"
+                            maxLength={6}
+                            placeholder="Masukkan 6 Digit PIN Owner"
+                            value={ownerPin ?? ''}
+                            onChange={(e) => setOwnerPin(e.target.value)}
+                            className="w-full pl-9 pr-3 py-2.5 bg-white border border-rose-300 rounded-xl text-center font-black tracking-widest text-slate-900 outline-none focus:ring-2 focus:ring-rose-500 text-sm shadow-sm"
+                          />
+                        </div>
+                      </div>
+                      <p className="text-[10px] text-slate-500 italic">
+                        * Penyesuaian selisih akan dicatat sebagai rekonsiliasi kas terpisah dan tidak mengubah transaksi penjualan di buku besar (ledger).
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* General End Notes */}
+              <div>
+                <label className="text-[11px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                  Catatan Penutupan Shift (Opsional)
+                </label>
+                <textarea
+                  rows={2}
+                  value={endNotes ?? ''}
+                  onChange={(e) => setEndNotes(e.target.value)}
+                  placeholder="Catatan umum kondisi laci, pergantian shift, stok menipis, dll."
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:border-slate-400 resize-none"
+                />
+              </div>
+
+              {errorMsg && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-center gap-2 text-rose-700 text-xs font-bold">
+                  <AlertTriangle size={16} className="shrink-0" />
+                  <span>{errorMsg}</span>
                 </div>
               )}
             </div>
-          )}
 
-          {/* General End Notes */}
-          <div>
-            <label className="text-[11px] font-black uppercase tracking-wider text-slate-500 block mb-1">
-              Catatan Penutupan Shift (Opsional)
-            </label>
-            <textarea
-              rows={2}
-              value={endNotes ?? ''}
-              onChange={(e) => setEndNotes(e.target.value)}
-              placeholder="Catatan umum kondisi laci, pergantian shift, stok menipis, dll."
-              className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:border-slate-400 resize-none"
-            />
-          </div>
-
-          {errorMsg && (
-            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-center gap-2 text-rose-700 text-xs font-bold">
-              <AlertTriangle size={16} className="shrink-0" />
-              <span>{errorMsg}</span>
+            {/* Footer Actions */}
+            <div className="pt-4 border-t border-slate-100 flex gap-3">
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={isSubmitting}
+                className="flex-1 py-3.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-xs uppercase tracking-wider rounded-xl transition-all"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmClose}
+                disabled={isSubmitting}
+                className="flex-[2] py-3.5 bg-rose-600 hover:bg-rose-500 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-rose-200 transition-all flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-wait"
+              >
+                {isSubmitting ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <span>Memproses...</span>
+                  </>
+                ) : (
+                  <>
+                    <Lock size={16} />
+                    <span>Tutup Shift & Rekonsiliasi Kas</span>
+                  </>
+                )}
+              </button>
             </div>
-          )}
-        </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-        {/* Footer Actions */}
-        <div className="pt-4 border-t border-slate-100 flex gap-3">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={isSubmitting}
-            className="flex-1 py-3.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-xs uppercase tracking-wider rounded-xl transition-all"
-          >
-            Batal
-          </button>
-          <button
-            type="button"
-            onClick={handleConfirmClose}
-            disabled={isSubmitting}
-            className="flex-2 py-3.5 bg-rose-600 hover:bg-rose-500 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-rose-200 transition-all flex items-center justify-center gap-2"
-          >
-            <Lock size={16} />
-            {isSubmitting ? 'Memproses Closing...' : 'Tutup Shift & Rekonsiliasi Kas'}
-          </button>
-        </div>
-      </motion.div>
+      {/* WhatsApp Share Modal */}
+      {closingMetricsForShare && (
+        <ShiftClosingShareModal
+          isOpen={showShareModal}
+          metrics={closingMetricsForShare}
+          onClose={() => {
+            setShowShareModal(false);
+            if (onSuccess) onSuccess();
+            onClose();
+          }}
+        />
+      )}
     </div>
   );
 }

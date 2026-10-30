@@ -13,6 +13,7 @@ export interface ShiftClosingMetrics {
   cashOut: number;
   cashSales: number;
   paymentBreakdown: Record<string, number>;
+  storageBreakdown: Record<string, number>;
   expectedCash: number;
 }
 
@@ -175,24 +176,32 @@ export class ShiftService {
       HUTANG: 0
     };
 
+    const storageBreakdown: Record<string, number> = {
+      WARUNG: 0,
+      IKAN: 0,
+      UANG_DIGITAL: 0
+    };
+
     let cashSales = 0;
     let cashReturns = 0;
     for (const tx of transactions) {
+      const storage = tx.moneyStorageId || 'WARUNG';
       if (tx.type === 'GAJIAN') {
         paymentBreakdown.HUTANG = (paymentBreakdown.HUTANG || 0) + (tx.total || 0);
+        storageBreakdown[storage] = (storageBreakdown[storage] || 0) + (tx.total || 0);
         continue;
       }
       if (tx.type === 'RETURN') {
         const method = (tx.paymentMethodId || 'CASH').toUpperCase();
-        const storage = tx.moneyStorageId || 'WARUNG';
         if (method === 'CASH' && (storage === 'WARUNG' || storage === 'IKAN')) {
           cashReturns += (tx.total || 0);
         }
+        storageBreakdown[storage] = (storageBreakdown[storage] || 0) - (tx.total || 0);
         continue;
       }
       const method = (tx.paymentMethodId || 'CASH').toUpperCase();
-      const storage = tx.moneyStorageId || 'WARUNG';
       paymentBreakdown[method] = (paymentBreakdown[method] || 0) + (tx.total || 0);
+      storageBreakdown[storage] = (storageBreakdown[storage] || 0) + (tx.total || 0);
       if (method === 'CASH' && (storage === 'WARUNG' || storage === 'IKAN')) {
         cashSales += (tx.total || 0);
       }
@@ -228,6 +237,7 @@ export class ShiftService {
       cashOut,
       cashSales,
       paymentBreakdown,
+      storageBreakdown,
       expectedCash
     };
   }

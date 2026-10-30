@@ -107,6 +107,21 @@ export default function ShiftSummaryWidget({ onOpenShiftTab }: { onOpenShiftTab?
     const count = txs.length;
     const avgBasket = count > 0 ? Math.round(total / count) : 0;
 
+    const storageBreakdown: Record<string, number> = {
+      WARUNG: 0,
+      IKAN: 0,
+      UANG_DIGITAL: 0
+    };
+
+    for (const tx of txs) {
+      const storage = tx.moneyStorageId || 'WARUNG';
+      if (tx.type === 'RETURN') {
+        storageBreakdown[storage] = (storageBreakdown[storage] || 0) - (tx.total || 0);
+      } else {
+        storageBreakdown[storage] = (storageBreakdown[storage] || 0) + (tx.total || 0);
+      }
+    }
+
     return {
       count,
       totalSales: total,
@@ -116,6 +131,7 @@ export default function ShiftSummaryWidget({ onOpenShiftTab }: { onOpenShiftTab?
       gajianSales: gajian,
       heldCount: held,
       avgBasket,
+      storageBreakdown
     };
   }, [currentShift, currentUser]);
 
@@ -352,12 +368,42 @@ export default function ShiftSummaryWidget({ onOpenShiftTab }: { onOpenShiftTab?
               (Modal + Tunai)
             </span>
           </div>
+
+          {/* Storage Breakdown Row */}
+          <div className="bg-slate-900/90 p-2.5 rounded-xl border border-slate-800 col-span-2 sm:col-span-4 mt-1">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">
+                Omzet per Storage Keuangan
+              </span>
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              <div className="flex flex-col">
+                <span className="text-[8px] text-slate-500 font-bold uppercase">Warung</span>
+                <span className="font-black text-slate-200 tabular-nums">
+                  Rp {(shiftMetrics?.storageBreakdown?.['WARUNG'] || 0).toLocaleString()}
+                </span>
+              </div>
+              <div className="flex flex-col border-l border-slate-800 pl-4">
+                <span className="text-[8px] text-slate-500 font-bold uppercase">Ikan</span>
+                <span className="font-black text-blue-400 tabular-nums">
+                  Rp {(shiftMetrics?.storageBreakdown?.['IKAN'] || 0).toLocaleString()}
+                </span>
+              </div>
+              <div className="flex flex-col border-l border-slate-800 pl-4">
+                <span className="text-[8px] text-slate-500 font-bold uppercase">Digital</span>
+                <span className="font-black text-emerald-400 tabular-nums">
+                  Rp {(shiftMetrics?.storageBreakdown?.['UANG_DIGITAL'] || 0).toLocaleString()}
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
       {/* Clock Out Modal */}
       <ClockOutModal
         isOpen={isClockOutModalOpen}
+        shiftId={currentShift?.shiftId}
         onClose={() => setIsClockOutModalOpen(false)}
       />
     </div>

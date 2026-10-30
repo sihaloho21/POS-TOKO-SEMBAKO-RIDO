@@ -21,7 +21,8 @@ import {
   Smartphone,
   Receipt,
   TrendingUp,
-  FileText
+  FileText,
+  Wallet
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -54,6 +55,31 @@ export default function Shift({ onNavigate }: { onNavigate?: (tab: string) => vo
       return [];
     }
   }, []);
+
+  const liveMetrics = useLiveQuery(async () => {
+    if (!currentShift) return null;
+    const txs = await db.transactions
+      .where('shiftId')
+      .equals(currentShift.shiftId)
+      .filter(tx => tx.status === 'COMPLETED')
+      .toArray();
+
+    const breakdown: Record<string, number> = {
+      WARUNG: 0,
+      IKAN: 0,
+      UANG_DIGITAL: 0
+    };
+
+    for (const tx of txs) {
+      const storage = tx.moneyStorageId || 'WARUNG';
+      if (tx.type === 'RETURN') {
+        breakdown[storage] = (breakdown[storage] || 0) - (tx.total || 0);
+      } else {
+        breakdown[storage] = (breakdown[storage] || 0) + (tx.total || 0);
+      }
+    }
+    return { storageBreakdown: breakdown };
+  }, [currentShift]);
 
   const [startingCashBills, setStartingCashBills] = useState('50000');
   const [startingCashCoins, setStartingCashCoins] = useState('0');
@@ -229,6 +255,35 @@ export default function Shift({ onNavigate }: { onNavigate?: (tab: string) => vo
                 </div>
               </div>
 
+              {/* Live Storage Summary during Shift */}
+              <div className="p-5 bg-slate-900 rounded-2xl border border-slate-800 shadow-lg">
+                <div className="flex items-center gap-2 mb-4">
+                  <Wallet size={16} className="text-slate-400" />
+                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Live Omzet per Storage</span>
+                </div>
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="space-y-1">
+                    <span className="text-[9px] font-black text-slate-500 uppercase block">Warung</span>
+                    <span className="text-sm font-black text-slate-200 tabular-nums">
+                      Rp {(liveMetrics?.storageBreakdown?.['WARUNG'] || 0).toLocaleString()} 
+                    </span>
+                  </div>
+                  <div className="space-y-1 border-l border-slate-800 pl-4">
+                    <span className="text-[9px] font-black text-slate-500 uppercase block">Ikan</span>
+                    <span className="text-sm font-black text-blue-400 tabular-nums">
+                      Rp {(liveMetrics?.storageBreakdown?.['IKAN'] || 0).toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="space-y-1 border-l border-slate-800 pl-4">
+                    <span className="text-[9px] font-black text-slate-500 uppercase block">Digital</span>
+                    <span className="text-sm font-black text-emerald-400 tabular-nums">
+                      Rp {(liveMetrics?.storageBreakdown?.['UANG_DIGITAL'] || 0).toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+                <p className="text-[9px] text-slate-500 mt-4 italic">* Data real-time dari transaksi berjalan</p>
+              </div>
+
               <div className="p-6 bg-gradient-to-br from-rose-50 to-amber-50 rounded-2xl border border-rose-100 space-y-4">
                 <div className="flex items-center gap-2 text-rose-800">
                   <Lock size={18} className="text-rose-600" />
@@ -330,6 +385,7 @@ export default function Shift({ onNavigate }: { onNavigate?: (tab: string) => vo
       {/* Comprehensive Clock Out Modal */}
       <ClockOutModal
         isOpen={isClockOutModalOpen}
+        shiftId={currentShift?.shiftId}
         onClose={() => setIsClockOutModalOpen(false)}
       />
     </div>
