@@ -55,7 +55,8 @@ export default function Shift({ onNavigate }: { onNavigate?: (tab: string) => vo
     }
   }, []);
 
-  const [startingCash, setStartingCash] = useState('50000');
+  const [startingCashBills, setStartingCashBills] = useState('50000');
+  const [startingCashCoins, setStartingCashCoins] = useState('0');
   const [openShiftNotes, setOpenShiftNotes] = useState('');
   const [isClockOutModalOpen, setIsClockOutModalOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -64,10 +65,13 @@ export default function Shift({ onNavigate }: { onNavigate?: (tab: string) => vo
     if (!currentUser) return;
     setIsLoading(true);
     try {
+      const totalStartingCash = (Number(startingCashBills) || 0) + (Number(startingCashCoins) || 0);
       await ShiftService.openShift({
         userId: currentUser.userId,
         deviceId,
-        startingCash: Number(startingCash) || 0,
+        startingCash: totalStartingCash,
+        startingCashBills: Number(startingCashBills) || 0,
+        startingCashCoins: Number(startingCashCoins) || 0,
         notes: openShiftNotes.trim()
       });
       if (openShiftNotes.trim()) {
@@ -156,33 +160,42 @@ export default function Shift({ onNavigate }: { onNavigate?: (tab: string) => vo
               )}
 
               <div className="p-6 bg-slate-50 rounded-2xl border border-slate-100">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-4">
-                  Modal Awal Kas (Laci)
-                </label>
-                <div className="relative">
-                  <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">Rp</div>
-                  <input 
-                    type="number"
-                    className="w-full pl-12 pr-4 py-4 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-black text-xl tabular-nums"
-                    value={startingCash ?? ''}
-                    onChange={(e) => setStartingCash(e.target.value)}
-                  />
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                  <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">
+                      Modal UANG LEMBARAN
+                    </label>
+                    <div className="relative">
+                      <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-xs">Rp</div>
+                      <input 
+                        type="number"
+                        className="w-full pl-9 pr-3 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none font-black text-lg tabular-nums"
+                        value={startingCashBills ?? ''}
+                        onChange={(e) => setStartingCashBills(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">
+                      Modal UANG KOIN
+                    </label>
+                    <div className="relative">
+                      <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-xs">Rp</div>
+                      <input 
+                        type="number"
+                        className="w-full pl-9 pr-3 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none font-black text-lg tabular-nums"
+                        value={startingCashCoins ?? ''}
+                        onChange={(e) => setStartingCashCoins(e.target.value)}
+                      />
+                    </div>
+                  </div>
                 </div>
-                <p className="text-[10px] text-slate-400 font-bold mt-4">
-                  Pastikan jumlah uang di laci sama dengan yang diinput.
-                </p>
 
-                <div className="mt-4">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">
-                    Catatan Modal Awal / Notes (Opsional)
-                  </label>
-                  <textarea 
-                    rows={2}
-                    className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none font-medium text-xs resize-none"
-                    placeholder="Contoh: Ada selisih modal awal, kembalian receh kurang..."
-                    value={openShiftNotes ?? ''}
-                    onChange={(e) => setOpenShiftNotes(e.target.value)}
-                  />
+                <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-2xl flex justify-between items-center">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-emerald-700">Total Modal Awal</span>
+                  <span className="text-xl font-black text-emerald-900 tabular-nums">
+                    Rp {((Number(startingCashBills) || 0) + (Number(startingCashCoins) || 0)).toLocaleString()}
+                  </span>
                 </div>
               </div>
 
@@ -204,6 +217,9 @@ export default function Shift({ onNavigate }: { onNavigate?: (tab: string) => vo
                   <p className="text-lg font-black text-slate-900 tabular-nums">
                     Rp {currentShift.startingCash.toLocaleString()}
                   </p>
+                  <div className="text-[9px] font-bold text-slate-500 mt-1">
+                    L: Rp {(currentShift.startingCashBills || 0).toLocaleString()} • K: Rp {(currentShift.startingCashCoins || 0).toLocaleString()}
+                  </div>
                 </div>
                 <div className="p-4 bg-blue-50 rounded-2xl border border-blue-100">
                   <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-1">Kasir Bertugas</p>
@@ -288,6 +304,11 @@ export default function Shift({ onNavigate }: { onNavigate?: (tab: string) => vo
                   <p className="text-xs font-black text-slate-900 tabular-nums">
                     Modal: Rp {s.startingCash.toLocaleString()}
                   </p>
+                  {(s.startingCashBills || s.startingCashCoins) && (
+                    <p className="text-[9px] font-bold text-slate-400 tabular-nums">
+                      L: {(s.startingCashBills || 0).toLocaleString()} • K: {(s.startingCashCoins || 0).toLocaleString()}
+                    </p>
+                  )}
                   {s.totalSales !== undefined && (
                     <p className="text-[11px] font-bold text-emerald-600 tabular-nums">
                       Omzet: Rp {s.totalSales.toLocaleString()}

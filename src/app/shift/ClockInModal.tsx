@@ -26,7 +26,8 @@ interface ClockInModalProps {
 export default function ClockInModal({ isOpen, onClose, onSuccess }: ClockInModalProps) {
   const { currentUser } = useAuthStore();
   const { addToast } = useToastStore();
-  const [startingCash, setStartingCash] = useState<string>('50000');
+  const [startingCashBills, setStartingCashBills] = useState<string>('50000');
+  const [startingCashCoins, setStartingCashCoins] = useState<string>('0');
   const [notes, setNotes] = useState<string>('');
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
   const [isLoading, setIsLoading] = useState(false);
@@ -55,10 +56,13 @@ export default function ClockInModal({ isOpen, onClose, onSuccess }: ClockInModa
     setIsLoading(true);
 
     try {
+      const totalStartingCash = (Number(startingCashBills) || 0) + (Number(startingCashCoins) || 0);
       const shiftId = await ShiftService.openShift({
         userId: currentUser.userId,
         deviceId,
-        startingCash: Number(startingCash) || 0,
+        startingCash: totalStartingCash,
+        startingCashBills: Number(startingCashBills) || 0,
+        startingCashCoins: Number(startingCashCoins) || 0,
         notes: notes.trim()
       });
 
@@ -185,27 +189,49 @@ export default function ClockInModal({ isOpen, onClose, onSuccess }: ClockInModa
           </div>
         </div>
 
-        {/* Starting Cash Input */}
-        <div className="space-y-3 mb-6">
-          <div>
-            <label className="text-[11px] font-black uppercase tracking-wider text-slate-600 block mb-1">
-              Modal Awal di Laci Kasir (Starting Cash)
-            </label>
-            <p className="text-[10px] text-slate-400 font-medium mb-2">
-              Masukkan jumlah uang receh/pecahan kasir awal yang diterima sebelum memulai penjualan.
-            </p>
-            <div className="relative">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 font-black text-slate-400 text-sm">
-                Rp
-              </span>
-              <input
-                type="number"
-                value={startingCash ?? ''}
-                onChange={(e) => setStartingCash(e.target.value)}
-                placeholder="0"
-                className="w-full pl-12 pr-4 py-3 bg-slate-50 border-2 border-slate-200 rounded-2xl text-xl font-black text-slate-900 focus:bg-white focus:border-emerald-500 outline-none tabular-nums transition-all"
-              />
+        <div className="space-y-4 mb-6">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[10px] font-black uppercase tracking-wider text-slate-600 block mb-1">
+                Modal UANG LEMBARAN
+              </label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 font-black text-slate-400 text-xs">
+                  Rp
+                </span>
+                <input
+                  type="number"
+                  value={startingCashBills ?? ''}
+                  onChange={(e) => setStartingCashBills(e.target.value)}
+                  placeholder="0"
+                  className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border-2 border-slate-200 rounded-xl text-sm font-black text-slate-900 focus:bg-white focus:border-emerald-500 outline-none tabular-nums transition-all"
+                />
+              </div>
             </div>
+            <div>
+              <label className="text-[10px] font-black uppercase tracking-wider text-slate-600 block mb-1">
+                Modal UANG KOIN
+              </label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 font-black text-slate-400 text-xs">
+                  Rp
+                </span>
+                <input
+                  type="number"
+                  value={startingCashCoins ?? ''}
+                  onChange={(e) => setStartingCashCoins(e.target.value)}
+                  placeholder="0"
+                  className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border-2 border-slate-200 rounded-xl text-sm font-black text-slate-900 focus:bg-white focus:border-emerald-500 outline-none tabular-nums transition-all"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-2xl flex justify-between items-center">
+            <span className="text-[10px] font-black uppercase tracking-wider text-emerald-700">Total Modal di Laci</span>
+            <span className="text-lg font-black text-emerald-900 tabular-nums">
+              Rp {((Number(startingCashBills) || 0) + (Number(startingCashCoins) || 0)).toLocaleString()}
+            </span>
           </div>
 
           {/* Quick Cash Chips */}
@@ -214,14 +240,17 @@ export default function ClockInModal({ isOpen, onClose, onSuccess }: ClockInModa
               <button
                 key={opt}
                 type="button"
-                onClick={() => setStartingCash(opt.toString())}
+                onClick={() => {
+                  setStartingCashBills(opt.toString());
+                  setStartingCashCoins('0');
+                }}
                 className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all ${
-                  startingCash === opt.toString()
+                  (Number(startingCashBills) || 0) + (Number(startingCashCoins) || 0) === opt
                     ? 'bg-emerald-600 text-white shadow-sm'
                     : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                 }`}
               >
-                {opt === 0 ? 'Tanpa Modal (Rp 0)' : `Rp ${opt.toLocaleString()}`}
+                {opt === 0 ? 'Tanpa Modal' : `Rp ${opt.toLocaleString()}`}
               </button>
             ))}
           </div>

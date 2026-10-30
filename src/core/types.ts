@@ -358,6 +358,8 @@ export interface CashierShift {
   startTime: string;
   endTime?: string;
   startingCash: number;
+  startingCashBills?: number;
+  startingCashCoins?: number;
   expectedCash?: number;
   actualCash?: number;
   discrepancy?: number;

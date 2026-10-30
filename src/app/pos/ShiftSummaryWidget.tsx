@@ -27,7 +27,8 @@ export default function ShiftSummaryWidget({ onOpenShiftTab }: { onOpenShiftTab?
   const [isExpanded, setIsExpanded] = useState(false);
   const [isOpeningShift, setIsOpeningShift] = useState(false);
   const [isClockOutModalOpen, setIsClockOutModalOpen] = useState(false);
-  const [startingCashInput, setStartingCashInput] = useState('50000');
+  const [startingCashBillsInput, setStartingCashBillsInput] = useState('50000');
+  const [startingCashCoinsInput, setStartingCashCoinsInput] = useState('0');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const deviceId = useDeviceId();
@@ -122,10 +123,13 @@ export default function ShiftSummaryWidget({ onOpenShiftTab }: { onOpenShiftTab?
     if (!currentUser) return;
     setIsSubmitting(true);
     try {
+      const totalStartingCash = (Number(startingCashBillsInput) || 0) + (Number(startingCashCoinsInput) || 0);
       await ShiftService.openShift({
         userId: currentUser.userId,
         deviceId,
-        startingCash: Number(startingCashInput) || 0
+        startingCash: totalStartingCash,
+        startingCashBills: Number(startingCashBillsInput) || 0,
+        startingCashCoins: Number(startingCashCoinsInput) || 0
       });
       setIsOpeningShift(false);
     } catch (err: any) {
@@ -155,23 +159,35 @@ export default function ShiftSummaryWidget({ onOpenShiftTab }: { onOpenShiftTab?
         </div>
 
         {isOpeningShift && !otherDeviceShift ? (
-          <div className="flex items-center gap-2 w-full sm:w-auto">
-            <div className="relative">
-              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[10px] text-slate-400 font-bold">Rp</span>
-              <input
-                type="number"
-                value={startingCashInput ?? ''}
-                onChange={(e) => setStartingCashInput(e.target.value)}
-                placeholder="Modal Awal"
-                className="pl-7 pr-3 py-1.5 bg-slate-800 border border-slate-700 rounded-xl text-white font-bold text-xs w-28 focus:border-blue-500 outline-none"
-              />
+          <div className="flex flex-col sm:flex-row items-center gap-2 w-full sm:w-auto">
+            <div className="flex gap-2">
+              <div className="relative">
+                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[8px] text-slate-400 font-bold">L:</span>
+                <input
+                  type="number"
+                  value={startingCashBillsInput ?? ''}
+                  onChange={(e) => setStartingCashBillsInput(e.target.value)}
+                  placeholder="Lembar"
+                  className="pl-5 pr-2 py-1.5 bg-slate-800 border border-slate-700 rounded-xl text-white font-bold text-[10px] w-20 focus:border-blue-500 outline-none"
+                />
+              </div>
+              <div className="relative">
+                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[8px] text-slate-400 font-bold">K:</span>
+                <input
+                  type="number"
+                  value={startingCashCoinsInput ?? ''}
+                  onChange={(e) => setStartingCashCoinsInput(e.target.value)}
+                  placeholder="Koin"
+                  className="pl-5 pr-2 py-1.5 bg-slate-800 border border-slate-700 rounded-xl text-white font-bold text-[10px] w-20 focus:border-blue-500 outline-none"
+                />
+              </div>
             </div>
             <button
               onClick={handleQuickOpenShift}
               disabled={isSubmitting}
-              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase text-[10px] tracking-wider rounded-xl transition-all shadow-md shadow-emerald-900/30"
+              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase text-[10px] tracking-wider rounded-xl transition-all shadow-md shadow-emerald-900/30 whitespace-nowrap"
             >
-              {isSubmitting ? 'Buka...' : 'Mulai Shift'}
+              {isSubmitting ? 'Buka...' : 'Mulai'}
             </button>
             <button
               onClick={() => setIsOpeningShift(false)}
@@ -296,9 +312,15 @@ export default function ShiftSummaryWidget({ onOpenShiftTab }: { onOpenShiftTab?
             <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 block mb-0.5">
               Modal Awal (Kasir)
             </span>
-            <span className="font-black text-slate-200 tabular-nums text-sm">
-              Rp {startingCash.toLocaleString()}
-            </span>
+            <div className="flex justify-between items-end">
+              <span className="font-black text-slate-200 tabular-nums text-sm">
+                Rp {startingCash.toLocaleString()}
+              </span>
+              <div className="text-[8px] font-bold text-slate-500 text-right leading-tight">
+                <div>L: Rp {(currentShift.startingCashBills || 0).toLocaleString()}</div>
+                <div>K: Rp {(currentShift.startingCashCoins || 0).toLocaleString()}</div>
+              </div>
+            </div>
           </div>
 
           <div className="bg-slate-900/90 p-2.5 rounded-xl border border-slate-800">

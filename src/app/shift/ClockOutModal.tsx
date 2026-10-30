@@ -197,7 +197,20 @@ export default function ClockOutModal({ isOpen, shiftId, onClose, onSuccess }: C
         {/* Content Body */}
         <div className="py-6 space-y-6 max-h-[calc(85vh-160px)] overflow-y-auto pr-1">
           {/* Metrics Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+            <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-2xl">
+              <div className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">
+                <Banknote size={12} /> Modal Awal
+              </div>
+              <p className="text-lg font-black text-slate-900 tabular-nums">
+                Rp {targetShift.startingCash.toLocaleString()}
+              </p>
+              <div className="flex flex-col text-[9px] font-bold text-slate-400 mt-0.5">
+                <span>Lembar: Rp {(targetShift.startingCashBills || 0).toLocaleString()}</span>
+                <span>Koin: Rp {(targetShift.startingCashCoins || 0).toLocaleString()}</span>
+              </div>
+            </div>
+
             <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-2xl">
               <div className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">
                 <Receipt size={12} /> Transaksi
@@ -245,7 +258,14 @@ export default function ClockOutModal({ isOpen, shiftId, onClose, onSuccess }: C
               <span className="text-[11px] font-black uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
                 <CreditCard size={14} /> Rincian Metode Pembayaran (Payment Breakdown)
               </span>
-              <span className="text-[10px] font-bold text-slate-400">Modal Awal: Rp {targetShift.startingCash.toLocaleString()}</span>
+              <span className="text-[10px] font-bold text-slate-400">
+                Modal Awal: Rp {targetShift.startingCash.toLocaleString()} 
+                { (targetShift.startingCashBills || targetShift.startingCashCoins) ? (
+                  <span className="ml-1 opacity-70">
+                    (L: Rp {(targetShift.startingCashBills || 0).toLocaleString()}, K: Rp {(targetShift.startingCashCoins || 0).toLocaleString()})
+                  </span>
+                ) : null }
+              </span>
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">

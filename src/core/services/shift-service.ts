@@ -26,6 +26,8 @@ export class ShiftService {
     userId: string;
     deviceId: string;
     startingCash: number;
+    startingCashBills?: number;
+    startingCashCoins?: number;
     notes?: string;
     startNotes?: string;
   }): Promise<string> {
@@ -68,6 +70,8 @@ export class ShiftService {
       deviceIds: [params.deviceId],
       startTime: timestamp,
       startingCash: params.startingCash,
+      startingCashBills: params.startingCashBills,
+      startingCashCoins: params.startingCashCoins,
       startNotes,
       notes: startNotes,
       status: 'OPEN'
@@ -180,14 +184,16 @@ export class ShiftService {
       }
       if (tx.type === 'RETURN') {
         const method = (tx.paymentMethodId || 'CASH').toUpperCase();
-        if (method === 'CASH' && (tx.moneyStorageId || 'WARUNG') === 'WARUNG') {
+        const storage = tx.moneyStorageId || 'WARUNG';
+        if (method === 'CASH' && (storage === 'WARUNG' || storage === 'IKAN')) {
           cashReturns += (tx.total || 0);
         }
         continue;
       }
       const method = (tx.paymentMethodId || 'CASH').toUpperCase();
+      const storage = tx.moneyStorageId || 'WARUNG';
       paymentBreakdown[method] = (paymentBreakdown[method] || 0) + (tx.total || 0);
-      if (method === 'CASH' && (tx.moneyStorageId || 'WARUNG') === 'WARUNG') {
+      if (method === 'CASH' && (storage === 'WARUNG' || storage === 'IKAN')) {
         cashSales += (tx.total || 0);
       }
     }
@@ -199,14 +205,15 @@ export class ShiftService {
     
     let cashFromReceivables = 0;
     for (const p of shiftPayments) {
-      if ((p.paymentMethodId || 'CASH').toUpperCase() === 'CASH' && (p.moneyStorageId || 'WARUNG') === 'WARUNG') {
+      const storage = p.moneyStorageId || 'WARUNG';
+      if ((p.paymentMethodId || 'CASH').toUpperCase() === 'CASH' && (storage === 'WARUNG' || storage === 'IKAN')) {
         cashFromReceivables += (p.amount || 0);
       }
     }
 
     // Cash out: expenses or petty cash out during this shift
     const expenses = await db.financeEvents
-      .filter(e => Boolean(e.referenceId === shiftId && e.direction === 'OUT' && e.storageId === 'WARUNG'))
+      .filter(e => Boolean(e.referenceId === shiftId && e.direction === 'OUT' && (e.storageId === 'WARUNG' || e.storageId === 'IKAN')))
       .toArray();
     const cashOut = expenses.reduce((acc, e) => acc + (e.amount || 0), 0);
 
