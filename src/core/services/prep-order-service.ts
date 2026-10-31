@@ -1,4 +1,5 @@
 import { db } from '@/core/database';
+import { cloudSetDoc, cloudUpdateDoc, cloudDeleteDoc } from '@/core/firestore-realtime';
 import type { 
   PrepOrder, 
   PrepOrderItem, 
@@ -115,35 +116,17 @@ export class PrepOrderService {
       updatedAt: now
     };
 
-    await db.prepOrders.put(newOrder);
-
-    // Queue for sync engine
-    try {
-      await db.syncQueue.put({
-        entityType: 'TRANSACTION',
-        entityId: orderId,
-        payload: {
-          type: 'PREP_ORDER',
-          ...newOrder
-        },
-        action: 'CREATE',
-        status: 'PENDING',
-        retryCount: 0,
-        createdAt: now
-      });
-    } catch (e) {
-      console.warn('Sync queue error for prepOrder:', e);
-    }
+    // Direct write to Cloud Firestore (Realtime & Instant)
+    await cloudSetDoc('prepOrders', orderId, newOrder);
 
     return newOrder;
   }
 
   /**
-   * Update the status of an order
+   * Update the status of an order directly in cloud
    */
   static async updateStatus(orderId: string, status: PrepOrderStatus, staffName?: string): Promise<void> {
     const existing = await db.prepOrders.get(orderId);
-    if (!existing) return;
 
     const now = new Date().toISOString();
     const updates: Partial<PrepOrder> = {
@@ -151,33 +134,32 @@ export class PrepOrderService {
       updatedAt: now
     };
 
-    if (status === 'IN_PROGRESS' && !existing.startedAt) {
+    if (status === 'IN_PROGRESS' && !existing?.startedAt) {
       updates.startedAt = now;
       if (staffName) updates.assignedStaffName = staffName;
     } else if (status === 'READY') {
       updates.readyAt = now;
-      if (staffName && !existing.assignedStaffName) updates.assignedStaffName = staffName;
+      if (staffName && !existing?.assignedStaffName) updates.assignedStaffName = staffName;
     } else if (status === 'COMPLETED') {
       updates.completedAt = now;
       updates.paymentStatus = 'PAID';
     }
 
-    await db.prepOrders.update(orderId, updates);
+    await cloudUpdateDoc('prepOrders', orderId, updates);
   }
 
   /**
-   * Update order details
+   * Update order details directly in cloud
    */
   static async updateOrder(orderId: string, updates: Partial<PrepOrder>): Promise<void> {
     const existing = await db.prepOrders.get(orderId);
-    if (!existing) return;
 
-    const items = updates.items || existing.items;
+    const items = updates.items || existing?.items || [];
     const totalWeightKg = items.reduce((sum, item) => sum + (Number(item.weightKg) || 0), 0);
     const totalQuantityPcs = items.reduce((sum, item) => sum + (item.quantityUnit === 'PCS' ? (Number(item.quantityValue) || 0) : 0), 0);
-    const totalEstimatedPrice = items.reduce((sum, item) => sum + (Number(item.estimatedPrice) || 0), 0) + (Number(updates.deliveryFee ?? existing.deliveryFee) || 0);
+    const totalEstimatedPrice = items.reduce((sum, item) => sum + (Number(item.estimatedPrice) || 0), 0) + (Number(updates.deliveryFee ?? existing?.deliveryFee) || 0);
 
-    await db.prepOrders.update(orderId, {
+    await cloudUpdateDoc('prepOrders', orderId, {
       ...updates,
       items,
       totalWeightKg,
@@ -188,10 +170,10 @@ export class PrepOrderService {
   }
 
   /**
-   * Delete an order
+   * Delete an order directly from cloud
    */
   static async deleteOrder(orderId: string): Promise<void> {
-    await db.prepOrders.delete(orderId);
+    await cloudDeleteDoc('prepOrders', orderId);
   }
 
   /**

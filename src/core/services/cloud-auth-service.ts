@@ -48,6 +48,11 @@ onAuthStateChanged(auth, async (user) => {
     } catch (e) {
       console.warn('Auto-upsert cloud user doc warning:', e);
     }
+
+    // Trigger cloud migration once authenticated session is available
+    import('./cloud-migration-service').then(({ CloudMigrationService }) => {
+      CloudMigrationService.migrateLocalToCloud().catch(err => console.warn('Cloud migration on auth change notice:', err));
+    });
   }
 });
 
@@ -95,7 +100,7 @@ export class CloudAuthService {
       store.setFirebaseUser(cred.user);
       return cred.user;
     } catch (err: any) {
-      console.error('Google Sign-In Error:', err);
+      console.warn('Google Sign-In Notice:', err?.code || err?.message || err);
       let userFriendlyMsg = err?.message || 'Gagal login dengan akun Google';
       if (err?.code === 'auth/popup-blocked') {
         userFriendlyMsg = 'Jendela pop-up login Google diblokir oleh browser. Harap izinkan pop-up (Allow pop-ups) pada browser Anda.';

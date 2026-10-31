@@ -1,91 +1,138 @@
-# Rencana Implementasi: Menu Terpisah "Jadwal & To-Do Pemesanan" (Ikan, Buah, Sembako)
+# Arsitektur Realtime Cloud-First (Direct Firestore & Zero Interval Sync)
 
-Dokumen ini merinci rencana teknis pembuatan menu terpisah berdedikasi untuk manajemen **Jadwal Pemesanan dan To-Do List Operasional** bagi lini bisnis **Ikan**, **Buah**, dan **Sembako** di Toko Harapan Jaya.
-
----
-
-## 1. Lingkup & Sasaran
-
-1. **Menu Terpisah di Navigasi Sidebar**:
-   - Menambahkan menu baru bernama **"Jadwal & To-Do"** (`order-schedule`) di `DashboardLayout.tsx` dan router `App.tsx`.
-   - Menggunakan ikon yang representatif (`CalendarClock` atau `ClipboardList`).
-   - Dapat diakses oleh **Owner** maupun **Kasir** (kasir dapat melihat to-do harian, menyelesaikan checklist, dan menambah pesanan saat ada pemesanan dari pembeli).
-2. **Kategori Multi-Produk**:
-   - **Ikan**: Tanggal kirim/ambil, berat (Kg), estimasi ekor/kg, opsi pembersihan (sisik, insang, isi perut), model potongan (utuh, kerat, potong 2/3/4, belah bakar, fillet), catatan boks/es.
-   - **Buah**: Tanggal kirim/ambil, berat (Kg) atau Pcs/Keranjang, tingkat kematangan (matang pohon, mengkal, setengah matang, siap makan), sortir grade super/mulus, kemasan parcel/dus/plastik.
-   - **Sembako**: Tanggal kirim/ambil, jumlah (Pcs, Sak, Karton, Bal, Dus, Kg), repack/timbang eceran, paket bundling/bansos, pemeriksaan segel dan mutu.
-3. **Detail Pemesanan Sesuai Arahan Pengguna**:
-   - **Tipe Pengambilan**: Tanggal Kirim (*Delivery* ke alamat pembeli) ATAU Tanggal Diambil di Tempat (*Pick-up* di toko).
-   - **Kuantitas**: Jumlah Kg atau Pcs/Karton/Dus.
-   - **Catatan Spesifikasi**: Formulir dinamis sesuai kategori yang dipilih.
-   - **Status Lifecycle To-Do**:
-     - `PENDING` (Menunggu Pengerjaan)
-     - `IN_PROGRESS` (Sedang Dikerjakan/Dibersihkan)
-     - `READY` (Siap Diambil/Dikirim)
-     - `COMPLETED` (Selesai Diserahkan)
-     - `CANCELLED` (Dibatalkan)
-4. **Fitur Operasional Tambahan**:
-   - Filter Waktu Cepat: *Hari Ini*, *Besok*, *Minggu Ini*, *Semua*.
-   - Filter Kategori: Tab Cepat *Semua*, *🐟 Ikan*, *🍎 Buah*, *📦 Sembako*.
-   - Filter Tipe: *Semua*, *🏪 Ambil di Toko*, *🚗 Kirim ke Alamat*.
-   - Dual View: Tampilan Kartu Kanban To-Do & Tampilan Tabel Lengkap.
-   - Aksi 1-Klik: Ubah status langsung dari kartu tugas.
-   - Cetak SPK / Surat Perintah Kerja untuk ditempel di kemasan pesanan.
-   - Quick WhatsApp reminder ("Pesanan telah siap diambil").
+Transformasi arsitektur sistem Toko Harapan Jaya dari model *Local-First Offline-First* (antrean sinkronisasi bertahap / *sync queue interval*) menjadi **Realtime Cloud-First Database**. Seluruh data disimpan langsung ke Google Cloud Firestore dan disiarkan secara instan (*sub-second onSnapshot*) ke semua perangkat (komputer kasir, tablet gudang, smartphone owner) tanpa penundaan atau tombol manual upload.
 
 ---
 
-## 2. Rincian Perubahan Kode
+## User Review & Critical Decisions
 
-### A. Data Layer & Schema (`src/core/types.ts` & `src/core/database.ts`)
-- Memperluas tipe `PrepOrder` / membuat entitas fleksibel `ScheduleOrder`:
-  - `category`: `'IKAN' | 'BUAH' | 'SEMBAKO' | 'CAMPURAN'`
-  - `fulfillmentType`: `'PICKUP' | 'DELIVERY'`
-  - `deliveryAddress?: string`
-  - `scheduledDate`: string (`YYYY-MM-DD`)
-  - `scheduledTime`: string (`HH:mm`)
-  - `quantityUnit`: `'KG' | 'PCS' | 'DUS' | 'SAK' | 'IKAT' | 'KERANJANG'`
-  - `quantityValue`: number
-  - `fishSpecs?`: `{ cleanScale, cleanGills, cleanGut, cuttingStyle, piecesCount, fishPerKg }`
-  - `fruitSpecs?`: `{ ripenessLevel, qualityGrade, packagingType }`
-  - `sembakoSpecs?`: `{ repackRequired, repackWeight, bundlePackage, packagingNotes }`
-  - `status`: `'PENDING' | 'IN_PROGRESS' | 'READY' | 'COMPLETED' | 'CANCELLED'`
-  - `paymentStatus`: `'UNPAID' | 'DOWN_PAYMENT' | 'PAID'`
-  - `assignedStaffName?: string`
-- Mendukung penyimpanan offline IndexedDB Dexie yang sudah memiliki index pencarian cepat.
-
-### B. Modul Komponen Utama (`src/app/schedule/OrderScheduleManagement.tsx`)
-- Membuat direktori baru `src/app/schedule/`:
-  - `OrderScheduleManagement.tsx`: Halaman utama berisi header statistik (Pesanan Hari Ini, Sedang Dikerjakan, Siap Diambil/Kirim, Selesai), filter tabs kategori, date picker, search, dan dual view toggle.
-  - `OrderScheduleCard.tsx`: Komponen kartu to-do interaktif dengan checklist spesifikasi visual, penanda waktu kirim/ambil, dan tombol cepat ganti status.
-  - `OrderScheduleModal.tsx`: Formulir pembuatan dan pengubahan pesanan dengan tab kategori otomatis yang memunculkan opsi spesifikasi yang relevan (Ikan/Buah/Sembako).
-  - `OrderSchedulePrintModal.tsx`: Tampilan cetak Surat Perintah Kerja (SPK) dan label tempel pesanan.
-
-### C. Registrasi Navigasi & Routing
-- `src/app/layout/DashboardLayout.tsx`:
-  - Menambahkan menu `order-schedule` di daftar `navItems` dengan icon `CalendarClock`.
-  - Terbuka untuk Owner dan Kasir (dengan badge jumlah pesanan yang perlu dikerjakan hari ini).
-- `src/App.tsx`:
-  - Mendaftarkan rute case `'order-schedule'` ke `OrderScheduleManagement`.
+> [!IMPORTANT]
+> Konfirmasi Pilihan Pengguna (Telah Diverifikasi):
+> - **Penegakan Konektivitas Online**: Sistem mewajibkan koneksi online aktif (*Strict Online Required*). Jika internet terputus, sistem menampilkan modal peringatan koneksi terputus dan mengunci checkout kasir sementara demi mencegah terjadinya perbedaan data (*split-brain*).
+> - **Migrasi Data Lokal Eksisting**: Dilakukan migrasi otomatis sekali jalan (*One-Time Cloud Data Migration*) dari IndexedDB/Dexie ke Cloud Firestore saat pertama kali diaktifkan agar seluruh produk, riwayat penjualan, dan jadwal pesanan yang tersimpan di perangkat tidak hilang.
+> - **Model Realtime Antarmuka**: Menggunakan listener langsung `onSnapshot` Firestore SDK. Perubahan harga/stok atau pesanan baru di satu perangkat akan langsung memicu re-render otomatis di seluruh layar perangkat lain secara *real-time* tanpa interval *polling*.
 
 ---
 
-## 3. Rencana Verifikasi & Pengujian
+## 1. Overview & Core Concept
 
-1. **Pengujian Pembuatan Jadwal Pesanan**:
-   - Buat pesanan Ikan (misal: Ikan Nila 5 Kg, 1 kg isi 3 ekor, dibersihkan sisik & isi perut, belah bakar, diambil di tempat jam 11:00).
-   - Buat pesanan Buah (misal: Mangga Arum Manis 10 Kg, matang pohon manis, grade super mulus, kemasan parcel, kirim jam 14:00).
-   - Buat pesanan Sembako (misal: Beras 50 Kg / 2 sak 25kg + Minyak Goreng 2 karton, kemasan utuh, kirim jam 16:00).
-2. **Pengujian Alur To-Do List**:
-   - Majukan status dari PENDING -> IN_PROGRESS -> READY -> COMPLETED.
-   - Verifikasi filter kategori (klik Tab Ikan hanya menampilkan ikan, Buah hanya buah, Sembako hanya sembako).
-   - Verifikasi filter tanggal (Hari Ini vs Kalender).
-3. **Pengujian Cetak SPK & Respon Cepat**:
-   - Buka modal cetak dan verifikasi format layout SPK rapi untuk ditempel pada boks/kantong.
-4. **Verifikasi Build & Kode**:
-   - Jalankan `npm run lint` / `tsc --noEmit` untuk memastikan tipe data bebas error.
-   - Jalankan `compile_applet` untuk memastikan kompilasi bundle Vite sukses 100%.
+- **Apa yang Dibangun**:
+  Sistem kasir dan manajemen ritel multi-perangkat yang tersambung langsung secara *real-time* ke Google Cloud Firestore. Setiap aksi kasir (scan barang, bayar, void), perubahan stok gudang, penambahan buah/ikan, serta pengerjaan to-do langsung memperbarui dokumen cloud dan terdistribusi seketika ke seluruh perangkat lain.
+- **Target Pengguna**:
+  - **Owner**: Mengawasi omzet harian, stok berjalan, laba ikan mati, dan kasbon pelanggan dari laptop atau smartphone dari mana saja dengan data 100% mutakhir.
+  - **Kasir**: Melayani penjualan di POS dengan kepastian data harga, diskon, dan stok yang selalu sinkron dengan gudang dan kasir lain.
+  - **Tim Persiapan / Dapur**: Melihat pesanan ikan, buah, dan sembako yang masuk secara *live* di papan to-do tanpa perlu me-refresh browser.
+- **Nilai Utama**:
+  - Tidak ada lagi keterlambatan data akibat antrean sinkronisasi (*Zero Sync Latency*).
+  - Tidak ada lagi risiko konflik revisi offline (*Zero Local Branching Conflicts*).
+  - Satu sumber kebenaran data terpusat (*Single Global Cloud Truth*).
 
 ---
 
-*Silakan klik tombol **Proceed** di bawah atau berikan revisi tambahan jika ada detail yang ingin disesuaikan sebelum implementasi dimulai.*
+## 2. User Experience & Visual Design
+
+### 2.1. Alur Pengguna (User Flows)
+1. **Status Koneksi Realtime yang Jelas**:
+   - Di bilah navigasi atas (top bar) terdapat indikator status: **"Cloud Realtime Terhubung"** dengan lampu hijau berkedip halus (*pulse*).
+   - Pengguna mengetahui secara visual bahwa sistem sedang terhubung langsung ke Google Cloud.
+2. **Pengalaman Transaksi Instan Multi-Perangkat**:
+   - Ketika Kasir di PC Toko menginput transaksi penjualan beras 5kg, stok di tablet gudang berkurang seketika dalam hitungan milidetik.
+   - Ketika Owner mengubah harga Mangga Arum Manis dari smartphonenya, monitor kasir seketika menampilkan harga baru tanpa perlu *reload*.
+3. **Peringatan Koneksi Terputus (Offline Safety Curtain)**:
+   - Jika kabel LAN atau sinyal WiFi terputus, banner/modal ramah muncul: *"Koneksi Cloud Terputus — Memeriksa Jaringan Internet..."*.
+   - Tombol checkout ditahan sejenak sampai koneksi pulih, memastikan nomor struk dan pembukuan uang kas tidak ganda.
+4. **Proses Migrasi Otomatis Transparan**:
+   - Pada pembukaan pertama kali, sistem menjalankan migrasi aman data lokal ke Firestore di latar belakang dengan progress bar halus. Pengguna diberitahu *"Data lokal berhasil diamankan ke Cloud!"*.
+
+### 2.2. Tema Visual & Umpan Balik Interaktif
+- **Aesthetic Direction**: *Enterprise Utilitarian Clean* — Palet warna Slate, Blue, dan Emerald khas sistem ritel modern, bebas dari elemen dekoratif berlebih.
+- **Status Indicator Tokens**:
+  - `bg-emerald-500 animate-pulse`: Status Cloud Realtime Aktif & Tersinkron.
+  - `bg-amber-500`: Sedang Menyambung Ulang Jaringan.
+  - `bg-rose-500`: Internet Terputus (Harap hubungkan kembali).
+- **Toast Notifications**: Pemberitahuan ringkas saat data berhasil disimpan langsung ke cloud.
+
+---
+
+## 3. Key Product Decisions & Trade-Offs
+
+- **Keputusan 1: Menonaktifkan Sync Queue Bertahap & Beralih ke Direct Cloud Write**
+  - *Pendekatan*: Menghilangkan interval looping `SyncEngine.start()` yang sebelumnya memeriksa antrean setiap beberapa detik. Semua pemanggilan service (misal: buat pesanan, potong stok, simpan kasir shift) langsung memanggil API Firestore (`setDoc`, `updateDoc`, `runTransaction`).
+  - *Alasan*: Menjawab kebutuhan utama Owner agar tidak ada interval penundaan dan data di seluruh perangkat selalu identik.
+  - *Alternatif yang Ditinggalkan*: Background interval polling (ditinggalkan karena lambat dan berpotensi memicu konflik data).
+
+- **Keputusan 2: Hook Reaktif Realtime Terpadu (`useFirestoreRealtime`)**
+  - *Pendekatan*: Menyediakan custom React hook pembungkus `onSnapshot` Firestore yang secara otomatis mengelola *subscription* dan *cleanup listener* saat komponen mount/unmount.
+  - *Alasan*: Kompatibel dengan arsitektur React, mencegah kebocoran memori (*memory leaks*), dan memberikan reaktivitas instan.
+  - *Alternatif yang Ditinggalkan*: Pemanggilan manual `getDocs()` berulang kali (memboroskan kuota baca dan tidak realtime).
+
+- **Keputusan 3: One-Time Seamless Migration Engine**
+  - *Pendekatan*: Script migrasi yang membaca seluruh tabel Dexie lokal (produk, transaksi, pelanggan, supplier, kasbon, prepOrders) dan memindahkannya ke koleksi Firestore menggunakan `writeBatch` Firestore yang aman dan idempoten.
+  - *Alasan*: Melindungi data bisnis yang sudah ada agar tidak ada satu pun riwayat transaksi atau stok yang terhapus saat berpindah arsitektur.
+
+---
+
+## 4. Technical Architecture & Data Strategy
+
+### 4.1. Diagram Arsitektur Sistem Baru
+
+```text
+┌────────────────────────────────────────────────────────────────────────┐
+│                        PERANGKAT PENGGUNA                              │
+│   (PC Kasir POS • Tablet Gudang • Laptop Owner • HP Smartphone)        │
+│                                                                        │
+│   ┌────────────────────────────────────────────────────────────────┐   │
+│   │                     ANTARMUKA REACT                            │   │
+│   │   [POS]  [Inventori]  [Buah & Ikan]  [Jadwal & To-Do]  [Shift] │   │
+│   └───────────────▲────────────────────────────────┬───────────────┘   │
+│                   │ onSnapshot (Realtime Listeners)│ Direct Writes     │
+│                   │ Sub-detik update               │ (setDoc/updateDoc)│
+│   ┌───────────────┴────────────────────────────────▼───────────────┐   │
+│   │                DIRECT FIRESTORE SERVICE LAYER                  │   │
+│   │   • ProductService       • TransactionService                  │   │
+│   │   • PrepOrderService     • ShiftService                        │   │
+│   │   • CustomerService      • ReceivablesService                  │   │
+│   │   • Auto-Migration Hook  • Connection Guard Modal              │   │
+│   └────────────────────────────────┬───────────────────────────────┘   │
+└────────────────────────────────────┼───────────────────────────────────┘
+                                     │ HTTPS / WebSocket (gRPC-Web)
+                                     │ Sub-second bi-directional stream
+                                     ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                    GOOGLE CLOUD FIRESTORE DATABASE                     │
+│    Project: solid-sprite-dq6d2                                         │
+│    Database: ai-studio-ridosembakobusin-f36dfbf4-d2cf-4cf5-88a3-1321ec │
+│                                                                        │
+│    /products      /transactions    /prepOrders     /shifts             │
+│    /customers     /receivables     /staffDebts     /suppliers          │
+│    /purchases     /stockMovements  /auditLogs      /settings           │
+│                                                                        │
+│    Enforced by: firestore.rules (Role-Based Access Control)            │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+### 4.2. Rencana Eksekusi Kode Bertahap
+
+1. **Langkah 1: Service Provider & Realtime Hooks (`src/core/firestore-realtime.ts`)**:
+   - Membangun hook `useFirestoreCollection<T>(collectionName, queryConstraints)` dan `useFirestoreDoc<T>(collectionName, docId)`.
+   - Menghubungkan listener `onSnapshot` yang mengembalikan state realtime, status loading, dan error.
+
+2. **Langkah 2: Mesin Migrasi Satu Kali (`src/core/services/cloud-migration-service.ts`)**:
+   - Memeriksa flag `hasMigratedToCloud` di Firestore atau localStorage.
+   - Jika belum migrasi, membaca seluruh record di Dexie lokal (`products`, `customers`, `transactions`, `prepOrders`, `suppliers`, `shifts`, `receivables`, dll.).
+   - Melakukan batch upload langsung ke Firestore secara aman dan efisien.
+
+3. **Langkah 3: Transformasi Layanan Tulis Langsung (Direct Firestore Services)**:
+   - Mengubah `ProductService`, `PrepOrderService`, `ShiftService`, `TransactionEngine`, dan `ReceivablesService` agar langsung menulis ke Firestore via `setDoc` / `updateDoc` / `deleteDoc` (menggantikan antrean sync queue).
+
+4. **Langkah 4: Integrasi Komponen UI**:
+   - Menggantikan `useLiveQuery` pada halaman utama (`POS`, `OrderScheduleManagement`, `Inventory`, `FishManagement`, `FruitManagement`, `Customers`, `DashboardLayout`) dengan realtime hook `useFirestoreCollection`.
+   - Menambahkan visual status bar **"Cloud Realtime Active"** di `DashboardLayout.tsx`.
+
+5. **Langkah 5: Peringatan Koneksi & Pembersihan Sync Engine Lama**:
+   - Menonaktifkan background timer `SyncEngine.start()` berkala yang lama.
+   - Menghapus badge antrean pending sync lama di sidebar karena data kini langsung terkirim secara instan.
+   - Menampilkan modal peringatan koneksi terputus saat perangkat kehilangan akses internet.
+
+6. **Langkah 6: Verifikasi & Audit**:
+   - Jalankan `compile_applet` dan `lint_applet` untuk memastikan nol error kompilasi dan tipe data TypeScript valid.

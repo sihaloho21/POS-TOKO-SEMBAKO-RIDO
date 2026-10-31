@@ -1,0 +1,5 @@
+{
+  "summary":  "Dokumen PRD komprehensif untuk transisi arsitektur Toko Harapan Jaya dari Local-First Sync Queue ke Realtime Cloud-First Firestore Database (Zero Interval, Realtime onSnapshot di seluruh perangkat).",
+  "updatedAt":  "2026-10-31T08:27:58.205813664Z",
+  "userFacing":  true
+}

@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { db } from './database';
+import { cloudSetDoc, cloudDeleteDoc } from './firestore-realtime';
 import type { 
   Transaction, 
   TransactionItem, 
@@ -993,15 +994,14 @@ export class TransactionEngine {
   }
 
   private static async addToQueue(entityType: string, entityId: string, action: 'CREATE' | 'UPDATE' | 'DELETE', payload: any) {
-    const queueItem: SyncQueueItem = {
-      entityType,
-      entityId,
-      action,
-      payload,
-      status: 'PENDING',
-      retryCount: 0,
-      createdAt: new Date().toISOString()
-    };
-    await db.syncQueue.add(queueItem);
+    try {
+      if (action === 'DELETE') {
+        await cloudDeleteDoc(entityType, entityId);
+      } else {
+        await cloudSetDoc(entityType, entityId, payload);
+      }
+    } catch (err) {
+      console.warn(`Direct cloud write error for ${entityType}/${entityId}:`, err);
+    }
   }
 }

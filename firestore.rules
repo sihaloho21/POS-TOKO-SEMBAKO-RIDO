@@ -156,5 +156,6 @@ service cloud.firestore {
     match /consignmentItems/{id} { allow read, write: if isOwner() || isManager() || isWarehouse() || isKasir(); }
     match /consignmentArrivals/{id} { allow read, write: if isOwner() || isManager() || isWarehouse() || isKasir(); }
     match /consignmentSettlements/{id} { allow read, write: if isOwner() || isManager() || isWarehouse() || isKasir(); }
+    match /settings/{id} { allow read: if isSignedIn(); allow write: if isOwner(); }
   }
 }

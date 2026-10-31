@@ -31,6 +31,7 @@ import ToastContainer from './app/components/ToastContainer';
 import { ErrorBoundary } from './app/components/ErrorBoundary';
 import { SyncEngine } from './core/sync-engine';
 import { ProductService } from './core/services/product-service';
+import { CloudMigrationService } from './core/services/cloud-migration-service';
 
 export default function App() {
   const { currentUser, isAuthenticated, initializeAuth } = useAuthStore();
@@ -44,8 +45,8 @@ export default function App() {
   useEffect(() => {
     if (!isAuthenticated) return;
 
-    // Start background sync
-    SyncEngine.start();
+    // Direct Cloud Realtime Architecture: Migrate local Dexie data to Firestore once
+    CloudMigrationService.migrateLocalToCloud().catch(err => console.warn('Cloud migration notice:', err));
 
     // Ensure baseline products and stock movements are valid
     ProductService.ensureBaselineProductsAndStock(currentUser?.userId).catch(err => console.warn('Baseline products init error:', err));

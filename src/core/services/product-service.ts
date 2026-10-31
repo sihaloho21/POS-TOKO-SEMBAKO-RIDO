@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '../database';
+import { cloudSetDoc, cloudUpdateDoc, cloudDeleteDoc } from '../firestore-realtime';
 import type { Product } from '../types';
 import { AuditEngine } from '../audit-engine';
 import { StockService } from './stock-service';
@@ -170,16 +171,7 @@ export class ProductService {
         updatedAt: timestamp
       };
       await db.productCosts.put(productCost);
-      
-      await db.syncQueue.add({
-        entityType: 'productCosts',
-        entityId: productId,
-        action: isNew ? 'CREATE' : 'UPDATE',
-        payload: productCost,
-        status: 'PENDING',
-        retryCount: 0,
-        createdAt: timestamp
-      });
+      await cloudSetDoc('productCosts', productId, productCost);
     }
 
     // Check for price fluctuations
@@ -197,15 +189,8 @@ export class ProductService {
       after: finalProduct
     });
 
-    await db.syncQueue.add({
-      entityType: 'products',
-      entityId: productId,
-      action: isNew ? 'CREATE' : 'UPDATE',
-      payload: finalProduct,
-      status: 'PENDING',
-      retryCount: 0,
-      createdAt: timestamp
-    });
+    // Direct write to Cloud Firestore (Realtime & Instant)
+    await cloudSetDoc('products', productId, finalProduct);
 
     return productId;
   }
@@ -251,15 +236,9 @@ export class ProductService {
       before: product
     });
 
-    await db.syncQueue.add({
-      entityType: 'products',
-      entityId: productId,
-      action: 'DELETE',
-      payload: { productId },
-      status: 'PENDING',
-      retryCount: 0,
-      createdAt: new Date().toISOString()
-    });
+    // Direct deletion from Cloud Firestore
+    await cloudDeleteDoc('products', productId);
+    await cloudDeleteDoc('productCosts', productId);
   }
 
   static async toggleStatus(productId: string): Promise<void> {
@@ -287,15 +266,8 @@ export class ProductService {
       after: updatedProduct
     });
 
-    await db.syncQueue.add({
-      entityType: 'products',
-      entityId: productId,
-      action: 'UPDATE',
-      payload: updatedProduct,
-      status: 'PENDING',
-      retryCount: 0,
-      createdAt: timestamp
-    });
+    // Direct update to Cloud Firestore
+    await cloudUpdateDoc('products', productId, { status: newStatus, updatedAt: timestamp });
   }
 
   static async bulkAdjustPrice(productIds: string[], percentage: number, type: 'INCREASE' | 'DECREASE'): Promise<void> {

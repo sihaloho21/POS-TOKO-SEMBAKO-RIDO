@@ -25,6 +25,7 @@ import {
 import { db } from '@/core/database';
 import { useAuthStore } from '@/core/auth-store';
 import { useToastStore } from '@/core/toast-store';
+import { useFirestoreCollection } from '@/core/firestore-realtime';
 import { PrepOrderService } from '@/core/services/prep-order-service';
 import { OrderScheduleCard } from './OrderScheduleCard';
 import { OrderScheduleModal } from './OrderScheduleModal';
@@ -63,10 +64,10 @@ export function OrderScheduleManagement() {
   const [orderToEdit, setOrderToEdit] = useState<PrepOrder | null>(null);
   const [orderToPrint, setOrderToPrint] = useState<PrepOrder | null>(null);
 
-  // Live data from Dexie
-  const allOrders = useLiveQuery(async () => {
-    return await db.prepOrders.toArray();
-  }, []);
+  // Live data from Cloud Firestore (Realtime onSnapshot - Zero Interval)
+  const { data: cloudOrders } = useFirestoreCollection<PrepOrder>('prepOrders');
+  const localOrders = useLiveQuery(async () => await db.prepOrders.toArray(), []);
+  const allOrders = cloudOrders && cloudOrders.length > 0 ? cloudOrders : (localOrders || []);
 
   // Today Summary Metrics
   const todaySummary = useMemo(() => {
@@ -231,9 +232,13 @@ export function OrderScheduleManagement() {
       {/* Top Banner Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
         <div>
-          <div className="flex items-center gap-2 text-xs font-bold text-blue-600 uppercase tracking-widest mb-1">
+          <div className="flex items-center gap-2 flex-wrap text-xs font-bold text-blue-600 uppercase tracking-widest mb-1">
             <Calendar size={14} />
             <span>Modul Operasional & Penjadwalan Kerja</span>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              Cloud Realtime Active (Zero Interval)
+            </span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
             Jadwal Pemesanan & To-Do List

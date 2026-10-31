@@ -34,7 +34,7 @@ import {
   Banknote,
   Apple
 } from 'lucide-react';
-import { useOnlineStatus } from '@/hooks/useOnlineStatus';
+import { useFirestoreConnection } from '@/hooks/useFirestoreConnection';
 import { db } from '@/core/database';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { motion, AnimatePresence } from 'motion/react';
@@ -43,10 +43,12 @@ import { StoreStatusService } from '@/core/services/store-status-service';
 import { StaffDebtService } from '@/core/services/staff-debt-service';
 import { isPast, parseISO } from 'date-fns';
 import { useDeviceId } from '@/core/device-store';
+import { useFirestoreCollection } from '@/core/firestore-realtime';
 import ClockInModal from '@/app/shift/ClockInModal';
 import ClockOutModal from '@/app/shift/ClockOutModal';
 import StoreStatusModal from '@/app/settings/StoreStatusModal';
 import { NotificationCenter } from './NotificationCenter';
+import { ConnectionStatusIndicator } from './ConnectionStatusIndicator';
 
 interface NavItemProps {
   icon: React.ReactNode;
@@ -110,7 +112,7 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
   onTabChange: (tab: string) => void;
 }) {
   const { currentUser, logout } = useAuthStore();
-  const isOnline = useOnlineStatus();
+  const { isOnline, isRetrying, retryConnection } = useFirestoreConnection();
   const deviceId = useDeviceId();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isClockInOpen, setIsClockInOpen] = useState(false);
@@ -192,22 +194,14 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
   const storeConfig = useLiveQuery(() => StoreStatusService.getStoreStatus(), []);
   const currentShift = useLiveQuery(() => ShiftService.getCurrentShift(deviceId, currentUser?.userId), [deviceId, currentUser?.userId]);
 
+  const { data: cloudPrepOrders } = useFirestoreCollection<any>('prepOrders');
   const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
-  const pendingPrepCount = useLiveQuery(
-    async () => {
-      try {
-        return await db.prepOrders
-          .where('scheduledDate')
-          .equals(todayStr)
-          .filter(o => o.status === 'PENDING' || o.status === 'IN_PROGRESS')
-          .count();
-      } catch {
-        return 0;
-      }
-    },
-    [todayStr],
-    0
-  );
+  const pendingPrepCount = useMemo(() => {
+    if (!cloudPrepOrders || cloudPrepOrders.length === 0) return 0;
+    return cloudPrepOrders.filter(o => 
+      o.scheduledDate === todayStr && (o.status === 'PENDING' || o.status === 'IN_PROGRESS')
+    ).length;
+  }, [cloudPrepOrders, todayStr]);
 
   const isOwner = currentUser?.role === 'OWNER';
 
@@ -338,15 +332,12 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
             </button>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
+            {/* Subtle, Real-Time Online/Offline Firestore Status Indicator */}
+            <ConnectionStatusIndicator />
+
             {/* Detailed Status Bar (PRD 98 & Req 8) */}
             <div className="hidden md:flex items-center gap-3 px-3 py-1 bg-slate-50 rounded-full border border-slate-200">
-              <div className="flex items-center gap-1.5 border-r border-slate-200 pr-3">
-                <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-red-500'}`} />
-                <span className="text-[10px] font-bold text-slate-600 uppercase">
-                  {isOnline ? 'Online' : 'Offline'}
-                </span>
-              </div>
 
               {/* Device ID (Terminal) */}
               <div className="flex items-center gap-1 border-r border-slate-200 pr-3 text-[10px] font-bold text-slate-600" title={`Perangkat POS: ${deviceId}`}>
@@ -424,6 +415,33 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
             </div>
           </div>
         </header>
+
+        {/* Subtle, Non-Intrusive Offline Warning Strip */}
+        {!isOnline && (
+          <div className="bg-amber-500/10 border-b border-amber-200/80 text-amber-900 px-4 py-2 text-xs font-medium flex flex-wrap items-center justify-between gap-3 shrink-0 shadow-xs animate-in fade-in duration-200">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse shrink-0" />
+              <span className="text-[11px]">
+                <strong className="font-bold">Perhatian:</strong> Koneksi Firestore terputus. Sistem akan otomatis menyambungkan kembali saat internet pulih.
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => retryConnection()}
+                disabled={isRetrying}
+                className="flex items-center gap-1.5 px-3 py-1 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white rounded-lg text-xs font-bold shadow-xs transition-all cursor-pointer disabled:opacity-50"
+                title="Paksa sambungkan ulang Firestore menggunakan enableNetwork()"
+              >
+                <RefreshCw size={12} className={isRetrying ? 'animate-spin' : ''} />
+                <span>{isRetrying ? 'Menghubungkan...' : 'Retry Connection'}</span>
+              </button>
+              <span className="text-[10px] text-amber-800 bg-amber-200/70 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider shrink-0">
+                Offline
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* Content */}
         <div className="flex-1 overflow-hidden relative">
