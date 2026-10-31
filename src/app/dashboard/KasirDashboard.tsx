@@ -29,7 +29,8 @@ import {
   Coins,
   Printer,
   FileText,
-  History
+  History,
+  CalendarClock
 } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
@@ -526,6 +527,24 @@ export default function KasirDashboard({ onNavigate }: KasirDashboardProps) {
                     Buka Kasir POS
                   </span>
                   <span className="text-[10px] text-slate-500">Scan barcode & layani pelanggan</span>
+                </div>
+              </div>
+              <ArrowRight size={16} className="text-slate-400 group-hover:translate-x-1 transition-all" />
+            </button>
+
+            <button
+              onClick={() => onNavigate?.('order-schedule')}
+              className="w-full flex items-center justify-between p-3.5 bg-cyan-50/70 hover:bg-cyan-100 border border-cyan-100 rounded-2xl transition-all group text-left"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 bg-cyan-600 rounded-xl flex items-center justify-center text-white shadow-sm">
+                  <CalendarClock size={18} />
+                </div>
+                <div>
+                  <span className="font-black text-slate-900 text-xs block group-hover:text-cyan-800">
+                    Jadwal & To-Do Pesanan
+                  </span>
+                  <span className="text-[10px] text-slate-500">Ikan, Buah & Sembako siap proses</span>
                 </div>
               </div>
               <ArrowRight size={16} className="text-slate-400 group-hover:translate-x-1 transition-all" />

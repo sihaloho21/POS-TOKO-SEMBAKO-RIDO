@@ -86,7 +86,7 @@ export function PrepScheduleBoard() {
         const q = searchQuery.toLowerCase();
         const matchName = order.customerName.toLowerCase().includes(q);
         const matchNum = order.orderNumber.toLowerCase().includes(q);
-        const matchFish = order.items.some(it => it.productName.toLowerCase().includes(q) || it.sizeSpec.toLowerCase().includes(q));
+        const matchFish = order.items.some(it => it.productName.toLowerCase().includes(q) || (it.sizeSpec || '').toLowerCase().includes(q));
         const matchNotes = (order.generalNotes || '').toLowerCase().includes(q);
         if (!matchName && !matchNum && !matchFish && !matchNotes) return false;
       }
@@ -427,7 +427,7 @@ export function PrepScheduleBoard() {
                           </span>
                         )}
                         <span className="px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded border border-blue-200">
-                          {CUTTING_STYLE_SHORT[item.cuttingStyle] || item.cuttingStyle}
+                          {item.cuttingStyle ? (CUTTING_STYLE_SHORT[item.cuttingStyle] || item.cuttingStyle) : 'Utuh'}
                         </span>
                       </div>
 

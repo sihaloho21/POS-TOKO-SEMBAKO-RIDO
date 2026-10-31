@@ -61,6 +61,12 @@ export default function Dashboard({ onTabChange }: { onTabChange: (tab: string) 
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button 
+            onClick={() => onTabChange('order-schedule')}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-50 border border-blue-200 text-blue-700 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-blue-100 transition-all shadow-xs"
+          >
+            <CalendarClock size={16} /> Jadwal & To-Do
+          </button>
+          <button 
             onClick={() => onTabChange('shift-history')}
             className="flex items-center gap-2 px-4 py-2 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-indigo-100 transition-all shadow-xs"
           >

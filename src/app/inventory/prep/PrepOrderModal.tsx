@@ -81,12 +81,12 @@ export function PrepOrderModal({
     customCuttingNotes: string;
   }>>(orderToEdit?.items?.map(it => ({
     productName: it.productName,
-    weightKg: it.weightKg.toString(),
-    sizeSpec: it.sizeSpec,
-    cleanScale: it.cleanScale,
-    cleanGills: it.cleanGills,
-    cleanGut: it.cleanGut,
-    cuttingStyle: it.cuttingStyle,
+    weightKg: (it.weightKg ?? 1).toString(),
+    sizeSpec: it.sizeSpec || 'Standar',
+    cleanScale: Boolean(it.cleanScale),
+    cleanGills: Boolean(it.cleanGills),
+    cleanGut: Boolean(it.cleanGut),
+    cuttingStyle: it.cuttingStyle || 'UTUH',
     customCuttingNotes: it.customCuttingNotes || ''
   })) || [
     {

@@ -159,7 +159,7 @@ export function PrepTicketModal({ isOpen, onClose, order }: PrepTicketModalProps
                   <div className="bg-white p-2 rounded-lg border border-blue-200/80 text-[11px]">
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Jenis Potongan:</span>
                     <span className="font-extrabold text-slate-900">
-                      {CUTTING_STYLE_LABELS[item.cuttingStyle] || item.cuttingStyle}
+                      {item.cuttingStyle ? (CUTTING_STYLE_LABELS[item.cuttingStyle] || item.cuttingStyle) : 'Utuh Bersih'}
                     </span>
                     {item.customCuttingNotes && (
                       <p className="text-[10px] text-slate-600 mt-0.5 italic">

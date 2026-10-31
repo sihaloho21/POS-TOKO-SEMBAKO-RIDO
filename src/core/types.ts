@@ -540,34 +540,61 @@ export type PrepOrderPriority = 'NORMAL' | 'URGENT' | 'VIP_EVENT';
 export type PrepPaymentStatus = 'UNPAID' | 'DOWN_PAYMENT' | 'PAID';
 export type PrepCuttingStyle = 'UTUH' | 'BELAH_BAKAR' | 'POTONG_2' | 'POTONG_3' | 'POTONG_4' | 'KERAT_GORENG' | 'FILLET' | 'CUSTOM';
 
+export type ScheduleCategory = 'IKAN' | 'BUAH' | 'SEMBAKO' | 'CAMPURAN';
+export type ScheduleFulfillmentType = 'PICKUP' | 'DELIVERY';
+export type ScheduleQuantityUnit = 'KG' | 'PCS' | 'DUS' | 'SAK' | 'IKAT' | 'KERANJANG' | 'PAKET';
+
+export interface FruitSpecs {
+  ripeness?: 'MATANG_POHON' | 'MENGKAL' | 'SETENGAH_MATANG' | 'MENTAH' | 'SIAP_KONSUMSI';
+  grade?: 'SUPER_A' | 'GRADE_B' | 'STANDARD' | 'JUMBO';
+  packaging?: 'KANTONG_PLASTIK' | 'MIKA_BUAH' | 'KERANJANG_PARCEL' | 'KARTON_DUS' | 'CUSTOM';
+  notes?: string;
+}
+
+export interface SembakoSpecs {
+  packagingType?: 'REPACK_ECER' | 'SAK_UTUH' | 'DUS_UTUH' | 'PAKET_BANSOS_SEDEKAH' | 'CUSTOM';
+  repackSpec?: string; // e.g. "Repack 1kg x 20 bks", "Timbang gula 1/2 kg"
+  sealCheck?: boolean; // Pastikan segel utuh & tanggal expired aman
+  notes?: string;
+}
+
 export interface PrepOrderItem {
   itemId: string;
   productName: string;
   productId?: string;
-  weightKg: number;
-  sizeSpec: string; // e.g. "1 kg 2-3 ekor", "Jumbo (1 ekor/kg)", "4-5 ekor/kg"
-  cleanScale: boolean; // Bersihkan Sisik
-  cleanGills: boolean; // Buang Insang
-  cleanGut: boolean; // Buang Isi Perut
-  cuttingStyle: PrepCuttingStyle;
+  category?: ScheduleCategory;
+  weightKg?: number;
+  quantityValue?: number; // e.g. 5 (kg) or 10 (pcs) or 2 (sak)
+  quantityUnit?: ScheduleQuantityUnit;
+  sizeSpec?: string; // e.g. "1 kg 2-3 ekor", "Jumbo (1 ekor/kg)", "4-5 ekor/kg"
+  cleanScale?: boolean; // Bersihkan Sisik (Ikan)
+  cleanGills?: boolean; // Buang Insang (Ikan)
+  cleanGut?: boolean; // Buang Isi Perut (Ikan)
+  cuttingStyle?: PrepCuttingStyle; // Potongan (Ikan)
   customCuttingNotes?: string;
   packagingNotes?: string;
+  fruitSpecs?: FruitSpecs;
+  sembakoSpecs?: SembakoSpecs;
   estimatedPrice?: number;
 }
 
 export interface PrepOrder {
   orderId: string;
   orderNumber: string; // e.g. "SPK-20261029-001"
+  category?: ScheduleCategory;
+  fulfillmentType?: ScheduleFulfillmentType; // 'PICKUP' | 'DELIVERY'
   customerId?: string;
   customerName: string;
   customerPhone?: string;
   customerAddress?: string;
-  scheduledDate: string; // YYYY-MM-DD
+  deliveryFee?: number;
+  scheduledDate: string; // YYYY-MM-DD (Tanggal Kirim atau Ambil di Tempat)
   scheduledTime: string; // HH:mm
   priority: PrepOrderPriority;
   status: PrepOrderStatus;
   items: PrepOrderItem[];
   totalWeightKg: number;
+  totalQuantityPcs?: number;
   totalEstimatedPrice: number;
   paymentStatus: PrepPaymentStatus;
   downPaymentAmount?: number;

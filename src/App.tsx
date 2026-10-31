@@ -26,6 +26,7 @@ import PayrollManagement from './app/payroll/PayrollManagement';
 import TransactionHistory from './app/transactions/TransactionHistory';
 import ConsignmentPage from './app/consignment/ConsignmentPage';
 import KasirDashboard from './app/dashboard/KasirDashboard';
+import { OrderScheduleManagement } from './app/schedule/OrderScheduleManagement';
 import ToastContainer from './app/components/ToastContainer';
 import { ErrorBoundary } from './app/components/ErrorBoundary';
 import { SyncEngine } from './core/sync-engine';
@@ -123,6 +124,8 @@ export default function App() {
           : <Dashboard onTabChange={setCurrentTab} />;
       case 'pos':
         return <POS />;
+      case 'order-schedule':
+        return <OrderScheduleManagement />;
       case 'transactions':
         return <TransactionHistory />;
       case 'inventory':

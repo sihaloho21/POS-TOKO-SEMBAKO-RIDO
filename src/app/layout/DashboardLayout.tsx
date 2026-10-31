@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuthStore } from '@/core/auth-store';
 import { 
   LayoutDashboard, 
@@ -192,12 +192,35 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
   const storeConfig = useLiveQuery(() => StoreStatusService.getStoreStatus(), []);
   const currentShift = useLiveQuery(() => ShiftService.getCurrentShift(deviceId, currentUser?.userId), [deviceId, currentUser?.userId]);
 
+  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
+  const pendingPrepCount = useLiveQuery(
+    async () => {
+      try {
+        return await db.prepOrders
+          .where('scheduledDate')
+          .equals(todayStr)
+          .filter(o => o.status === 'PENDING' || o.status === 'IN_PROGRESS')
+          .count();
+      } catch {
+        return 0;
+      }
+    },
+    [todayStr],
+    0
+  );
+
   const isOwner = currentUser?.role === 'OWNER';
 
   // All navbar menus are displayed for Kasir, with Owner-only menus disabled/read-only
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={18} /> },
     { id: 'pos', label: 'POS', icon: <ShoppingCart size={18} /> },
+    { 
+      id: 'order-schedule', 
+      label: 'Jadwal & To-Do', 
+      icon: <CalendarClock size={18} />, 
+      badge: (pendingPrepCount && pendingPrepCount > 0) ? pendingPrepCount : undefined 
+    },
     { id: 'shift', label: 'Cashier Shift', icon: <ClipboardList size={18} /> },
     { id: 'shift-history', label: 'Shift History', icon: <CalendarClock size={18} /> },
     { id: 'transactions', label: 'Riwayat Transaksi (Sales)', icon: <Receipt size={18} /> },

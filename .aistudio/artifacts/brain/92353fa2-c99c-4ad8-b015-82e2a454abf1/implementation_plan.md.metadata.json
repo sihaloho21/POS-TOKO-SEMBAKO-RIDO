@@ -1,6 +1,6 @@
 {
-  "summary":  "Revisi PRD Modul Penjualan Buah:\n- Menyesuaikan data bawaan (pre-seeded master data) khusus terfokus pada: Mangga Arum Manis dan Jeruk Berastagi.\n- CRUD Lengkap (Katalog, Tambah Buah Baru, Edit Harga Modal HPP & Harga Jual, Hapus dengan proteksi role Owner).\n- Storage Keuangan Khusus 'BUAH' (Pos kas operasional, pencatatan kulakan modal buah, dan omset kasir).\n- POS Kasir dengan dukungan timbangan desimal (kg/gram) & tombol cepat berat.\n- Penyesuaian stok khusus buah (Penyusutan, Sortir, Buah Busuk) terintegrasi audit log.",
-  "updatedAt":  "2026-10-30T15:50:04.457224132Z",
+  "summary":  "Rencana implementasi terperinci untuk membuat modul menu terpisah 'Jadwal & To-Do Pemesanan' yang mencakup Ikan, Buah, dan Produk Sembako, dengan rincian tanggal kirim/ambil di tempat, jumlah kg/pcs, catatan spesifikasi khusus, alur status to-do, filter multi-kategori, dan cetak SPK.",
+  "updatedAt":  "2026-10-31T00:15:57.076688302Z",
   "requestFeedback":  true,
   "userFacing":  true
 }
