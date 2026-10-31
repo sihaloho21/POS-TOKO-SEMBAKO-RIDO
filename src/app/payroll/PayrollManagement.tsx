@@ -27,6 +27,7 @@ import { PayrollInputModal } from './PayrollInputModal';
 import { BonusCategoryModal } from './BonusCategoryModal';
 import { PayrollSlipModal } from './PayrollSlipModal';
 import type { PayrollRecord } from '@/core/types';
+import { useFirestoreCollection } from '@/core/firestore-realtime';
 
 const MONTH_NAMES = [
   'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
@@ -49,9 +50,24 @@ export default function PayrollManagement({ onNavigate }: { onNavigate?: (tab: s
   const [filterYear, setFilterYear] = useState<number | 'ALL'>('ALL');
   const [filterType, setFilterType] = useState<'ALL' | 'REGULAR' | 'BACKDATED'>('ALL');
 
-  // Load all payroll records
-  const allRecords = useLiveQuery(async () => {
+  // Real-Time Cloud Firestore Listener + Local Dexie Fallback
+  const { data: cloudPayrolls, loading: cloudLoading } = useFirestoreCollection<PayrollRecord>('payrolls');
+  const localPayrolls = useLiveQuery(async () => {
     return await db.payrolls.reverse().sortBy('paymentDate');
+  }, []);
+
+  const allRecords = React.useMemo(() => {
+    const list = (cloudPayrolls && cloudPayrolls.length > 0) ? cloudPayrolls : (localPayrolls || []);
+    return [...list].sort((a, b) => {
+      const dateA = a.paymentDate || a.createdAt || '';
+      const dateB = b.paymentDate || b.createdAt || '';
+      return dateB.localeCompare(dateA);
+    });
+  }, [cloudPayrolls, localPayrolls]);
+
+  // Ensure default bonus categories in Cloud Firestore on mount
+  React.useEffect(() => {
+    PayrollService.ensureDefaultBonusCategories().catch(() => {});
   }, []);
 
   // Strict Owner Access Guard
@@ -147,6 +163,11 @@ export default function PayrollManagement({ onNavigate }: { onNavigate?: (tab: s
             </span>
             <span className="text-xs text-slate-400 font-bold">•</span>
             <span className="text-xs text-slate-500 font-semibold">Toko Sembako Riama</span>
+            <span className="text-xs text-slate-400 font-bold">•</span>
+            <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+              Cloud Realtime
+            </span>
           </div>
           <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">
             Penggajian Karyawan & Bonus

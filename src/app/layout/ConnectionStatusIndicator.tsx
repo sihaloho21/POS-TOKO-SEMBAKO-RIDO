@@ -190,18 +190,40 @@ export function ConnectionStatusIndicator() {
               </div>
             )}
 
-            {/* Popover Footer Action */}
-            <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-400">
-              <span>Auto-reconnect aktif</span>
+            {/* Manual Two-Way Sync Action */}
+            <div className="pt-2 border-t border-slate-100 space-y-2">
               <button
                 type="button"
-                onClick={() => retryConnection()}
-                disabled={isRetrying}
-                className="flex items-center gap-1 text-blue-600 hover:text-blue-800 font-bold hover:underline cursor-pointer disabled:opacity-50"
+                onClick={async () => {
+                  try {
+                    const result = await (await import('@/core/services/cloud-migration-service')).CloudMigrationService.syncAllBiDirectional();
+                    if (result.success) {
+                      const toast = (await import('@/core/toast-store')).useToastStore.getState().addToast;
+                      toast(`Sinkronisasi sukses! ${result.totalDownloaded} data diunduh dari Cloud, ${result.totalUploaded} data lokal disinkronkan.`, 'success');
+                    }
+                  } catch (e: any) {
+                    const toast = (await import('@/core/toast-store')).useToastStore.getState().addToast;
+                    toast('Sinkronisasi gagal: ' + (e?.message || ''), 'error');
+                  }
+                }}
+                className="w-full py-2 px-3 bg-blue-600 hover:bg-blue-700 active:scale-98 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm transition-all cursor-pointer"
               >
-                <RefreshCw size={11} className={isRetrying ? 'animate-spin' : ''} />
-                <span>{isRetrying ? 'Menyambungkan...' : 'Retry Connection'}</span>
+                <RefreshCw size={12} />
+                <span>Sinkronkan Semua Data Sekarang</span>
               </button>
+
+              <div className="flex items-center justify-between text-[10px] text-slate-400">
+                <span>Auto-reconnect aktif</span>
+                <button
+                  type="button"
+                  onClick={() => retryConnection()}
+                  disabled={isRetrying}
+                  className="flex items-center gap-1 text-blue-600 hover:text-blue-800 font-bold hover:underline cursor-pointer disabled:opacity-50"
+                >
+                  <RefreshCw size={11} className={isRetrying ? 'animate-spin' : ''} />
+                  <span>{isRetrying ? 'Menyambungkan...' : 'Retry Connection'}</span>
+                </button>
+              </div>
             </div>
           </div>
         </>

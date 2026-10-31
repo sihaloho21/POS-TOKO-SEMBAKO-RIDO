@@ -19,6 +19,21 @@ import { db as localDb } from '@/core/database';
 
 export { firestoreDb, auth };
 
+const PRIMARY_KEYS: Record<string, string> = {
+  products: 'productId',
+  transactions: 'transactionId',
+  customers: 'customerId',
+  shifts: 'shiftId',
+  prepOrders: 'orderId',
+  financeEvents: 'financeEventId',
+  receivables: 'receivableId',
+  bundles: 'bundleId',
+  suppliers: 'supplierId',
+  settings: 'id',
+  payrolls: 'id',
+  bonusCategories: 'id'
+};
+
 /**
  * Custom React Hook for Realtime Sub-Second Firestore Collection Listening
  * Automatically triggers across all devices when any change occurs in the cloud.
@@ -32,17 +47,41 @@ export function useFirestoreCollection<T = any>(
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<Error | null>(null);
 
+  // Prefill from local Dexie for instant UI rendering
+  useEffect(() => {
+    try {
+      const table = (localDb as any)[collectionName];
+      if (table && typeof table.toArray === 'function') {
+        table.toArray().then((localItems: T[]) => {
+          if (localItems && localItems.length > 0) {
+            setData(prev => (prev.length === 0 ? localItems : prev));
+            setLoading(false);
+          }
+        }).catch(() => {});
+      }
+    } catch {
+      // Non-blocking
+    }
+  }, [collectionName]);
+
   useEffect(() => {
     try {
       const colRef = collection(firestoreDb, collectionName);
       const q = constraints.length > 0 ? query(colRef, ...constraints) : query(colRef);
+      const idField = PRIMARY_KEYS[collectionName] || 'id';
 
       const unsubscribe = onSnapshot(
         q,
         (snapshot) => {
           const items: T[] = [];
           snapshot.forEach((d) => {
-            items.push({ ...(d.data() as any), id: d.id });
+            const raw = d.data();
+            const recordId = raw[idField] || raw.id || d.id;
+            items.push({
+              ...(raw as any),
+              id: d.id,
+              [idField]: recordId
+            });
           });
           setData(items);
           setLoading(false);
@@ -60,7 +99,7 @@ export function useFirestoreCollection<T = any>(
           }
         },
         (err) => {
-          console.warn(`Firestore onSnapshot error for [${collectionName}]:`, err);
+          console.warn(`Firestore onSnapshot notice for [${collectionName}]:`, err);
           setError(err);
           setLoading(false);
         }

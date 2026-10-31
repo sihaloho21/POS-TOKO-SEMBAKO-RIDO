@@ -232,9 +232,8 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
     { id: 'finance', label: 'Finance', icon: <TrendingUp size={18} />, disabled: !isOwner },
     ...(isOwner ? [{ id: 'payroll', label: 'Penggajian Karyawan', icon: <Banknote size={18} /> }] : []),
     { id: 'audit', label: 'Audit Log', icon: <ShieldCheck size={18} />, disabled: !isOwner },
-    { id: 'conflicts', label: 'Conflicts & Approvals', icon: <AlertTriangle size={18} />, badge: totalConflictsAndApprovals, disabled: !isOwner },
+    { id: 'conflicts', label: 'Persetujuan Shift Kasir', icon: <ShieldCheck size={18} />, badge: pendingDiscrepanciesCount && pendingDiscrepanciesCount > 0 ? pendingDiscrepanciesCount : undefined, disabled: !isOwner },
     { id: 'consignment', label: 'Titipan Barang (Bagi Hasil)', icon: <TrendingUp size={18} />, disabled: !isOwner },
-    { id: 'system-health', label: 'System Health', icon: <Activity size={18} />, disabled: !isOwner },
     { id: 'settings', label: 'Settings', icon: <Settings size={18} />, disabled: !isOwner },
   ];
 
@@ -339,35 +338,16 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
             {/* Detailed Status Bar (PRD 98 & Req 8) */}
             <div className="hidden md:flex items-center gap-3 px-3 py-1 bg-slate-50 rounded-full border border-slate-200">
 
-              {/* Device ID (Terminal) */}
+              {/* Terminal & Shift Info */}
               <div className="flex items-center gap-1 border-r border-slate-200 pr-3 text-[10px] font-bold text-slate-600" title={`Perangkat POS: ${deviceId}`}>
                 <Smartphone size={12} className="text-slate-400" />
                 <span className="uppercase">{deviceId}</span>
               </div>
               
-              <div className="flex items-center gap-1.5 border-r border-slate-200 pr-3 text-[10px] font-bold text-slate-500">
+              <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500">
                 <ClipboardList size={12} />
                 {currentShift ? `SHIFT: ${currentShift.shiftId.slice(-6).toUpperCase()}` : 'NO SHIFT'}
               </div>
-
-              {pendingSyncCount !== undefined && pendingSyncCount > 0 && (
-                <button
-                  type="button"
-                  onClick={() => isOwner && onTabChange('system-health')}
-                  className={`flex items-center gap-1.5 border-r border-slate-200 pr-3 text-[10px] font-bold text-blue-600 animate-pulse ${isOwner ? 'hover:underline cursor-pointer' : ''}`}
-                  title={isOwner ? "Ada antrian data lokal. Klik untuk buka System Health & Push Sync" : "Antrian sync aktif"}
-                >
-                  <RefreshCw size={12} className="animate-spin-slow" />
-                  SYNC: {pendingSyncCount}
-                </button>
-              )}
-
-              {conflictCount !== undefined && conflictCount > 0 && (
-                <div className="flex items-center gap-1.5 text-[10px] font-bold text-red-600">
-                  <AlertTriangle size={12} />
-                  {conflictCount} CONFLICT
-                </div>
-              )}
             </div>
 
             {/* Shift Actions: Clock In or Clock Out */}

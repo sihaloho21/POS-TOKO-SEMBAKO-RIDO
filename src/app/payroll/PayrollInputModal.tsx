@@ -17,6 +17,7 @@ import { db } from '@/core/database';
 import { PayrollService } from '@/core/services/payroll-service';
 import { useToastStore } from '@/core/toast-store';
 import type { PayrollBonusItem, PayrollPaymentMethod, BonusCategory } from '@/core/types';
+import { useFirestoreCollection } from '@/core/firestore-realtime';
 
 interface PayrollInputModalProps {
   isOpen: boolean;
@@ -81,15 +82,64 @@ export function PayrollInputModal({
   const [isBackdated, setIsBackdated] = useState(false);
   const [affectCashBalance, setAffectCashBalance] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isCalculatingBonus, setIsCalculatingBonus] = useState(false);
 
-  // Queries
-  const activeCategories = useLiveQuery(async () => {
+  // Queries: Realtime Cloud Firestore for Bonus Categories + Local Dexie Fallback
+  const { data: cloudCategories } = useFirestoreCollection<BonusCategory>('bonusCategories');
+  const localCategories = useLiveQuery(async () => {
     return await PayrollService.getActiveBonusCategories();
   }, []);
+
+  const activeCategories = React.useMemo(() => {
+    if (cloudCategories && cloudCategories.length > 0) {
+      return cloudCategories.filter(c => c.isActive);
+    }
+    return localCategories || [];
+  }, [cloudCategories, localCategories]);
 
   const registeredUsers = useLiveQuery(async () => {
     return await PayrollService.getRegisteredStaff();
   }, []);
+
+  // Automatic Performance Bonus Calculation from Real Sales & Shifts
+  const handleAutoCalculateBonuses = async () => {
+    let employeeName = '';
+    if (isManualEmployee) {
+      employeeName = customEmployeeName;
+    } else {
+      const staff = registeredUsers?.find(u => u.id === selectedStaffId);
+      employeeName = staff ? staff.name : '';
+    }
+
+    setIsCalculatingBonus(true);
+    try {
+      const autoBonuses = await PayrollService.calculateAutoBonuses({
+        employeeId: isManualEmployee ? undefined : selectedStaffId,
+        employeeName,
+        periodMonth,
+        periodYear
+      });
+
+      if (autoBonuses.length > 0) {
+        setBonuses(autoBonuses.map(b => {
+          const matchedCat = activeCategories?.find(c => c.name.toLowerCase() === b.categoryName.toLowerCase());
+          return {
+            categoryId: matchedCat ? matchedCat.id : 'custom',
+            categoryName: b.categoryName,
+            amount: String(b.amount),
+            notes: b.notes || ''
+          };
+        }));
+        addToast(`Berhasil menghitung otomatis ${autoBonuses.length} bonus kinerja dari transaksi riil!`, 'success');
+      } else {
+        addToast('Tidak ditemukan riwayat bonus pada periode ini.', 'info');
+      }
+    } catch (e: any) {
+      addToast('Gagal menghitung otomatis bonus: ' + (e?.message || ''), 'error');
+    } finally {
+      setIsCalculatingBonus(false);
+    }
+  };
 
   // When month or year is earlier than current period, prompt backdated recommendation
   useEffect(() => {
@@ -376,13 +426,25 @@ export function PayrollInputModal({
                   Kebersihan, Penjualan Ikan, Penjualan Digital, Disiplin, Lembur, dll.
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={handleAddBonusRow}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition-colors shadow-xs"
-              >
-                <Plus size={15} /> Tambah Bonus
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleAutoCalculateBonuses}
+                  disabled={isCalculatingBonus}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 active:scale-95 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-xs disabled:opacity-50 cursor-pointer"
+                  title="Hitung otomatis bonus penjualan ikan, transaksi digital, dan shift kasir dari database riil"
+                >
+                  <Sparkles size={14} className={isCalculatingBonus ? 'animate-spin' : ''} />
+                  <span>{isCalculatingBonus ? 'Menganalisis...' : '⚡ Hitung Otomatis Bonus'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAddBonusRow}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition-colors shadow-xs cursor-pointer"
+                >
+                  <Plus size={15} /> Tambah Bonus
+                </button>
+              </div>
             </div>
 
             {bonuses.length === 0 ? (

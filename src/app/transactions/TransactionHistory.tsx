@@ -33,6 +33,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { QuickRefundModal } from './QuickRefundModal';
 import { DebtCorrectionModal } from '../pos/DebtCorrectionModal';
 
+import { useFirestoreCollection } from '@/core/firestore-realtime';
+
 export default function TransactionHistory() {
   const { currentUser } = useAuthStore();
   const [search, setSearch] = useState('');
@@ -53,15 +55,24 @@ export default function TransactionHistory() {
 
   const isOwner = currentUser?.role === 'OWNER';
 
-  const pendingApprovalsCount = useLiveQuery(
-    () => db.transactions.where('status').equals('approval_pending').count()
-  );
+  const { data: cloudTransactions } = useFirestoreCollection<Transaction>('transactions');
+  const localTransactions = useLiveQuery(() => db.transactions.toArray(), []);
 
-  const transactions = useLiveQuery(async () => {
-    let query = db.transactions.orderBy('clientTimestamp').reverse();
-    const all = await query.toArray();
+  const rawTransactions = React.useMemo(() => {
+    if (cloudTransactions && cloudTransactions.length > 0) return cloudTransactions;
+    return localTransactions || [];
+  }, [cloudTransactions, localTransactions]);
 
-    return all.filter(tx => {
+  const pendingApprovalsCount = React.useMemo(() => {
+    return rawTransactions.filter(tx => tx.status === 'approval_pending').length;
+  }, [rawTransactions]);
+
+  const transactions = React.useMemo(() => {
+    const sorted = [...rawTransactions].sort((a, b) => 
+      new Date(b.clientTimestamp || (b as any).createdAt || 0).getTime() - new Date(a.clientTimestamp || (a as any).createdAt || 0).getTime()
+    );
+
+    return sorted.filter(tx => {
       // Status & Return filter
       if (statusFilter !== 'ALL') {
         if (statusFilter === 'RETURN') {
@@ -74,17 +85,19 @@ export default function TransactionHistory() {
       // Search filter
       if (search.trim()) {
         const q = search.toLowerCase();
-        const receiptMatch = tx.receiptNumber.toLowerCase().includes(q);
-        const cashierMatch = tx.cashierId.toLowerCase().includes(q);
-        const itemMatch = tx.items.some(i => i.nameSnapshot.toLowerCase().includes(q));
+        const receiptMatch = (tx.receiptNumber || '').toLowerCase().includes(q);
+        const cashierMatch = (tx.cashierId || '').toLowerCase().includes(q);
+        const itemMatch = (tx.items || []).some(i => (i.nameSnapshot || '').toLowerCase().includes(q));
         const originalMatch = tx.originalReceiptNumber ? tx.originalReceiptNumber.toLowerCase().includes(q) : false;
         return receiptMatch || cashierMatch || itemMatch || originalMatch;
       }
       return true;
     });
-  }, [search, statusFilter]);
+  }, [rawTransactions, search, statusFilter]);
 
-  const customers = useLiveQuery(() => db.customers.toArray());
+  const { data: cloudCustomers } = useFirestoreCollection('customers');
+  const localCustomers = useLiveQuery(() => db.customers.toArray());
+  const customers = (cloudCustomers && cloudCustomers.length > 0) ? cloudCustomers : (localCustomers || []);
 
   const getCustomerName = (customerId?: string) => {
     if (!customerId) return 'Pelanggan Umum';

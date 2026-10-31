@@ -45,12 +45,20 @@ export default function App() {
   useEffect(() => {
     if (!isAuthenticated) return;
 
-    // Direct Cloud Realtime Architecture: Migrate local Dexie data to Firestore once
-    CloudMigrationService.migrateLocalToCloud().catch(err => console.warn('Cloud migration notice:', err));
+    // Direct Cloud Realtime Architecture: Two-way sync with Firestore cloud immediately
+    CloudMigrationService.syncAllBiDirectional().then(() => {
+      ProductService.ensureBaselineProductsAndStock(currentUser?.userId).catch(err => console.warn('Baseline products init error:', err));
+    }).catch(err => console.warn('Cloud sync notice:', err));
 
-    // Ensure baseline products and stock movements are valid
-    ProductService.ensureBaselineProductsAndStock(currentUser?.userId).catch(err => console.warn('Baseline products init error:', err));
-    
+    const handleSyncOnResume = () => {
+      if (navigator.onLine) {
+        CloudMigrationService.syncAllBiDirectional().catch(() => {});
+      }
+    };
+
+    window.addEventListener('focus', handleSyncOnResume);
+    window.addEventListener('online', handleSyncOnResume);
+
     // Ensure minimal fish products exist
     import('./core/services/fish-service').then(({ FishService }) => {
       FishService.ensureMinimalFishProducts(currentUser?.userId).catch(err => console.warn('Fish products init error:', err));
@@ -68,6 +76,8 @@ export default function App() {
     }, 5 * 60 * 1000);
 
     return () => {
+      window.removeEventListener('focus', handleSyncOnResume);
+      window.removeEventListener('online', handleSyncOnResume);
       SyncEngine.stop();
       clearInterval(stockInterval);
     };

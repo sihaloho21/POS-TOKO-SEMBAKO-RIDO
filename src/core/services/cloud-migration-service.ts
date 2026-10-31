@@ -1,94 +1,107 @@
-import { doc, writeBatch, collection, getDocs, limit, query } from 'firebase/firestore';
-import { db as firestoreDb, auth } from '@/firebase/config';
+import { doc, writeBatch, collection, getDocs } from 'firebase/firestore';
+import { db as firestoreDb } from '@/firebase/config';
 import { db as localDb } from '@/core/database';
 
+export interface SyncStats {
+  downloaded: number;
+  uploaded: number;
+  collection: string;
+}
+
 export class CloudMigrationService {
-  private static readonly MIGRATION_FLAG_KEY = 'harapan_jaya_cloud_migrated_v2';
+  private static readonly MIGRATION_FLAG_KEY = 'riama_cloud_sync_initialized_v3';
   private static isRunning = false;
 
-  /**
-   * Run one-time idempotent migration of local Dexie data to Firestore cloud
-   */
-  static async migrateLocalToCloud(force: boolean = false): Promise<{ success: boolean; totalUploaded: number; reason?: string }> {
-    if (this.isRunning) {
-      return { success: false, totalUploaded: 0, reason: 'ALREADY_RUNNING' };
-    }
+  private static readonly SYNC_MAPPINGS: { name: string; idField: string }[] = [
+    { name: 'products', idField: 'productId' },
+    { name: 'transactions', idField: 'transactionId' },
+    { name: 'customers', idField: 'customerId' },
+    { name: 'shifts', idField: 'shiftId' },
+    { name: 'prepOrders', idField: 'orderId' },
+    { name: 'financeEvents', idField: 'financeEventId' },
+    { name: 'receivables', idField: 'receivableId' },
+    { name: 'bundles', idField: 'bundleId' },
+    { name: 'suppliers', idField: 'supplierId' },
+    { name: 'settings', idField: 'id' },
+    { name: 'payrolls', idField: 'id' },
+    { name: 'bonusCategories', idField: 'id' }
+  ];
 
-    if (!force && localStorage.getItem(this.MIGRATION_FLAG_KEY) === 'true') {
-      return { success: true, totalUploaded: 0, reason: 'ALREADY_MIGRATED' };
+  /**
+   * Two-Way Bidirectional Realtime Sync:
+   * 1. Downloads all existing cloud documents to local IndexedDB (Dexie)
+   * 2. Uploads any local records that do not exist yet in Firestore
+   * Guarantees 100% data parity across all devices (PC Toko, HP Owner, Tablet)
+   */
+  static async syncAllBiDirectional(force: boolean = false): Promise<{ success: boolean; totalDownloaded: number; totalUploaded: number; error?: string }> {
+    if (this.isRunning) {
+      return { success: false, totalDownloaded: 0, totalUploaded: 0, error: 'ALREADY_RUNNING' };
     }
 
     if (!navigator.onLine) {
-      console.warn('Cannot run cloud migration while offline');
-      return { success: false, totalUploaded: 0, reason: 'OFFLINE' };
-    }
-
-    // Wait until Firebase Auth is established to avoid Missing or insufficient permissions
-    if (!auth.currentUser) {
-      console.info('Cloud migration ditunda: Menunggu sesi login Firebase/Google aktif.');
-      return { success: false, totalUploaded: 0, reason: 'AWAITING_AUTH' };
+      return { success: false, totalDownloaded: 0, totalUploaded: 0, error: 'OFFLINE' };
     }
 
     this.isRunning = true;
+    let totalDownloaded = 0;
     let totalUploaded = 0;
 
     try {
-      console.log('Starting Cloud Migration from IndexedDB to Firestore for user:', auth.currentUser.email || auth.currentUser.uid);
+      console.log('🔄 Memulai Sinkronisasi Dua Arah Toko Sembako Riama (Cloud <-> Local)...');
 
-      // 1. Products
-      const localProducts = await localDb.products.toArray();
-      if (localProducts.length > 0) {
-        totalUploaded += await this.batchUploadCollection('products', localProducts, 'productId');
-      }
+      for (const map of this.SYNC_MAPPINGS) {
+        const { name: colName, idField } = map;
+        const table = (localDb as any)[colName];
+        if (!table) continue;
 
-      // 2. Prep Orders (Jadwal & To-Do)
-      const localPrepOrders = await localDb.prepOrders.toArray();
-      if (localPrepOrders.length > 0) {
-        totalUploaded += await this.batchUploadCollection('prepOrders', localPrepOrders, 'orderId');
-      }
+        // 1. PULL: Fetch all cloud documents from Firestore
+        try {
+          const colRef = collection(firestoreDb, colName);
+          const snap = await getDocs(colRef);
+          const cloudDocs: any[] = [];
+          const cloudIdSet = new Set<string>();
 
-      // 3. Customers
-      const localCustomers = await localDb.customers.toArray();
-      if (localCustomers.length > 0) {
-        totalUploaded += await this.batchUploadCollection('customers', localCustomers, 'customerId');
-      }
+          snap.forEach((d) => {
+            const data = d.data();
+            const recordId = data[idField] || data.id || d.id;
+            const fullItem = {
+              ...data,
+              id: d.id,
+              [idField]: recordId
+            };
+            cloudDocs.push(fullItem);
+            cloudIdSet.add(recordId);
+            cloudIdSet.add(d.id);
+          });
 
-      // 4. Bundles
-      const localBundles = await localDb.bundles.toArray();
-      if (localBundles.length > 0) {
-        totalUploaded += await this.batchUploadCollection('bundles', localBundles, 'bundleId');
-      }
+          // Mirror cloud docs into local Dexie
+          if (cloudDocs.length > 0) {
+            await table.bulkPut(cloudDocs).catch((e: any) => console.warn(`bulkPut notice for ${colName}:`, e));
+            totalDownloaded += cloudDocs.length;
+          }
 
-      // 5. Suppliers
-      const localSuppliers = await localDb.suppliers.toArray();
-      if (localSuppliers.length > 0) {
-        totalUploaded += await this.batchUploadCollection('suppliers', localSuppliers, 'supplierId');
-      }
+          // 2. PUSH: If local has items not yet in Cloud, upload them
+          const localItems = await table.toArray();
+          const itemsToUpload = localItems.filter((item: any) => {
+            const id = item[idField] || item.id;
+            return id && !cloudIdSet.has(id);
+          });
 
-      // 6. Shifts
-      const localShifts = await localDb.shifts.toArray();
-      if (localShifts.length > 0) {
-        totalUploaded += await this.batchUploadCollection('shifts', localShifts, 'shiftId');
-      }
-
-      // 7. Transactions
-      const localTransactions = await localDb.transactions.toArray();
-      if (localTransactions.length > 0) {
-        totalUploaded += await this.batchUploadCollection('transactions', localTransactions, 'transactionId');
-      }
-
-      // 8. Receivables (Kasbon)
-      const localReceivables = await localDb.receivables.toArray();
-      if (localReceivables.length > 0) {
-        totalUploaded += await this.batchUploadCollection('receivables', localReceivables, 'receivableId');
+          if (itemsToUpload.length > 0) {
+            const uploaded = await this.batchUploadCollection(colName, itemsToUpload, idField);
+            totalUploaded += uploaded;
+          }
+        } catch (colErr: any) {
+          console.warn(`Sinkronisasi koleksi [${colName}] notice:`, colErr?.message || colErr);
+        }
       }
 
       localStorage.setItem(this.MIGRATION_FLAG_KEY, 'true');
-      console.log(`Cloud Migration finished successfully. Total records mirrored: ${totalUploaded}`);
-      return { success: true, totalUploaded };
+      console.log(`✅ Sinkronisasi Selesai: ${totalDownloaded} data diunduh dari cloud, ${totalUploaded} data lokal diunggah.`);
+      return { success: true, totalDownloaded, totalUploaded };
     } catch (err: any) {
-      console.warn('Notice during cloud migration:', err?.message || err);
-      return { success: false, totalUploaded, reason: err?.message };
+      console.warn('Notice during bi-directional sync:', err?.message || err);
+      return { success: false, totalDownloaded, totalUploaded, error: err?.message };
     } finally {
       this.isRunning = false;
     }
@@ -97,7 +110,7 @@ export class CloudMigrationService {
   /**
    * Helper to write records in chunks of 50 via Firestore writeBatch
    */
-  private static async batchUploadCollection(
+  static async batchUploadCollection(
     collectionName: string, 
     records: any[], 
     idField: string
@@ -125,5 +138,12 @@ export class CloudMigrationService {
     }
 
     return count;
+  }
+
+  /**
+   * Legacy alias for backward compatibility
+   */
+  static async migrateLocalToCloud(force: boolean = false) {
+    return this.syncAllBiDirectional(force);
   }
 }

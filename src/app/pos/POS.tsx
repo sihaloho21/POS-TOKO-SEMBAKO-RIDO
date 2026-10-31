@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/core/database';
 import { useLiveQuery } from 'dexie-react-hooks';
+import { useFirestoreCollection } from '@/core/firestore-realtime';
 import { TransactionEngine } from '@/core/transaction-engine';
 import { PricingEngine } from '@/core/pricing-engine';
 import { useAuthStore } from '@/core/auth-store';
@@ -330,26 +331,35 @@ export default function POS() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [cart, selectedCustomer, transactionType, isPaymentModalOpen, isQuickAddProductOpen, isHeldModalOpen, isGajianApprovalOpen, isSalesHistoryModalOpen, weightProduct, overrideStockPrompt, isQuickSaleOpen, isClockInModalOpen]);
 
-  const products = useLiveQuery(
-    () => db.products.filter(p => {
+  const { data: cloudProducts } = useFirestoreCollection<Product>('products');
+  const localProducts = useLiveQuery(() => db.products.toArray(), []);
+  const rawProducts = React.useMemo(() => {
+    if (cloudProducts && cloudProducts.length > 0) return cloudProducts;
+    return localProducts || [];
+  }, [cloudProducts, localProducts]);
+
+  const products = React.useMemo(() => {
+    return rawProducts.filter(p => {
       if (p.status !== 'ACTIVE') return false;
       if (selectedCategoryTab === 'FRUIT' && p.productType !== 'FRUIT') return false;
       if (selectedCategoryTab === 'FISH' && p.productType !== 'FISH') return false;
       if (selectedCategoryTab === 'BUNDLE' && p.productType !== 'BUNDLE') return false;
       if (selectedCategoryTab === 'SEMBAKO' && (p.productType === 'FRUIT' || p.productType === 'FISH' || p.productType === 'BUNDLE')) return false;
 
+      const q = search.toLowerCase();
       return (
         !search ||
-        p.name.toLowerCase().includes(search.toLowerCase()) || 
-        p.barcode.includes(search) ||
-        !!(p.sku && p.sku.includes(search)) ||
+        (p.name || '').toLowerCase().includes(q) || 
+        (p.barcode || '').includes(search) ||
+        !!(p.sku && p.sku.toLowerCase().includes(q)) ||
         Boolean(p.conversionRules && p.conversionRules.some(r => r.barcode && r.barcode.includes(search)))
       );
-    }).toArray(),
-    [search, selectedCategoryTab]
-  );
+    });
+  }, [rawProducts, search, selectedCategoryTab]);
 
-  const customers = useLiveQuery(() => db.customers.toArray());
+  const { data: cloudCustomers } = useFirestoreCollection<Customer>('customers');
+  const localCustomers = useLiveQuery(() => db.customers.toArray());
+  const customers = (cloudCustomers && cloudCustomers.length > 0) ? cloudCustomers : (localCustomers || []);
   const heldTransactions = useLiveQuery(() => db.transactions.where('status').equals('HOLD').toArray());
 
   // Dynamically calculate assemblable bundle availability from component stock

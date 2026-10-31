@@ -21,6 +21,7 @@ export class SyncEngine {
 
   static start() {
     if (this.interval) return;
+    this.sanitizeSyncQueue().catch(() => {});
     this.interval = setInterval(() => this.processQueue(), 10000); // Check every 10 seconds
     this.processQueue();
   }
@@ -32,11 +33,35 @@ export class SyncEngine {
     }
   }
 
+  /**
+   * Automatically repairs legacy or malformed items in the syncQueue
+   * (e.g. po-* items mistakenly stored as TRANSACTION)
+   */
+  static async sanitizeSyncQueue(): Promise<void> {
+    try {
+      const items = await localDb.syncQueue.toArray();
+      for (const item of items) {
+        if (!item.queueId) continue;
+        const idStr = String(item.entityId || '');
+        if (idStr.startsWith('po-') && item.entityType !== 'prepOrders') {
+          await localDb.syncQueue.update(item.queueId, { entityType: 'prepOrders' });
+        } else if (item.entityType === 'TRANSACTION' || item.entityType === 'TRANSACTIONS' || item.entityType === 'transaction') {
+          await localDb.syncQueue.update(item.queueId, { entityType: 'transactions' });
+        } else if (item.entityType === 'SHIFT') {
+          await localDb.syncQueue.update(item.queueId, { entityType: 'shifts' });
+        }
+      }
+    } catch {
+      // Non-blocking
+    }
+  }
+
   private static async processQueue() {
     if (this.isSyncing || !navigator.onLine || !auth.currentUser) return;
     this.isSyncing = true;
 
     try {
+      await this.sanitizeSyncQueue();
       const now = new Date().toISOString();
       const pendingItems = await localDb.syncQueue
         .filter(item => 
@@ -65,14 +90,23 @@ export class SyncEngine {
     try {
       await localDb.syncQueue.update(item.queueId!, { status: 'SYNCING' });
 
-      const collectionName = item.entityType;
+      // Robust collection name normalization
+      let collectionName = item.entityType;
+      const idStr = String(item.entityId || '');
+      if (idStr.startsWith('po-')) {
+        collectionName = 'prepOrders';
+      } else if (collectionName === 'TRANSACTION' || collectionName === 'TRANSACTIONS' || collectionName === 'transaction') {
+        collectionName = 'transactions';
+      } else if (collectionName === 'SHIFT') {
+        collectionName = 'shifts';
+      }
 
       // Evaluate offline transaction for STORE_STATUS_CONFLICT
-      if (item.entityType === 'transactions' && item.payload) {
+      if ((collectionName === 'transactions' || item.entityType === 'transactions') && item.payload) {
         await StoreStatusService.evaluateTransactionForConflict(item.payload);
       }
 
-      const docRef = doc(firestoreDb, collectionName, item.entityId);
+      const docRef = doc(firestoreDb, collectionName, idStr);
       
       if (item.action === 'DELETE') {
         try {

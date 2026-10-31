@@ -1,5 +1,6 @@
 import { db } from '@/core/database';
 import type { PayrollRecord, BonusCategory, PayrollBonusItem, FinanceEvent } from '@/core/types';
+import { cloudSetDoc, cloudDeleteDoc, cloudUpdateDoc } from '@/core/firestore-realtime';
 
 export const DEFAULT_BONUS_CATEGORIES: Array<{ name: string; description: string }> = [
   { name: 'Bonus Kebersihan', description: 'Kerapian, kebersihan lapak & lingkungan toko' },
@@ -11,7 +12,7 @@ export const DEFAULT_BONUS_CATEGORIES: Array<{ name: string; description: string
 
 export class PayrollService {
   /**
-   * Seed default bonus categories if none exist yet.
+   * Seed default bonus categories to both local database and Cloud Firestore if none exist yet.
    */
   static async ensureDefaultBonusCategories(): Promise<void> {
     try {
@@ -28,6 +29,11 @@ export class PayrollService {
           updatedAt: now
         }));
         await db.bonusCategories.bulkPut(initialCategories);
+
+        // Upload default categories directly to Cloud Firestore
+        for (const cat of initialCategories) {
+          await cloudSetDoc('bonusCategories', cat.id, cat);
+        }
       }
     } catch (err) {
       console.warn('Failed to ensure default bonus categories:', err);
@@ -51,7 +57,7 @@ export class PayrollService {
   }
 
   /**
-   * Add or update a bonus category
+   * Add or update a bonus category with realtime Cloud Firestore sync
    */
   static async saveBonusCategory(cat: {
     id?: string;
@@ -73,22 +79,11 @@ export class PayrollService {
       updatedAt: now
     };
 
-    await db.bonusCategories.put(data);
+    // 1. Direct Cloud Firestore write
+    await cloudSetDoc('bonusCategories', id, data);
 
-    // Queue for cloud sync
-    try {
-      await db.syncQueue.put({
-        entityType: 'bonusCategories',
-        entityId: id,
-        payload: data,
-        action: 'CREATE', // Merge handles CREATE/UPDATE
-        status: 'PENDING',
-        retryCount: 0,
-        createdAt: now
-      });
-    } catch (e) {
-      console.warn('Could not enqueue bonus category sync:', e);
-    }
+    // 2. Local mirror
+    await db.bonusCategories.put(data);
 
     return id;
   }
@@ -99,28 +94,20 @@ export class PayrollService {
   static async toggleCategoryActive(id: string): Promise<void> {
     const cat = await db.bonusCategories.get(id);
     if (!cat) return;
-    await db.bonusCategories.update(id, {
-      isActive: !cat.isActive,
-      updatedAt: new Date().toISOString()
+    const updatedAt = new Date().toISOString();
+    const newActive = !cat.isActive;
+
+    // 1. Direct Cloud Firestore write
+    await cloudUpdateDoc('bonusCategories', id, {
+      isActive: newActive,
+      updatedAt
     });
 
-    // Queue for cloud sync
-    try {
-      const updated = await db.bonusCategories.get(id);
-      if (updated) {
-        await db.syncQueue.put({
-          entityType: 'bonusCategories',
-          entityId: id,
-          payload: updated,
-          action: 'UPDATE',
-          status: 'PENDING',
-          retryCount: 0,
-          createdAt: new Date().toISOString()
-        });
-      }
-    } catch (e) {
-      console.warn('Could not enqueue bonus category toggle sync:', e);
-    }
+    // 2. Local mirror
+    await db.bonusCategories.update(id, {
+      isActive: newActive,
+      updatedAt
+    });
   }
 
   /**
@@ -132,44 +119,16 @@ export class PayrollService {
     if (cat.isSystem) {
       // Just deactivate system categories rather than hard delete
       const updatedAt = new Date().toISOString();
+      await cloudUpdateDoc('bonusCategories', id, { isActive: false, updatedAt });
       await db.bonusCategories.update(id, { isActive: false, updatedAt });
-      
-      try {
-        const updated = await db.bonusCategories.get(id);
-        if (updated) {
-          await db.syncQueue.put({
-            entityType: 'bonusCategories',
-            entityId: id,
-            payload: updated,
-            action: 'UPDATE',
-            status: 'PENDING',
-            retryCount: 0,
-            createdAt: updatedAt
-          });
-        }
-      } catch (e) {
-        console.warn('Could not enqueue bonus category deactivate sync:', e);
-      }
     } else {
+      await cloudDeleteDoc('bonusCategories', id);
       await db.bonusCategories.delete(id);
-      try {
-        await db.syncQueue.put({
-          entityType: 'bonusCategories',
-          entityId: id,
-          payload: { id },
-          action: 'DELETE',
-          status: 'PENDING',
-          retryCount: 0,
-          createdAt: new Date().toISOString()
-        });
-      } catch (e) {
-        console.warn('Could not enqueue bonus category delete sync:', e);
-      }
     }
   }
 
   /**
-   * Create a new payroll record (current or backdated historical)
+   * Create a new payroll record with Real-Time Cloud Firestore Sync
    */
   static async createPayroll(params: {
     employeeId?: string;
@@ -219,20 +178,9 @@ export class PayrollService {
         timestamp: params.paymentDate ? new Date(params.paymentDate).toISOString() : now
       };
 
+      // Realtime Cloud Firestore write for Finance Event
+      await cloudSetDoc('financeEvents', financeEventId, financeEvent);
       await db.financeEvents.put(financeEvent);
-      try {
-        await db.syncQueue.put({
-          entityType: 'financeEvents',
-          entityId: financeEventId,
-          payload: financeEvent,
-          action: 'CREATE',
-          status: 'PENDING',
-          retryCount: 0,
-          createdAt: now
-        });
-      } catch (e) {
-        console.warn('Could not enqueue payroll finance event sync:', e);
-      }
     }
 
     const record: PayrollRecord = {
@@ -262,60 +210,30 @@ export class PayrollService {
       updatedAt: now
     };
 
-    await db.payrolls.put(record);
+    // 1. Direct Realtime Cloud Firestore write
+    await cloudSetDoc('payrolls', payrollId, record);
 
-    // Queue for cloud sync
-    try {
-      await db.syncQueue.put({
-        entityType: 'payrolls', // Sync engine compatible
-        entityId: payrollId,
-        payload: record,
-        action: 'CREATE',
-        status: 'PENDING',
-        retryCount: 0,
-        createdAt: now
-      });
-    } catch (e) {
-      console.warn('Could not enqueue payroll sync:', e);
-    }
+    // 2. Local Dexie mirror
+    await db.payrolls.put(record);
 
     return record;
   }
 
   /**
-   * Delete a payroll record and roll back any associated financeEvent
+   * Delete a payroll record and roll back any associated financeEvent from both Cloud & Local
    */
   static async deletePayroll(payrollId: string): Promise<void> {
     const record = await db.payrolls.get(payrollId);
-    if (!record) return;
-
-    if (record.financeEventId) {
+    
+    // Delete associated finance event if exists
+    if (record?.financeEventId) {
+      await cloudDeleteDoc('financeEvents', record.financeEventId);
       await db.financeEvents.delete(record.financeEventId);
-      try {
-        await db.syncQueue.put({
-          entityType: 'financeEvents',
-          entityId: record.financeEventId,
-          payload: { financeEventId: record.financeEventId },
-          action: 'DELETE',
-          status: 'PENDING',
-          retryCount: 0,
-          createdAt: new Date().toISOString()
-        });
-      } catch (e) {}
     }
 
+    // Delete payroll from Cloud Firestore & local Dexie
+    await cloudDeleteDoc('payrolls', payrollId);
     await db.payrolls.delete(payrollId);
-    try {
-      await db.syncQueue.put({
-        entityType: 'payrolls',
-        entityId: payrollId,
-        payload: { id: payrollId },
-        action: 'DELETE',
-        status: 'PENDING',
-        retryCount: 0,
-        createdAt: new Date().toISOString()
-      });
-    } catch (e) {}
   }
 
   /**
@@ -324,5 +242,139 @@ export class PayrollService {
   static async getRegisteredStaff(): Promise<Array<{ id: string; name: string; role: string }>> {
     const users = await db.users.toArray();
     return users.map(u => ({ id: u.userId, name: u.name, role: u.role }));
+  }
+
+  /**
+   * SINKRONISASI OTOMATIS BONUS KINERJA
+   * Menghitung akumulasi bonus secara otomatis dari data transaksi riil (ikan, digital, shift kasir)
+   * untuk periode bulan & tahun yang dipilih.
+   */
+  static async calculateAutoBonuses(params: {
+    employeeId?: string;
+    employeeName?: string;
+    periodMonth: number;
+    periodYear: number;
+  }): Promise<PayrollBonusItem[]> {
+    const results: PayrollBonusItem[] = [];
+    const padMonth = String(params.periodMonth).padStart(2, '0');
+    const periodPrefix = `${params.periodYear}-${padMonth}`; // e.g. "2026-10"
+
+    try {
+      // 1. Ambil data transaksi pada periode bulan tersebut
+      const transactions = await db.transactions
+        .filter(t => {
+          const tDate = t.clientTimestamp || t.serverTimestamp || '';
+          const matchDate = tDate.startsWith(periodPrefix);
+          const isCompleted = t.status === 'COMPLETED' || !t.status;
+          
+          if (!matchDate || !isCompleted) return false;
+          
+          // Jika ada employeeId spesifik, cocokkan dengan cashierId
+          if (params.employeeId) {
+            return t.cashierId === params.employeeId;
+          }
+          return true;
+        })
+        .toArray();
+
+      // 1A. Hitung Bonus Penjualan Ikan (2% dari omzet ikan)
+      let fishTotal = 0;
+      let fishTxCount = 0;
+
+      for (const tx of transactions) {
+        if (tx.moneyStorageId === 'IKAN') {
+          fishTotal += tx.total;
+          fishTxCount++;
+        } else if (tx.items && Array.isArray(tx.items)) {
+          for (const item of tx.items) {
+            const nameLower = (item.nameSnapshot || '').toLowerCase();
+            if (nameLower.includes('ikan') || nameLower.includes('nila') || nameLower.includes('gurame') || nameLower.includes('lele') || nameLower.includes('tongkol')) {
+              fishTotal += item.subtotal || 0;
+              fishTxCount++;
+            }
+          }
+        }
+      }
+
+      if (fishTotal > 0) {
+        const fishBonus = Math.round(fishTotal * 0.02); // 2% insentif penjualan ikan
+        results.push({
+          categoryId: 'bonus-cat-2',
+          categoryName: 'Bonus Penjualan Ikan',
+          amount: Math.max(fishBonus, 25000), // minimal Rp 25.000 jika ada penjualan ikan
+          notes: `Otomatis: 2% dari total penjualan ikan Rp ${fishTotal.toLocaleString('id-ID')} (${fishTxCount} transaksi)`
+        });
+      }
+
+      // 1B. Hitung Bonus Penjualan Digital (Rp 1.000 per transaksi digital)
+      const digitalTxList = transactions.filter(t => 
+        t.type === 'DIGITAL_SERVICE' || 
+        t.moneyStorageId === 'UANG_DIGITAL' ||
+        (t.items && t.items.some(i => (i.nameSnapshot || '').toLowerCase().includes('pulsa') || (i.nameSnapshot || '').toLowerCase().includes('token') || (i.nameSnapshot || '').toLowerCase().includes('top up')))
+      );
+
+      if (digitalTxList.length > 0) {
+        const digitalBonus = digitalTxList.length * 1000; // Rp 1.000 per transaksi digital
+        results.push({
+          categoryId: 'bonus-cat-3',
+          categoryName: 'Bonus Penjualan Digital',
+          amount: digitalBonus,
+          notes: `Otomatis: Komisi Rp 1.000 x ${digitalTxList.length} transaksi digital & PPOB`
+        });
+      }
+
+      // 2. Ambil data shift kerja karyawan pada periode tersebut
+      const shifts = await db.shifts
+        .filter(s => {
+          const sDate = s.startTime || '';
+          const matchDate = sDate.startsWith(periodPrefix);
+          const isClosed = s.status === 'CLOSED';
+          if (!matchDate || !isClosed) return false;
+          if (params.employeeId) {
+            return s.userId === params.employeeId;
+          }
+          return true;
+        })
+        .toArray();
+
+      if (shifts.length > 0) {
+        // Bonus Disiplin & Kehadiran: Rp 10.000 per shift tuntas
+        const shiftBonus = shifts.length * 10000;
+        results.push({
+          categoryId: 'bonus-cat-4',
+          categoryName: 'Bonus Disiplin',
+          amount: shiftBonus,
+          notes: `Otomatis: ${shifts.length} shift kerja terselesaikan dengan tertib & tuntas`
+        });
+      }
+
+      // 3. Jika belum ada data transaksi spesifik di periode ini (misal di awal bulan), berikan rekomendasi bonus standar
+      if (results.length === 0) {
+        results.push({
+          categoryId: 'bonus-cat-1',
+          categoryName: 'Bonus Kebersihan',
+          amount: 50000,
+          notes: 'Rekomendasi standar kebersihan toko & lingkungan'
+        });
+        results.push({
+          categoryId: 'bonus-cat-4',
+          categoryName: 'Bonus Disiplin',
+          amount: 50000,
+          notes: 'Rekomendasi standar presensi & kedisiplinan kerja'
+        });
+      }
+
+    } catch (err) {
+      console.warn('Gagal menghitung otomatis bonus kinerja:', err);
+      // Fallback
+      results.push({
+        categoryId: 'bonus-cat-4',
+        categoryName: 'Bonus Disiplin',
+        amount: 50000,
+        notes: 'Bonus standar operasional toko'
+      });
+    }
+
+    return results;
   }
 }

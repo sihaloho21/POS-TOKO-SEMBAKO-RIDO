@@ -14,23 +14,38 @@ import { VisualAnalyticsSection } from './VisualAnalyticsSection';
 import { OutstandingDebtWidget } from './OutstandingDebtWidget';
 import { useToastStore } from '@/core/toast-store';
 import { IntegrityService } from '@/core/services/integrity-service';
+import { useFirestoreCollection } from '@/core/firestore-realtime';
+import type { Transaction, Product, Customer, FinanceEvent } from '@/core/types';
 
 export default function Dashboard({ onTabChange }: { onTabChange: (tab: string) => void }) {
   const { addToast } = useToastStore();
   const [isRebuilding, setIsRebuilding] = React.useState(false);
-  const transactions = useLiveQuery(() => db.transactions.toArray());
-  const products = useLiveQuery(() => db.products.toArray());
-  const customers = useLiveQuery(() => db.customers.toArray());
+
+  // Real-time Cloud Collections with local Dexie backup
+  const { data: cloudTransactions } = useFirestoreCollection<Transaction>('transactions');
+  const localTransactions = useLiveQuery(() => db.transactions.toArray());
+  const transactions = (cloudTransactions && cloudTransactions.length > 0) ? cloudTransactions : (localTransactions || []);
+
+  const { data: cloudProducts } = useFirestoreCollection<Product>('products');
+  const localProducts = useLiveQuery(() => db.products.toArray());
+  const products = (cloudProducts && cloudProducts.length > 0) ? cloudProducts : (localProducts || []);
+
+  const { data: cloudCustomers } = useFirestoreCollection<Customer>('customers');
+  const localCustomers = useLiveQuery(() => db.customers.toArray());
+  const customers = (cloudCustomers && cloudCustomers.length > 0) ? cloudCustomers : (localCustomers || []);
   
-  const lowStockProducts = useLiveQuery(() => 
-    db.products.filter(p => p.status === 'ACTIVE' && (p.stock ?? 0) <= (p.minimumStock ?? 0)).toArray()
-  );
+  const lowStockProducts = React.useMemo(() => {
+    return products.filter(p => p.status === 'ACTIVE' && (p.stock ?? 0) <= (p.minimumStock ?? 0));
+  }, [products]);
 
   // Real-time Storage Balances
-  const balances = useLiveQuery(async () => {
-    const all = await db.financeEvents.toArray();
+  const { data: cloudFinanceEvents } = useFirestoreCollection<FinanceEvent>('financeEvents');
+  const localFinanceEvents = useLiveQuery(() => db.financeEvents.toArray());
+  const financeEvents = (cloudFinanceEvents && cloudFinanceEvents.length > 0) ? cloudFinanceEvents : (localFinanceEvents || []);
+
+  const balances = React.useMemo(() => {
     const store: Record<string, number> = { WARUNG: 0, IKAN: 0, UANG_DIGITAL: 0 };
-    all.forEach(e => {
+    financeEvents.forEach(e => {
       const amt = Number(e.amount) || 0;
       const sid = e.storageId || 'WARUNG';
       if (store[sid] === undefined) store[sid] = 0;
@@ -38,7 +53,7 @@ export default function Dashboard({ onTabChange }: { onTabChange: (tab: string) 
       else store[sid] -= amt;
     });
     return store;
-  });
+  }, [financeEvents]);
 
   const handleRebuildMetrics = async () => {
     setIsRebuilding(true);

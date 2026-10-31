@@ -5,6 +5,7 @@ import { db } from '@/core/database';
 import { PayrollService } from '@/core/services/payroll-service';
 import { useToastStore } from '@/core/toast-store';
 import type { BonusCategory } from '@/core/types';
+import { useFirestoreCollection } from '@/core/firestore-realtime';
 
 interface BonusCategoryModalProps {
   isOpen: boolean;
@@ -17,9 +18,16 @@ export function BonusCategoryModal({ isOpen, onClose }: BonusCategoryModalProps)
   const [newCatDesc, setNewCatDesc] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const categories = useLiveQuery(async () => {
+  // Realtime Cloud Firestore for Bonus Categories
+  const { data: cloudCategories } = useFirestoreCollection<BonusCategory>('bonusCategories');
+  const localCategories = useLiveQuery(async () => {
     return await PayrollService.getAllBonusCategories();
   }, []);
+
+  const categories = React.useMemo(() => {
+    if (cloudCategories && cloudCategories.length > 0) return cloudCategories;
+    return localCategories || [];
+  }, [cloudCategories, localCategories]);
 
   if (!isOpen) return null;
 

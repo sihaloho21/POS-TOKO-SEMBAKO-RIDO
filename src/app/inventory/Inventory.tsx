@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { db } from '@/core/database';
 import { useLiveQuery } from 'dexie-react-hooks';
+import { useFirestoreCollection } from '@/core/firestore-realtime';
 import { InventoryPredictionService, type InventoryPrediction } from '@/core/services/inventory-prediction-service';
 import { 
   Package, 
@@ -71,27 +72,29 @@ export default function Inventory() {
   const [isAdjustmentOpen, setIsAdjustmentOpen] = useState(false);
   const [adjustmentProductId, setAdjustmentProductId] = useState<string | undefined>(undefined);
   
-  const products = useLiveQuery(
-    () => {
-      let collection = db.products.filter(p => 
-        p.name.toLowerCase().includes(search.toLowerCase()) || 
-        p.barcode.includes(search) || 
-        !!(p.sku && p.sku.includes(search)) ||
-        Boolean(p.conversionRules && p.conversionRules.some(r => r.barcode && r.barcode.includes(search)))
-      );
+  const { data: cloudProducts } = useFirestoreCollection<Product>('products');
+  const localProducts = useLiveQuery(() => db.products.toArray(), []);
 
-      if (filterType !== 'ALL') {
-        collection = collection.filter(p => p.productType === filterType);
-      }
+  const rawProducts = React.useMemo(() => {
+    if (cloudProducts && cloudProducts.length > 0) return cloudProducts;
+    return localProducts || [];
+  }, [cloudProducts, localProducts]);
 
-      if (filterStatus !== 'ALL') {
-        collection = collection.filter(p => p.status === filterStatus);
-      }
+  const products = React.useMemo(() => {
+    return rawProducts.filter(p => {
+      const q = search.toLowerCase();
+      const matchesSearch = !search ||
+        (p.name || '').toLowerCase().includes(q) || 
+        (p.barcode || '').includes(search) || 
+        !!(p.sku && p.sku.toLowerCase().includes(q)) ||
+        Boolean(p.conversionRules && p.conversionRules.some(r => r.barcode && r.barcode.includes(search)));
 
-      return collection.toArray();
-    },
-    [search, filterType, filterStatus]
-  );
+      const matchesType = filterType === 'ALL' || p.productType === filterType;
+      const matchesStatus = filterStatus === 'ALL' || p.status === filterStatus;
+
+      return matchesSearch && matchesType && matchesStatus;
+    });
+  }, [rawProducts, search, filterType, filterStatus]);
 
   // Real-time Inventory Summary Statistics (Owner Only)
   const stats = React.useMemo(() => {

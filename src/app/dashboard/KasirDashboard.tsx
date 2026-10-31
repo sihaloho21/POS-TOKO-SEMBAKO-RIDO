@@ -5,7 +5,8 @@ import { useAuthStore } from '@/core/auth-store';
 import { ShiftService } from '@/core/services/shift-service';
 import { PrintService } from '@/core/utils/print-service';
 import { useToastStore } from '@/core/toast-store';
-import type { CashierShift } from '@/core/types';
+import type { CashierShift, Transaction } from '@/core/types';
+import { useFirestoreCollection } from '@/core/firestore-realtime';
 import ClockInModal from '@/app/shift/ClockInModal';
 import ShiftReport from '@/app/shift/ShiftReport';
 import { 
@@ -72,23 +73,22 @@ export default function KasirDashboard({ onNavigate }: KasirDashboardProps) {
     return all.sort((a, b) => (b.startTime || '').localeCompare(a.startTime || ''))[0];
   });
 
+  const { data: cloudTransactions } = useFirestoreCollection<Transaction>('transactions');
+  const localTransactions = useLiveQuery(() => db.transactions.toArray());
+  const allTransactions = (cloudTransactions && cloudTransactions.length > 0) ? cloudTransactions : (localTransactions || []);
+
   // Live query transactions in current shift
-  const shiftTransactions = useLiveQuery(async () => {
+  const shiftTransactions = React.useMemo(() => {
     if (!currentShift) return [];
-    return db.transactions
-      .where('shiftId')
-      .equals(currentShift.shiftId)
-      .toArray();
-  }, [currentShift?.shiftId]);
+    return allTransactions.filter(tx => tx.shiftId === currentShift.shiftId);
+  }, [allTransactions, currentShift?.shiftId]);
 
   // Live query pending void/refund requests
-  const pendingVoidRequests = useLiveQuery(async () => {
-    const list = await db.transactions
-      .where('status')
-      .equals('approval_pending')
-      .toArray();
-    return list.sort((a, b) => new Date(b.clientTimestamp).getTime() - new Date(a.clientTimestamp).getTime());
-  });
+  const pendingVoidRequests = React.useMemo(() => {
+    return allTransactions
+      .filter(tx => tx.status === 'approval_pending')
+      .sort((a, b) => new Date(b.clientTimestamp || 0).getTime() - new Date(a.clientTimestamp || 0).getTime());
+  }, [allTransactions]);
 
   // Clock Out Modal State
   const [isClockOutModalOpen, setIsClockOutModalOpen] = useState(false);

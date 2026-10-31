@@ -153,8 +153,8 @@ export default function ConflictCenter() {
     <div className="space-y-8 pb-16">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Conflict & Approval Center</h2>
-          <p className="text-slate-500 text-sm font-medium">Review persetujuan selisih kasir & tabrakan sinkronisasi operasional.</p>
+          <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Persetujuan Shift & Rekonsiliasi Kasir</h2>
+          <p className="text-slate-500 text-sm font-medium">Verifikasi dan setujui laporan selisih kas fisik closing shift dari kasir toko.</p>
         </div>
 
         {activeSubTab === 'sync_conflicts' && (
@@ -183,7 +183,7 @@ export default function ConflictCenter() {
           }`}
         >
           <ShieldCheck size={16} />
-          <span>Approval Workflow Selisih Shift</span>
+          <span>Persetujuan Selisih Shift Kasir</span>
           {pendingDiscrepanciesCount !== undefined && pendingDiscrepanciesCount > 0 && (
             <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500 text-white animate-pulse">
               {pendingDiscrepanciesCount}
@@ -191,23 +191,23 @@ export default function ConflictCenter() {
           )}
         </button>
 
-        <button
-          type="button"
-          onClick={() => setActiveSubTab('sync_conflicts')}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer ${
-            activeSubTab === 'sync_conflicts'
-              ? 'bg-white text-slate-900 shadow-sm'
-              : 'text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          <RefreshCw size={15} />
-          <span>Konflik Offline & Toko Tutup</span>
-          {conflicts && conflicts.length > 0 && (
+        {conflicts && conflicts.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('sync_conflicts')}
+            className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer ${
+              activeSubTab === 'sync_conflicts'
+                ? 'bg-white text-slate-900 shadow-sm'
+                : 'text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <RefreshCw size={15} />
+            <span>Arsip Konflik Offline</span>
             <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-500 text-white">
               {conflicts.length}
             </span>
-          )}
-        </button>
+          </button>
+        )}
       </div>
 
       {activeSubTab === 'approvals' ? (
