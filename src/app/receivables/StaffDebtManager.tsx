@@ -92,16 +92,44 @@ export function StaffDebtManager({ onOpenPaymentModal }: StaffDebtManagerProps) 
   const { data: cloudShifts } = useFirestoreCollection<CashierShift>('shifts');
   const { data: cloudPayments } = useFirestoreCollection<ReceivablePayment>('receivablePayments');
 
+  // Local Dexie fallbacks with refreshKey for instantaneous deletion & offline readiness
+  const localReceivables = useLiveQuery(() => db.receivables.toArray(), [refreshKey]);
+  const localCustomers = useLiveQuery(() => db.customers.toArray(), [refreshKey]);
+  const localUsers = useLiveQuery(() => db.users.toArray(), [refreshKey]);
+  const localShifts = useLiveQuery(() => db.shifts.toArray(), [refreshKey]);
+  const localPayments = useLiveQuery(() => db.receivablePayments.toArray(), [refreshKey]);
+
+  const activeReceivables = useMemo(() => {
+    const list = (cloudReceivables && cloudReceivables.length > 0) ? cloudReceivables : (localReceivables || []);
+    return list;
+  }, [cloudReceivables, localReceivables]);
+
+  const activeCustomers = useMemo(() => {
+    return (cloudCustomers && cloudCustomers.length > 0) ? cloudCustomers : (localCustomers || []);
+  }, [cloudCustomers, localCustomers]);
+
+  const activeUsers = useMemo(() => {
+    return (cloudUsers && cloudUsers.length > 0) ? cloudUsers : (localUsers || []);
+  }, [cloudUsers, localUsers]);
+
+  const activeShifts = useMemo(() => {
+    return (cloudShifts && cloudShifts.length > 0) ? cloudShifts : (localShifts || []);
+  }, [cloudShifts, localShifts]);
+
+  const activePayments = useMemo(() => {
+    return (cloudPayments && cloudPayments.length > 0) ? cloudPayments : (localPayments || []);
+  }, [cloudPayments, localPayments]);
+
   // 2. Enriched Staff Debts (In-memory Join)
   const staffDebts = useMemo(() => {
-    if (!cloudReceivables || !cloudCustomers) return [];
+    if (!activeReceivables || !activeCustomers) return [];
     
-    const customerMap = new Map<string, Customer>(cloudCustomers.map(c => [c.customerId, c]));
-    const userMap = new Map<string, User>(cloudUsers?.map(u => [u.userId, u]) || []);
+    const customerMap = new Map<string, Customer>(activeCustomers.map(c => [c.customerId, c]));
+    const userMap = new Map<string, User>(activeUsers?.map(u => [u.userId, u]) || []);
 
     const items: StaffDebtItem[] = [];
 
-    for (const r of cloudReceivables) {
+    for (const r of activeReceivables) {
       const customer = customerMap.get(r.customerId);
       const isStaffCustomer = Boolean(
         customer &&
@@ -117,8 +145,8 @@ export function StaffDebtManager({ onOpenPaymentModal }: StaffDebtManagerProps) 
         let matchedUser: User | undefined = undefined;
 
         // Try to match shift by staffReceivableId or transactionId
-        if (cloudShifts) {
-          for (const s of cloudShifts) {
+        if (activeShifts) {
+          for (const s of activeShifts) {
             if (s.staffReceivableId === r.receivableId || (s.shiftId && r.transactionId.includes(s.shiftId.slice(-8).toUpperCase()))) {
               matchedShift = s;
               matchedUser = userMap.get(s.userId);
@@ -128,8 +156,8 @@ export function StaffDebtManager({ onOpenPaymentModal }: StaffDebtManagerProps) 
         }
 
         // If no user matched via shift, try parsing from customer notes or name
-        if (!matchedUser && customer && cloudUsers) {
-          for (const u of cloudUsers) {
+        if (!matchedUser && customer && activeUsers) {
+          for (const u of activeUsers) {
             if (customer.name.toLowerCase().includes(u.name.toLowerCase()) || customer.notes?.includes(u.userId)) {
               matchedUser = u;
               break;
@@ -170,7 +198,7 @@ export function StaffDebtManager({ onOpenPaymentModal }: StaffDebtManagerProps) 
     }
 
     return items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [cloudReceivables, cloudCustomers, cloudUsers, cloudShifts]);
+  }, [activeReceivables, activeCustomers, activeUsers, activeShifts]);
 
   const cashierUsers = useMemo(() => {
     return cloudUsers?.filter(u => u.status === 'ACTIVE' && (u.role === 'KASIR' || u.role === 'MANAGER' || u.role === 'WAREHOUSE')) || [];
@@ -224,13 +252,13 @@ export function StaffDebtManager({ onOpenPaymentModal }: StaffDebtManagerProps) 
     }
   };
 
-  // 3. Filter Unassigned Shift Discrepancies (from Cloud)
+  // 3. Filter Unassigned Shift Discrepancies (from Active Data)
   const unassignedShiftDiscrepancies = useMemo(() => {
-    if (!cloudShifts || !cloudUsers) return [];
+    if (!activeShifts || !activeUsers) return [];
 
-    const userMap = new Map<string, string>(cloudUsers.map(u => [u.userId, u.name]));
+    const userMap = new Map<string, string>(activeUsers.map(u => [u.userId, u.name]));
     
-    return cloudShifts
+    return activeShifts
       .filter(s => 
         s.status === 'CLOSED' && 
         Boolean(s.discrepancy && s.discrepancy < 0) &&
@@ -241,7 +269,7 @@ export function StaffDebtManager({ onOpenPaymentModal }: StaffDebtManagerProps) 
         cashierName: userMap.get(s.userId) || s.userId
       }))
       .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
-  }, [cloudShifts, cloudUsers]);
+  }, [activeShifts, activeUsers]);
 
   // 4. Filtered Staff Debts
   const filteredDebts = useMemo(() => {
@@ -303,13 +331,13 @@ export function StaffDebtManager({ onOpenPaymentModal }: StaffDebtManagerProps) 
 
   // 5. Fetch Repayment History (linked to original cash differences)
   const repaymentHistory = useMemo(() => {
-    if (!staffDebts || !cloudPayments || !cloudUsers) return [];
+    if (!staffDebts || !activePayments || !activeUsers) return [];
     
     const staffReceivableIds = new Set(staffDebts.map(d => d.receivable.receivableId));
     const debtMap = new Map<string, StaffDebtItem>(staffDebts.map(d => [d.receivable.receivableId, d]));
-    const userMap = new Map<string, string>(cloudUsers.map(u => [u.userId, u.name]));
+    const userMap = new Map<string, string>(activeUsers.map(u => [u.userId, u.name]));
 
-    const staffPayments = cloudPayments.filter(p => staffReceivableIds.has(p.receivableId));
+    const staffPayments = activePayments.filter(p => staffReceivableIds.has(p.receivableId));
 
     return staffPayments.map(p => {
       const debt = debtMap.get(p.receivableId)!;
@@ -328,15 +356,15 @@ export function StaffDebtManager({ onOpenPaymentModal }: StaffDebtManagerProps) 
         recorderName
       };
     }).sort((a, b) => new Date(b.payment.timestamp).getTime() - new Date(a.payment.timestamp).getTime());
-  }, [staffDebts, cloudPayments, cloudUsers]);
+  }, [staffDebts, activePayments, activeUsers]);
 
   // 6. Selected Debt Payments (for detail modal)
   const selectedDebtPayments = useMemo(() => {
-    if (!selectedStaffDebt || !cloudPayments) return [];
-    return cloudPayments
+    if (!selectedStaffDebt || !activePayments) return [];
+    return activePayments
       .filter(p => p.receivableId === selectedStaffDebt.receivable.receivableId)
       .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-  }, [selectedStaffDebt, cloudPayments]);
+  }, [selectedStaffDebt, activePayments]);
 
   // 7. Filtered Repayment History
   const filteredHistory = useMemo(() => {

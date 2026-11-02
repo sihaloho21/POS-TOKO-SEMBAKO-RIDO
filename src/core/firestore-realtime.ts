@@ -16,6 +16,7 @@ import {
 } from 'firebase/firestore';
 import { db as firestoreDb, auth, handleFirestoreError, OperationType } from '@/firebase/config';
 import { db as localDb } from '@/core/database';
+import { SyncEngine } from './sync-engine';
 
 export { firestoreDb, auth };
 
@@ -32,7 +33,10 @@ const PRIMARY_KEYS: Record<string, string> = {
   suppliers: 'supplierId',
   settings: 'id',
   payrolls: 'id',
-  bonusCategories: 'id'
+  bonusCategories: 'id',
+  consignmentItems: 'id',
+  consignmentArrivals: 'id',
+  consignmentSettlements: 'id'
 };
 
 /**
@@ -75,29 +79,65 @@ export function useFirestoreCollection<T = any>(
         q,
         (snapshot) => {
           const items: T[] = [];
+          const snapshotIds = new Set<string>();
+
           snapshot.forEach((d) => {
             const raw = d.data();
             const recordId = raw[idField] || raw.id || d.id;
-            items.push({
+            const fullItem = {
               ...(raw as any),
               id: d.id,
               [idField]: recordId
-            });
+            };
+            items.push(fullItem);
+            snapshotIds.add(recordId);
           });
-          setData(items);
-          setLoading(false);
+          // Filter out items that are currently pending DELETE in sync queue
+          // to prevent them from "reappearing" before the sync engine finishes.
+          localDb.syncQueue.where('entityType').equals(collectionName).toArray().then(async (pendingItems) => {
+            const pendingDeleteIds = new Set(
+              pendingItems.filter(p => p.action === 'DELETE').map(p => p.entityId)
+            );
+            
+            const filteredItems = items.filter((item: any) => {
+              const id = item[idField] || item.id;
+              return !pendingDeleteIds.has(id);
+            });
 
-          // Optionally mirror into local Dexie for seamless offline backup
-          if (syncToLocal && localDb[collectionName as keyof typeof localDb]) {
-            try {
+            // Set UI data with deleted items strictly excluded
+            setData(filteredItems);
+            setLoading(false);
+
+            // Mirror into local Dexie for seamless offline backup
+            if (syncToLocal && localDb[collectionName as keyof typeof localDb]) {
               const table = (localDb as any)[collectionName];
-              if (table && typeof table.bulkPut === 'function' && items.length > 0) {
-                table.bulkPut(items).catch(() => {});
+
+              // 1. Upsert filtered items from cloud snapshot
+              if (filteredItems.length > 0) {
+                await table.bulkPut(filteredItems).catch(() => {});
               }
-            } catch {
-              // Ignore local mirror errors
+
+              // 2. Identify and remove local records that no longer exist in Cloud
+              const snapshotIds = new Set(filteredItems.map((item: any) => item[idField] || item.id));
+              const localItems: any[] = await table.toArray();
+              const pendingIds = new Set(pendingItems.map(p => p.entityId));
+
+              const idsToRemove = localItems
+                .filter((li: any) => {
+                  const id = li[idField] || li.id;
+                  // Remove if not in Cloud AND not pending creation/update locally
+                  return !snapshotIds.has(id) && !pendingIds.has(id);
+                })
+                .map((li: any) => li[idField] || li.id);
+
+              if (idsToRemove.length > 0) {
+                await table.bulkDelete(idsToRemove).catch(() => {});
+              }
             }
-          }
+          }).catch(() => {
+            setData(items);
+            setLoading(false);
+          });
         },
         (err) => {
           console.warn(`Firestore onSnapshot notice for [${collectionName}]:`, err);
@@ -162,8 +202,30 @@ export function useFirestoreDoc<T = any>(collectionName: string, docId?: string 
 }
 
 /**
- * DIRECT FIRESTORE WRITE HELPERS (Bypass Sync Queue - Zero Latency)
+ * DIRECT FIRESTORE WRITE HELPERS (Queued via Sync Engine for 100% Offline Reliability)
  */
+
+async function addToSyncQueue(entityType: string, entityId: string, action: 'CREATE' | 'UPDATE' | 'DELETE', payload: any) {
+  const timestamp = new Date().toISOString();
+  try {
+    await localDb.syncQueue.add({
+      entityType,
+      entityId,
+      action,
+      payload,
+      status: 'PENDING',
+      retryCount: 0,
+      createdAt: timestamp
+    });
+
+    // Sub-second sync attempt if online
+    if (navigator.onLine) {
+      SyncEngine.processQueue().catch(() => {});
+    }
+  } catch (err) {
+    console.warn('Failed to add to sync queue:', err);
+  }
+}
 
 export async function cloudSetDoc(collectionName: string, docId: string, data: any): Promise<void> {
   const cleanData = JSON.parse(JSON.stringify({
@@ -171,22 +233,18 @@ export async function cloudSetDoc(collectionName: string, docId: string, data: a
     updatedAt: new Date().toISOString()
   }));
 
-  try {
-    const docRef = doc(firestoreDb, collectionName, docId);
-    await setDoc(docRef, cleanData, { merge: true });
-  } catch (err: any) {
-    console.warn(`cloudSetDoc notice for [${collectionName}/${docId}]:`, err?.message || err);
-  }
-
-  // Update local Dexie table in background for consistency
+  // 1. Update local Dexie table immediately for zero-latency UI
   try {
     const table = (localDb as any)[collectionName];
     if (table) {
       await table.put(cleanData);
     }
   } catch (e) {
-    // Local mirror is non-blocking
+    console.warn(`Local mirror update failed for [${collectionName}]:`, e);
   }
+
+  // 2. Queue for Cloud Sync
+  await addToSyncQueue(collectionName, docId, 'UPDATE', cleanData);
 }
 
 export async function cloudUpdateDoc(collectionName: string, docId: string, updates: any): Promise<void> {
@@ -195,68 +253,58 @@ export async function cloudUpdateDoc(collectionName: string, docId: string, upda
     updatedAt: new Date().toISOString()
   }));
 
-  try {
-    const docRef = doc(firestoreDb, collectionName, docId);
-    await updateDoc(docRef, cleanUpdates);
-  } catch (err: any) {
-    console.warn(`cloudUpdateDoc notice for [${collectionName}/${docId}]:`, err?.message || err);
-  }
-
-  // Update local Dexie table in background
+  // 1. Update local Dexie table immediately
   try {
     const table = (localDb as any)[collectionName];
     if (table) {
       await table.update(docId, cleanUpdates);
     }
   } catch (e) {
-    // Local mirror is non-blocking
+    console.warn(`Local mirror update failed for [${collectionName}]:`, e);
   }
+
+  // 2. Queue for Cloud Sync
+  // For update, we might need the full doc or just the diff. 
+  // SyncEngine.syncItem uses setDoc with merge: true, so sending updates is fine.
+  await addToSyncQueue(collectionName, docId, 'UPDATE', cleanUpdates);
 }
 
 export async function cloudDeleteDoc(collectionName: string, docId: string): Promise<void> {
-  try {
-    const docRef = doc(firestoreDb, collectionName, docId);
-    await deleteDoc(docRef);
-  } catch (err: any) {
-    console.warn(`cloudDeleteDoc notice for [${collectionName}/${docId}]:`, err?.message || err);
-  }
-
-  // Delete from local Dexie table in background
+  // 1. Delete from local Dexie table immediately
   try {
     const table = (localDb as any)[collectionName];
     if (table) {
       await table.delete(docId);
     }
   } catch (e) {
-    // Local mirror is non-blocking
+    console.warn(`Local mirror delete failed for [${collectionName}]:`, e);
   }
+
+  // 2. Queue for Cloud Sync
+  await addToSyncQueue(collectionName, docId, 'DELETE', null);
 }
 
 export async function cloudAddDoc(collectionName: string, data: any): Promise<string> {
+  const docId = `local-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
   const cleanData = JSON.parse(JSON.stringify({
     ...data,
+    id: docId,
     createdAt: data.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString()
   }));
 
-  let docId = `local-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-  try {
-    const colRef = collection(firestoreDb, collectionName);
-    const docRef = await addDoc(colRef, cleanData);
-    docId = docRef.id;
-  } catch (err: any) {
-    console.warn(`cloudAddDoc notice for [${collectionName}]:`, err?.message || err);
-  }
-
-  // Update local Dexie table in background
+  // 1. Update local Dexie table immediately
   try {
     const table = (localDb as any)[collectionName];
     if (table) {
-      await table.put({ ...cleanData, id: docId });
+      await table.put(cleanData);
     }
   } catch (e) {
-    // Local mirror is non-blocking
+    console.warn(`Local mirror add failed for [${collectionName}]:`, e);
   }
+
+  // 2. Queue for Cloud Sync
+  await addToSyncQueue(collectionName, docId, 'CREATE', cleanData);
 
   return docId;
 }

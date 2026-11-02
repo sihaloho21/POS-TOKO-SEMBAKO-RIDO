@@ -97,14 +97,8 @@ export class PayrollService {
     const updatedAt = new Date().toISOString();
     const newActive = !cat.isActive;
 
-    // 1. Direct Cloud Firestore write
+    // 1. Direct Cloud Firestore write (handles local mirror + sync queue)
     await cloudUpdateDoc('bonusCategories', id, {
-      isActive: newActive,
-      updatedAt
-    });
-
-    // 2. Local mirror
-    await db.bonusCategories.update(id, {
       isActive: newActive,
       updatedAt
     });
@@ -120,10 +114,8 @@ export class PayrollService {
       // Just deactivate system categories rather than hard delete
       const updatedAt = new Date().toISOString();
       await cloudUpdateDoc('bonusCategories', id, { isActive: false, updatedAt });
-      await db.bonusCategories.update(id, { isActive: false, updatedAt });
     } else {
       await cloudDeleteDoc('bonusCategories', id);
-      await db.bonusCategories.delete(id);
     }
   }
 
@@ -178,9 +170,8 @@ export class PayrollService {
         timestamp: params.paymentDate ? new Date(params.paymentDate).toISOString() : now
       };
 
-      // Realtime Cloud Firestore write for Finance Event
+      // Realtime Cloud Firestore write for Finance Event (handles local mirror + sync queue)
       await cloudSetDoc('financeEvents', financeEventId, financeEvent);
-      await db.financeEvents.put(financeEvent);
     }
 
     const record: PayrollRecord = {
@@ -210,30 +201,30 @@ export class PayrollService {
       updatedAt: now
     };
 
-    // 1. Direct Realtime Cloud Firestore write
+    // 1. Direct Realtime Cloud Firestore write (handles local mirror + sync queue)
     await cloudSetDoc('payrolls', payrollId, record);
-
-    // 2. Local Dexie mirror
-    await db.payrolls.put(record);
 
     return record;
   }
 
   /**
    * Delete a payroll record and roll back any associated financeEvent from both Cloud & Local
+   * Restricted to Owner as per security policy.
    */
-  static async deletePayroll(payrollId: string): Promise<void> {
+  static async deletePayroll(payrollId: string, role: string): Promise<void> {
+    if (role !== 'OWNER') {
+      throw new Error('Akses Ditolak: Hanya Owner yang diperbolehkan menghapus data penggajian.');
+    }
+
     const record = await db.payrolls.get(payrollId);
     
     // Delete associated finance event if exists
     if (record?.financeEventId) {
       await cloudDeleteDoc('financeEvents', record.financeEventId);
-      await db.financeEvents.delete(record.financeEventId);
     }
 
-    // Delete payroll from Cloud Firestore & local Dexie
+    // Delete payroll from Cloud Firestore & local Dexie (handles both via cloudDeleteDoc)
     await cloudDeleteDoc('payrolls', payrollId);
-    await db.payrolls.delete(payrollId);
   }
 
   /**

@@ -4,6 +4,7 @@ import type { Product, StockMovement, ProductCost } from '../types';
 import { StockService } from './stock-service';
 import { FinanceService } from './finance-service';
 import { AuditEngine } from '../audit-engine';
+import { cloudSetDoc, cloudUpdateDoc } from '../firestore-realtime';
 
 export interface FruitProductDef {
   productId: string;
@@ -53,6 +54,9 @@ export class FruitService {
    * Ensures default fruit products (Mangga Arum Manis & Jeruk Berastagi) exist in the database.
    */
   static async ensureMinimalFruitProducts(userId: string = 'SYSTEM'): Promise<number> {
+    // USER REQUEST 2026-11-01: No automatic fruit stock list. Only manual.
+    return 0;
+
     const deletedSetting = await db.settings.get('deleted_product_ids');
     const deletedIds: string[] = deletedSetting?.ids || [];
 
@@ -239,12 +243,12 @@ export class FruitService {
     });
 
     // 2. Update HPP in database
-    await db.productCosts.put({
-      productId: product.productId,
+    await cloudUpdateDoc('products', product.productId, {
       hpp: newHpp,
       updatedAt: now
     });
-    await db.products.update(product.productId, {
+    await cloudSetDoc('productCosts', product.productId, {
+      productId: product.productId,
       hpp: newHpp,
       updatedAt: now
     });

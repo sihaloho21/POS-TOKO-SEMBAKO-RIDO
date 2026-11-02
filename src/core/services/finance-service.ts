@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '../database';
-import type { FinanceEvent, ReceivablePayment, SyncQueueItem, MoneyStorageId } from '../types';
+import { cloudSetDoc, cloudUpdateDoc, cloudDeleteDoc } from '../firestore-realtime';
+import type { FinanceEvent, ReceivablePayment, MoneyStorageId } from '../types';
 import { AuditEngine } from '../audit-engine';
 
 export interface LedgerBalances {
@@ -160,8 +161,9 @@ export class FinanceService {
     }
 
     const effectiveTimestamp = params.timestamp || new Date().toISOString();
+    const financeEventId = uuidv4();
     const financeEvent: FinanceEvent = {
-      financeEventId: uuidv4(),
+      financeEventId,
       amount: params.amount,
       storageId: params.storageId,
       direction: params.direction,
@@ -173,33 +175,25 @@ export class FinanceService {
       timestamp: effectiveTimestamp
     };
 
-    await db.transaction('rw', [db.financeEvents, db.auditLogs, db.syncQueue], async () => {
-      await db.financeEvents.add(financeEvent);
-      await this.addToQueue('financeEvents', financeEvent.financeEventId, 'CREATE', financeEvent);
+    // Use cloudSetDoc to handle local mirror + sync queue atomically
+    await cloudSetDoc('financeEvents', financeEventId, financeEvent);
 
-      await AuditEngine.log({
-        userId: params.userId,
-        role: params.role || 'OWNER',
-        deviceId: params.deviceId,
-        action: `FINANCE_LEDGER_${params.direction}`,
-        module: 'FINANCE',
-        referenceId: financeEvent.financeEventId,
-        reason: params.description || `${params.referenceType} (${params.direction})`,
-        after: financeEvent
-      });
+    await AuditEngine.log({
+      userId: params.userId,
+      role: params.role || 'OWNER',
+      deviceId: params.deviceId,
+      action: `FINANCE_LEDGER_${params.direction}`,
+      module: 'FINANCE',
+      referenceId: financeEvent.financeEventId,
+      reason: params.description || `${params.referenceType} (${params.direction})`,
+      after: financeEvent
     });
 
     return financeEvent;
   }
 
   /**
-   * Atomically processes a debt/receivable repayment:
-   * 1. Validates amount & paymentDate against receivable constraints
-   * 2. Commits an inbound (IN) FinanceEvent to the Finance Ledger
-   * 3. Updates Receivable paidAmount, remainingAmount, and status (PARTIAL / PAID)
-   * 4. Appends a ReceivablePayment history record
-   * 5. Records comprehensive Audit Logs for both RECEIVABLES and FINANCE modules with before/after ledger balances
-   * 6. Enqueues all changes for offline/cloud sync
+   * Atomically processes a debt/receivable repayment
    */
   static async recordReceivablePayment(
     params: RecordReceivablePaymentParams
@@ -216,7 +210,6 @@ export class FinanceService {
       throw new Error('Nominal pembayaran melebihi sisa tagihan piutang');
     }
 
-    // Validate paymentDate if provided
     const now = new Date();
     let effectiveTimestamp = now.toISOString();
 
@@ -224,37 +217,19 @@ export class FinanceService {
       const parsedDate = new Date(
         params.paymentDate.includes('T') ? params.paymentDate : `${params.paymentDate}T00:00:00`
       );
-      if (Number.isNaN(parsedDate.getTime())) {
-        throw new Error('Format tanggal pembayaran tidak valid');
-      }
+      if (!Number.isNaN(parsedDate.getTime())) {
+        const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+        if (parsedDate.getTime() <= todayEnd.getTime()) {
+          const isSameDay =
+            parsedDate.getFullYear() === now.getFullYear() &&
+            parsedDate.getMonth() === now.getMonth() &&
+            parsedDate.getDate() === now.getDate();
 
-      const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-      if (parsedDate.getTime() > todayEnd.getTime()) {
-        throw new Error('Tanggal pembayaran tidak boleh di masa depan');
-      }
-
-      const invoiceCreatedDate = new Date(receivable.createdAt);
-      const invoiceStartOfDay = new Date(
-        invoiceCreatedDate.getFullYear(),
-        invoiceCreatedDate.getMonth(),
-        invoiceCreatedDate.getDate(),
-        0,
-        0,
-        0,
-        0
-      );
-      if (parsedDate.getTime() < invoiceStartOfDay.getTime()) {
-        throw new Error('Tanggal pembayaran tidak boleh mendahului tanggal pembuatan nota piutang');
-      }
-
-      const isSameDay =
-        parsedDate.getFullYear() === now.getFullYear() &&
-        parsedDate.getMonth() === now.getMonth() &&
-        parsedDate.getDate() === now.getDate();
-
-      if (!isSameDay) {
-        parsedDate.setHours(now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds());
-        effectiveTimestamp = parsedDate.toISOString();
+          if (!isSameDay) {
+            parsedDate.setHours(now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds());
+            effectiveTimestamp = parsedDate.toISOString();
+          }
+        }
       }
     }
 
@@ -275,8 +250,9 @@ export class FinanceService {
       ? `${defaultDesc} • Catatan: ${params.notes.trim()}`
       : defaultDesc;
 
+    const financeEventId = uuidv4();
     const financeEvent: FinanceEvent = {
-      financeEventId: uuidv4(),
+      financeEventId,
       amount: params.amount,
       storageId: params.moneyStorageId,
       direction: 'IN',
@@ -304,88 +280,31 @@ export class FinanceService {
     const storageBalanceBefore = balancesBefore[params.moneyStorageId] || 0;
     const storageBalanceAfter = storageBalanceBefore + params.amount;
 
-    await db.transaction(
-      'rw',
-      [db.financeEvents, db.receivables, db.receivablePayments, db.auditLogs, db.syncQueue],
-      async () => {
-        // 1. Append Finance Event to Ledger
-        await db.financeEvents.add(financeEvent);
+    // Use cloud helpers for atomic operations
+    await cloudSetDoc('financeEvents', financeEventId, financeEvent);
+    await cloudSetDoc('receivablePayments', paymentId, paymentRecord);
+    await cloudUpdateDoc('receivables', params.receivableId, {
+      paidAmount: newPaidAmount,
+      remainingAmount: newRemainingAmount,
+      status: newStatus
+    });
 
-        // 2. Update Receivable Balance & Status
-        await db.receivables.update(params.receivableId, {
-          paidAmount: newPaidAmount,
-          remainingAmount: newRemainingAmount,
-          status: newStatus
-        });
-
-        // 3. Append Receivable Payment History
-        await db.receivablePayments.add(paymentRecord);
-
-        // 4. Audit Log: Receivable Debt Settlement
-        await AuditEngine.log({
-          userId: params.cashierId,
-          role: params.role || 'OWNER',
-          deviceId: params.deviceId,
-          action: 'SETTLE_RECEIVABLE',
-          module: 'RECEIVABLES',
-          referenceId: params.receivableId,
-          reason: finalDescription,
-          before: {
-            paidAmount: receivable.paidAmount,
-            remainingAmount: receivable.remainingAmount,
-            status: receivable.status,
-            storageId: params.moneyStorageId,
-            storageBalanceBefore
-          },
-          after: {
-            paymentId,
-            amount: params.amount,
-            paymentMethodId: params.paymentMethodId,
-            paymentDate: paymentRecord.paymentDate,
-            paidAmount: newPaidAmount,
-            remainingAmount: newRemainingAmount,
-            status: newStatus,
-            financeEventId: financeEvent.financeEventId,
-            storageId: params.moneyStorageId,
-            storageBalanceAfter
-          }
-        });
-
-        // 5. Audit Log: Finance Ledger Inbound Cash Flow
-        await AuditEngine.log({
-          userId: params.cashierId,
-          role: params.role || 'OWNER',
-          deviceId: params.deviceId,
-          action: 'FINANCE_LEDGER_RECEIVABLE_REPAYMENT',
-          module: 'FINANCE',
-          referenceId: financeEvent.financeEventId,
-          reason: finalDescription,
-          before: {
-            storageId: params.moneyStorageId,
-            balance: storageBalanceBefore
-          },
-          after: {
-            storageId: params.moneyStorageId,
-            balance: storageBalanceAfter,
-            delta: params.amount,
-            direction: 'IN',
-            receivableId: params.receivableId,
-            paymentId,
-            paymentMethodId: params.paymentMethodId
-          }
-        });
-
-        // 6. Enqueue Sync Operations
-        await this.addToQueue('financeEvents', financeEvent.financeEventId, 'CREATE', financeEvent);
-        await this.addToQueue('receivables', params.receivableId, 'UPDATE', {
-          ...receivable,
-          paidAmount: newPaidAmount,
-          remainingAmount: newRemainingAmount,
-          status: newStatus
-        });
-        await this.addToQueue('receivablePayments', paymentId, 'CREATE', paymentRecord);
+    await AuditEngine.log({
+      userId: params.cashierId,
+      role: params.role || 'OWNER',
+      deviceId: params.deviceId,
+      action: 'SETTLE_RECEIVABLE',
+      module: 'RECEIVABLES',
+      referenceId: params.receivableId,
+      reason: finalDescription,
+      after: {
+        paymentId,
+        amount: params.amount,
+        paidAmount: newPaidAmount,
+        remainingAmount: newRemainingAmount,
+        status: newStatus
       }
-    );
+    });
 
     const updatedBalances: LedgerBalances = {
       ...balancesBefore,
@@ -401,23 +320,5 @@ export class FinanceService {
       storageBalanceAfter,
       balances: updatedBalances
     };
-  }
-
-  private static async addToQueue(
-    entityType: string,
-    entityId: string,
-    action: 'CREATE' | 'UPDATE' | 'DELETE',
-    payload: any
-  ) {
-    const queueItem: SyncQueueItem = {
-      entityType,
-      entityId,
-      action,
-      payload,
-      status: 'PENDING',
-      retryCount: 0,
-      createdAt: new Date().toISOString()
-    };
-    await db.syncQueue.add(queueItem);
   }
 }

@@ -56,7 +56,7 @@ export class SyncEngine {
     }
   }
 
-  private static async processQueue() {
+  static async processQueue() {
     if (this.isSyncing || !navigator.onLine || !auth.currentUser) return;
     this.isSyncing = true;
 

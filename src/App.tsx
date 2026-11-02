@@ -46,9 +46,7 @@ export default function App() {
     if (!isAuthenticated) return;
 
     // Direct Cloud Realtime Architecture: Two-way sync with Firestore cloud immediately
-    CloudMigrationService.syncAllBiDirectional().then(() => {
-      ProductService.ensureBaselineProductsAndStock(currentUser?.userId).catch(err => console.warn('Baseline products init error:', err));
-    }).catch(err => console.warn('Cloud sync notice:', err));
+    SyncEngine.start();
 
     const handleSyncOnResume = () => {
       if (navigator.onLine) {
@@ -58,16 +56,6 @@ export default function App() {
 
     window.addEventListener('focus', handleSyncOnResume);
     window.addEventListener('online', handleSyncOnResume);
-
-    // Ensure minimal fish products exist
-    import('./core/services/fish-service').then(({ FishService }) => {
-      FishService.ensureMinimalFishProducts(currentUser?.userId).catch(err => console.warn('Fish products init error:', err));
-    });
-
-    // Ensure minimal fruit products exist (Mangga Arum Manis & Jeruk Berastagi)
-    import('./core/services/fruit-service').then(({ FruitService }) => {
-      FruitService.ensureMinimalFruitProducts(currentUser?.userId).catch(err => console.warn('Fruit products init error:', err));
-    });
 
     // Check low stock
     ProductService.checkLowStock().catch(err => console.warn('checkLowStock failed:', err));

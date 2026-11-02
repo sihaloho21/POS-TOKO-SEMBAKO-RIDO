@@ -3,7 +3,6 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/core/database';
 import { IntegrityService, type IntegrityReport } from '@/core/services/integrity-service';
 import { 
-  Activity, 
   Database, 
   Cloud, 
   Wifi, 
@@ -238,7 +237,7 @@ export default function SystemHealth() {
           icon={<Wifi size={20} />}
           label="Konektivitas Internet"
           status={isOnline ? 'OK' : 'WARNING'}
-          detail={isOnline ? 'Terhubung ke jaringan aktif' : 'Bekerja secara offline (local-first)'}
+          detail={isOnline ? 'Terhubung ke jaringan aktif' : 'Bekerja secara offline (Realtime Cloud-First dengan fallback cache)'}
           color="text-blue-600"
         />
         <HealthItem 
@@ -486,7 +485,7 @@ export default function SystemHealth() {
                 <div className="space-y-1 max-w-xl">
                   <div className="flex items-center gap-2">
                     <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-indigo-500/30 text-indigo-200 border border-indigo-400/30">
-                      Local-First Architecture
+                      Realtime Cloud-First (Firestore Live Sync)
                     </span>
                     <span className="text-xs font-bold text-slate-300">
                       Auto-sync: tiap 10 detik
@@ -876,23 +875,6 @@ export default function SystemHealth() {
         </div>
       )}
 
-      {/* Educational Footer Banner */}
-      <div className="bg-slate-900 rounded-3xl p-8 text-white relative overflow-hidden shadow-xl">
-        <Activity className="absolute right-[-20px] top-[-20px] w-48 h-48 text-white/5 rotate-12 pointer-events-none" />
-        <div className="relative z-10 space-y-2">
-          <div className="flex items-center gap-2 text-indigo-400 text-xs font-black uppercase tracking-widest">
-            <Gauge size={16} />
-            <span>High Performance Architecture</span>
-          </div>
-          <h3 className="text-xl font-black uppercase tracking-widest">
-            Event-Based Ledger &amp; Low-Latency Local Cache
-          </h3>
-          <p className="text-slate-400 text-sm max-w-xl leading-relaxed font-medium">
-            Toko Sembako Riama dirancang dengan filosofi <strong>Local-First Offline</strong>: Seluruh transaksi divalidasi dan disimpan secara instan ke IndexedDB lokal (sub-100ms) tanpa menunggu respon jaringan cloud. 
-            Sinkronisasi ke Firestore berjalan asinkron di latar belakang (background worker) untuk menjamin kasir dapat melayani pelanggan tanpa jeda antrian.
-          </p>
-        </div>
-      </div>
 
       {/* Firebase Auth Interactive Guide Modal (User Request 5) */}
       <FirebaseAuthGuideModal

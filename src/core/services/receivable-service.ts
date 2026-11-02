@@ -24,11 +24,8 @@ export class ReceivableService {
       updatedAt: timestamp
     };
 
-    // 1. Cloud Firestore update
+    // 1. Cloud Firestore update (handles local mirror + sync queue)
     await cloudUpdateDoc('receivables', receivableId, updates);
-
-    // 2. Local database update
-    await db.receivables.update(receivableId, updates);
 
     // 3. Audit log
     await AuditEngine.log({
@@ -74,9 +71,8 @@ export class ReceivableService {
       }
     }
 
-    // 2. Delete the receivable itself in Cloud FIRST
+    // 2. Delete the receivable (handles local mirror + sync queue)
     await cloudDeleteDoc('receivables', receivableId);
-    await db.receivables.delete(receivableId);
 
     // 3. Get and delete all associated payments (Cloud & Local)
     // We try local first, but we should also check cloud if possible.
@@ -95,11 +91,9 @@ export class ReceivableService {
       
       for (const fe of financeEvents) {
         await cloudDeleteDoc('financeEvents', fe.financeEventId);
-        await db.financeEvents.delete(fe.financeEventId);
       }
 
       await cloudDeleteDoc('receivablePayments', payment.paymentId);
-      await db.receivablePayments.delete(payment.paymentId);
     }
 
     // 4. Update the source transaction if it exists (remove receivableId reference)
@@ -109,10 +103,6 @@ export class ReceivableService {
         await cloudUpdateDoc('transactions', transaction.transactionId, {
           receivableId: null,
           status: 'VOIDED' // Mark as voided since the piutang is deleted
-        });
-        await db.transactions.update(transaction.transactionId, {
-          receivableId: undefined,
-          status: 'VOIDED'
         });
       }
     }
@@ -179,12 +169,10 @@ export class ReceivableService {
     
     for (const fe of financeEvents) {
       await cloudDeleteDoc('financeEvents', fe.financeEventId);
-      await db.financeEvents.delete(fe.financeEventId);
     }
 
     // 2. Delete the payment record
     await cloudDeleteDoc('receivablePayments', paymentId);
-    await db.receivablePayments.delete(paymentId);
 
     // 3. Recalculate receivable balance
     if (!receivable) {
@@ -217,7 +205,6 @@ export class ReceivableService {
       };
 
       await cloudUpdateDoc('receivables', receivableId, updates);
-      await db.receivables.update(receivableId, updates);
     }
 
     // 4. Audit log

@@ -35,5 +35,5 @@ Saat Sales berkunjung, Owner/Kasir menginput **Sisa Stok**:
 
 ---
 **Catatan Teknis**: 
-- Data tersimpan di Dexie (Local) dan sinkron ke Firestore.
+- Data tersimpan langsung secara Realtime Cloud-First (Firestore Live Sync) dengan fallback cache lokal.
 - Transaksi tercatat di `FinanceEvent` sebagai pengeluaran (`OUT`) dari storage `WARUNG`.

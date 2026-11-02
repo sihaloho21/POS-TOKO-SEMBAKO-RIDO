@@ -1066,7 +1066,7 @@ export default function Receivables() {
               <tbody className="divide-y divide-slate-100">
                 {!payments || payments.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-6 py-16 text-center text-slate-400 text-xs font-bold uppercase">
+                    <td colSpan={7} className="px-6 py-16 text-center text-slate-400 text-xs font-bold uppercase">
                       Belum ada riwayat pembayaran cicilan atau pelunasan piutang
                     </td>
                   </tr>

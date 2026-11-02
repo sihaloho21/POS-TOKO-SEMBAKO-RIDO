@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { db } from './database';
-import { cloudSetDoc, cloudDeleteDoc } from './firestore-realtime';
+import { cloudSetDoc, cloudUpdateDoc, cloudDeleteDoc } from './firestore-realtime';
 import type { 
   Transaction, 
   TransactionItem, 
@@ -120,7 +120,7 @@ export class TransactionEngine {
     }
 
     // 3. Persist Transaction
-    await db.transactions.add(transaction);
+    await cloudSetDoc('transactions', transactionId, transaction);
 
     // 4. Handle Stock Movements & Audit
     for (const item of params.items) {
@@ -217,12 +217,12 @@ export class TransactionEngine {
         status: 'PARTIAL',
         createdAt: timestamp
       };
-      await db.receivables.add(receivable);
-      await this.addToQueue('receivables', receivableId, 'CREATE', receivable);
+      await cloudSetDoc('receivables', receivableId, receivable);
 
       // Log the initial DP payment record
-      await db.receivablePayments.add({
-        paymentId: uuidv4(),
+      const paymentId = uuidv4();
+      const payment = {
+        paymentId,
         receivableId,
         amount: params.partialPayment.paidCashAmount,
         paymentMethodId: params.paymentMethodId,
@@ -231,12 +231,14 @@ export class TransactionEngine {
         timestamp,
         paymentDate: timestamp.slice(0, 10),
         notes: `Pembayaran tunai awal (DP) saat transaksi POS #${transaction.receiptNumber}`
-      });
+      };
+      await cloudSetDoc('receivablePayments', paymentId, payment);
 
-      // Finance event for the physical cash actually received (misal Rp 95.000)
+      // Finance event for the physical cash actually received
       if (params.partialPayment.paidCashAmount > 0) {
+        const financeEventId = uuidv4();
         const financeEvent: FinanceEvent = {
-          financeEventId: uuidv4(),
+          financeEventId,
           amount: params.partialPayment.paidCashAmount,
           storageId: params.moneyStorageId,
           direction: 'IN',
@@ -247,11 +249,10 @@ export class TransactionEngine {
           deviceId: params.deviceId,
           timestamp
         };
-        await db.financeEvents.add(financeEvent);
-        await this.addToQueue('financeEvents', financeEvent.financeEventId, 'CREATE', financeEvent);
+        await cloudSetDoc('financeEvents', financeEventId, financeEvent);
       }
 
-      await db.transactions.update(transactionId, { receivableId });
+      await cloudUpdateDoc('transactions', transactionId, { receivableId });
     } else if (params.type === 'GAJIAN' && params.customerId) {
       const customer = await db.customers.get(params.customerId);
       const receivableId = uuidv4();
@@ -272,12 +273,12 @@ export class TransactionEngine {
         status: 'OPEN',
         createdAt: timestamp
       };
-      await db.receivables.add(receivable);
-      await this.addToQueue('receivables', receivableId, 'CREATE', receivable);
-      await db.transactions.update(transactionId, { receivableId });
+      await cloudSetDoc('receivables', receivableId, receivable);
+      await cloudUpdateDoc('transactions', transactionId, { receivableId });
     } else {
+      const financeEventId = uuidv4();
       const financeEvent: FinanceEvent = {
-        financeEventId: uuidv4(),
+        financeEventId,
         amount: total,
         storageId: params.moneyStorageId,
         direction: 'IN',
@@ -287,8 +288,7 @@ export class TransactionEngine {
         deviceId: params.deviceId,
         timestamp
       };
-      await db.financeEvents.add(financeEvent);
-      await this.addToQueue('financeEvents', financeEvent.financeEventId, 'CREATE', financeEvent);
+      await cloudSetDoc('financeEvents', financeEventId, financeEvent);
     }
 
     // 6. Update Customer Loyalty & Audit
@@ -307,7 +307,8 @@ export class TransactionEngine {
       after: transaction
     });
 
-    await this.addToQueue('transactions', transactionId, 'CREATE', transaction);
+    // Already persisted above
+    // await cloudSetDoc('transactions', transactionId, transaction);
 
     const durationMs = Math.round(performance.now() - startTime);
     PerformanceTracker.recordTransactionMetric({
@@ -364,109 +365,85 @@ export class TransactionEngine {
     const timestamp = new Date().toISOString();
     const dueDate = params.dueDate || addDays(new Date(), customer.defaultDueDateDays || 30).toISOString();
 
-    await db.transaction(
-      'rw',
-      [db.transactions, db.receivables, db.receivablePayments, db.financeEvents, db.auditLogs, db.syncQueue],
-      async () => {
-        // 1. Catat Receivable di db.receivables
-        const receivable: Receivable = {
-          receivableId,
-          transactionId: tx.transactionId,
-          customerId: params.customerId,
-          totalAmount: tx.total,
-          paidAmount: params.actualPaidAmount,
-          remainingAmount: remainingDebt,
-          dueDate,
-          status: params.actualPaidAmount > 0 ? 'PARTIAL' : 'OPEN',
-          createdAt: timestamp
-        };
-        await db.receivables.add(receivable);
+    // 1. Catat Receivable
+    const receivable: Receivable = {
+      receivableId,
+      transactionId: tx.transactionId,
+      customerId: params.customerId,
+      totalAmount: tx.total,
+      paidAmount: params.actualPaidAmount,
+      remainingAmount: remainingDebt,
+      dueDate,
+      status: params.actualPaidAmount > 0 ? 'PARTIAL' : 'OPEN',
+      createdAt: timestamp
+    };
+    await cloudSetDoc('receivables', receivableId, receivable);
 
-        // 2. Catat bukti pembayaran DP / cicilan awal di receivablePayments jika ada uang diterima
-        if (params.actualPaidAmount > 0) {
-          await db.receivablePayments.add({
-            paymentId: uuidv4(),
-            receivableId,
-            amount: params.actualPaidAmount,
-            paymentMethodId: tx.paymentMethodId || 'CASH',
-            moneyStorageId: tx.moneyStorageId || 'WARUNG',
-            userId: params.userId,
-            timestamp,
-            paymentDate: timestamp.slice(0, 10),
-            notes: `Pembayaran awal saat transaksi #${tx.receiptNumber} (Disahkan penyesuaian piutang)`
-          });
-        }
+    // 2. Catat bukti pembayaran DP / cicilan awal
+    if (params.actualPaidAmount > 0) {
+      const paymentId = uuidv4();
+      await cloudSetDoc('receivablePayments', paymentId, {
+        paymentId,
+        receivableId,
+        amount: params.actualPaidAmount,
+        paymentMethodId: tx.paymentMethodId || 'CASH',
+        moneyStorageId: tx.moneyStorageId || 'WARUNG',
+        userId: params.userId,
+        timestamp,
+        paymentDate: timestamp.slice(0, 10),
+        notes: `Pembayaran awal saat transaksi #${tx.receiptNumber} (Disahkan penyesuaian piutang)`
+      });
+    }
 
-        // 3. Sesuaikan Finance Event agar uang di laci kasir cocok dengan uang fisik
-        const existingEvents = await db.financeEvents
-          .where('referenceId')
-          .equals(tx.transactionId)
-          .toArray();
+    // 3. Sesuaikan Finance Event
+    const existingEvents = await db.financeEvents
+      .where('referenceId')
+      .equals(tx.transactionId)
+      .toArray();
 
-        if (existingEvents.length > 0) {
-          const firstEvt = existingEvents[0];
-          await db.financeEvents.update(firstEvt.financeEventId, {
-            amount: params.actualPaidAmount,
-            description: `Penyesuaian Tunai Diterima: Rp ${params.actualPaidAmount.toLocaleString()} (Nota #${tx.receiptNumber}, Sisa Rp ${remainingDebt.toLocaleString()} jadi Piutang ${customer.name})`
-          });
-        } else {
-          await db.financeEvents.add({
-            financeEventId: uuidv4(),
-            amount: params.actualPaidAmount,
-            storageId: tx.moneyStorageId || 'WARUNG',
-            direction: 'IN',
-            referenceId: tx.transactionId,
-            referenceType: 'TRANSACTION',
-            description: `Penyesuaian Tunai Diterima Nota #${tx.receiptNumber} (${customer.name})`,
-            userId: params.userId,
-            deviceId: params.deviceId,
-            timestamp
-          });
-        }
+    if (existingEvents.length > 0) {
+      const firstEvt = existingEvents[0];
+      await cloudUpdateDoc('financeEvents', firstEvt.financeEventId, {
+        amount: params.actualPaidAmount,
+        description: `Penyesuaian Tunai Diterima: Rp ${params.actualPaidAmount.toLocaleString()} (Nota #${tx.receiptNumber}, Sisa Rp ${remainingDebt.toLocaleString()} jadi Piutang ${customer.name})`
+      });
+    } else {
+      const financeEventId = uuidv4();
+      await cloudSetDoc('financeEvents', financeEventId, {
+        financeEventId,
+        amount: params.actualPaidAmount,
+        storageId: tx.moneyStorageId || 'WARUNG',
+        direction: 'IN',
+        referenceId: tx.transactionId,
+        referenceType: 'TRANSACTION',
+        description: `Penyesuaian Tunai Diterima Nota #${tx.receiptNumber} (${customer.name})`,
+        userId: params.userId,
+        deviceId: params.deviceId,
+        timestamp
+      });
+    }
 
-        // 4. Update data transaksi
-        await db.transactions.update(tx.transactionId, {
-          customerId: params.customerId,
-          paidAmount: params.actualPaidAmount,
-          remainingDebtAmount: remainingDebt,
-          receivableId
-        });
+    // 4. Update data transaksi
+    await cloudUpdateDoc('transactions', tx.transactionId, {
+      customerId: params.customerId,
+      paidAmount: params.actualPaidAmount,
+      remainingDebtAmount: remainingDebt,
+      receivableId
+    });
 
-        // 5. Audit Log
-        await AuditEngine.log({
-          userId: params.userId,
-          role: params.role,
-          deviceId: params.deviceId,
-          action: 'CONVERT_TO_PARTIAL_RECEIVABLE',
-          module: 'POS_TRANSACTIONS',
-          referenceId: tx.transactionId,
-          before: {
-            total: tx.total,
-            customerId: tx.customerId
-          },
-          after: {
-            actualPaidAmount: params.actualPaidAmount,
-            remainingDebt,
-            customerId: params.customerId,
-            customerName: customer.name,
-            receivableId,
-            notes: params.notes,
-            timestamp
-          }
-        });
-
-        // 6. Sync queues
-        await db.syncQueue.add({
-          entityType: 'receivables',
-          entityId: receivableId,
-          action: 'CREATE',
-          payload: receivable,
-          status: 'PENDING',
-          retryCount: 0,
-          createdAt: timestamp
-        });
+    // 5. Audit Log
+    await AuditEngine.log({
+      userId: params.userId,
+      role: params.role,
+      deviceId: params.deviceId,
+      action: 'CONVERT_TO_PARTIAL_RECEIVABLE',
+      module: 'POS_TRANSACTIONS',
+      referenceId: tx.transactionId,
+      before: {
+        total: tx.total,
+        customerId: tx.customerId
       }
-    );
+    });
 
     return {
       receivableId,
@@ -492,7 +469,7 @@ export class TransactionEngine {
 
     // 1. Update Transaction Status
     const newStatus = params.actionType === 'VOID' ? 'VOIDED' : 'CANCELLED';
-    await db.transactions.update(params.transactionId, {
+    await cloudUpdateDoc('transactions', params.transactionId, {
       status: newStatus,
       serverTimestamp: timestamp
     });
@@ -560,7 +537,7 @@ export class TransactionEngine {
         timestamp
       };
       await db.financeEvents.add(reverseFinance);
-      await this.addToQueue('financeEvents', reverseFinance.financeEventId, 'CREATE', reverseFinance);
+      await cloudSetDoc('financeEvents', reverseFinance.financeEventId, reverseFinance);
     }
 
     // 4. If was GAJIAN, cancel receivable and refund any already-paid installments per their original storageId
@@ -589,7 +566,7 @@ export class TransactionEngine {
                 timestamp
               };
               await db.financeEvents.add(refundPaidFinance);
-              await this.addToQueue('financeEvents', refundPaidFinance.financeEventId, 'CREATE', refundPaidFinance);
+              await cloudSetDoc('financeEvents', refundPaidFinance.financeEventId, refundPaidFinance);
             }
           } else {
             const refundPaidFinance: FinanceEvent = {
@@ -605,7 +582,7 @@ export class TransactionEngine {
               timestamp
             };
             await db.financeEvents.add(refundPaidFinance);
-            await this.addToQueue('financeEvents', refundPaidFinance.financeEventId, 'CREATE', refundPaidFinance);
+            await cloudSetDoc('financeEvents', refundPaidFinance.financeEventId, refundPaidFinance);
           }
         }
 
@@ -614,11 +591,7 @@ export class TransactionEngine {
           status: 'VOIDED',
           remainingAmount: 0
         };
-        await db.receivables.update(receivable.receivableId, {
-          status: 'VOIDED',
-          remainingAmount: 0
-        });
-        await this.addToQueue('receivables', receivable.receivableId, 'UPDATE', updatedReceivable);
+        await cloudSetDoc('receivables', receivable.receivableId, updatedReceivable);
       }
     }
 
@@ -643,8 +616,7 @@ export class TransactionEngine {
       after: { ...transaction, status: newStatus }
     });
 
-    await this.addToQueue('transactions', params.transactionId, 'UPDATE', {
-      ...transaction,
+    await cloudUpdateDoc('transactions', params.transactionId, {
       status: newStatus
     });
   }
@@ -845,12 +817,7 @@ export class TransactionEngine {
       const newRemaining = Math.max(0, linkedReceivable.remainingAmount - deductedFromReceivable);
       const newStatus = newRemaining === 0 ? 'PAID' : 'PARTIAL';
 
-      await db.receivables.update(linkedReceivable.receivableId, {
-        remainingAmount: newRemaining,
-        status: newStatus
-      });
-      await this.addToQueue('receivables', linkedReceivable.receivableId, 'UPDATE', {
-        ...linkedReceivable,
+      await cloudUpdateDoc('receivables', linkedReceivable.receivableId, {
         remainingAmount: newRemaining,
         status: newStatus
       });
@@ -870,8 +837,7 @@ export class TransactionEngine {
         deviceId: originalTx.deviceId,
         timestamp
       };
-      await db.financeEvents.add(refundFinance);
-      await this.addToQueue('financeEvents', refundFinance.financeEventId, 'CREATE', refundFinance);
+      await cloudSetDoc('financeEvents', refundFinance.financeEventId, refundFinance);
     }
 
     // 3. Proportional Loyalty Reversal
@@ -927,8 +893,7 @@ export class TransactionEngine {
       isRestocked: params.itemsToReturn.some(i => i.restock)
     };
 
-    await db.transactions.add(returnTx);
-    await this.addToQueue('transactions', returnTxId, 'CREATE', returnTx);
+    await cloudSetDoc('transactions', returnTxId, returnTx);
 
     // 5. Update original transaction state
     const isFullRefund = params.refundAmount >= originalTx.total;
@@ -940,11 +905,7 @@ export class TransactionEngine {
     if (isFullRefund) {
       updateOriginal.status = 'VOIDED';
     }
-    await db.transactions.update(originalTx.transactionId, updateOriginal);
-    await this.addToQueue('transactions', originalTx.transactionId, 'UPDATE', {
-      ...originalTx,
-      ...updateOriginal
-    });
+    await cloudUpdateDoc('transactions', originalTx.transactionId, updateOriginal);
 
     // 6. Audit Logging
     await AuditEngine.log({
@@ -993,15 +954,4 @@ export class TransactionEngine {
     };
   }
 
-  private static async addToQueue(entityType: string, entityId: string, action: 'CREATE' | 'UPDATE' | 'DELETE', payload: any) {
-    try {
-      if (action === 'DELETE') {
-        await cloudDeleteDoc(entityType, entityId);
-      } else {
-        await cloudSetDoc(entityType, entityId, payload);
-      }
-    } catch (err) {
-      console.warn(`Direct cloud write error for ${entityType}/${entityId}:`, err);
-    }
-  }
 }

@@ -4,6 +4,7 @@ import type { Product, Supplier, StockMovement, ProductCost } from '../types';
 import { CostingEngine } from '../costing-engine';
 import { StockService } from './stock-service';
 import { AuditEngine } from '../audit-engine';
+import { cloudSetDoc } from '../firestore-realtime';
 
 export interface MinimalFishDef {
   productId: string;
@@ -403,8 +404,9 @@ export class FishService {
 
     // 3. Record Finance Outflow from IKAN storage
     const storageId = params.moneyStorageId || 'IKAN';
-    await db.financeEvents.add({
-      financeEventId: uuidv4(),
+    const financeEventId = uuidv4();
+    await cloudSetDoc('financeEvents', financeEventId, {
+      financeEventId,
       amount: totalCost,
       storageId,
       direction: 'OUT',
@@ -995,7 +997,7 @@ export class FishService {
     }
 
     // Save stock opname document
-    await db.stockOpnames.add({
+    await cloudSetDoc('stockOpnames', opnameId, {
       opnameId,
       status: 'COMPLETED',
       createdBy: params.userId,

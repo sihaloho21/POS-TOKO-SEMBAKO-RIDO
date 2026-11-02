@@ -119,6 +119,23 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
   const [isClockOutOpen, setIsClockOutOpen] = useState(false);
   const [isStoreStatusOpen, setIsStoreStatusOpen] = useState(false);
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
+  const [logoClicks, setLogoClicks] = useState(0);
+  const [isDeveloperMode, setIsDeveloperMode] = useState(() => localStorage.getItem('riama_dev_mode') === 'true');
+  
+  const handleLogoClick = () => {
+    const newCount = logoClicks + 1;
+    if (newCount >= 7) {
+      const newState = !isDeveloperMode;
+      setIsDeveloperMode(newState);
+      localStorage.setItem('riama_dev_mode', String(newState));
+      setLogoClicks(0);
+      alert(newState ? 'Developer Mode: AKTIF' : 'Developer Mode: NON-AKTIF');
+    } else {
+      setLogoClicks(newCount);
+      // Reset clicks after 2 seconds of inactivity
+      setTimeout(() => setLogoClicks(0), 2000);
+    }
+  };
   
   const unreadNotificationCount = useLiveQuery(
     () => db.notifications.filter(n => !n.isRead).count()
@@ -231,8 +248,11 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
     { id: 'receivables', label: 'Receivables & Kasbon', icon: <CreditCard size={18} />, badge: overdueKasbonCount > 0 ? overdueKasbonCount : undefined, disabled: !isOwner },
     { id: 'finance', label: 'Finance', icon: <TrendingUp size={18} />, disabled: !isOwner },
     ...(isOwner ? [{ id: 'payroll', label: 'Penggajian Karyawan', icon: <Banknote size={18} /> }] : []),
-    { id: 'audit', label: 'Audit Log', icon: <ShieldCheck size={18} />, disabled: !isOwner },
-    { id: 'conflicts', label: 'Persetujuan Shift Kasir', icon: <ShieldCheck size={18} />, badge: pendingDiscrepanciesCount && pendingDiscrepanciesCount > 0 ? pendingDiscrepanciesCount : undefined, disabled: !isOwner },
+    ...(isDeveloperMode && isOwner ? [
+      { id: 'audit', label: 'Audit Log', icon: <ShieldCheck size={18} /> },
+      { id: 'conflicts', label: 'Persetujuan Shift Kasir', icon: <ShieldCheck size={18} />, badge: pendingDiscrepanciesCount && pendingDiscrepanciesCount > 0 ? pendingDiscrepanciesCount : undefined },
+      { id: 'system-health', label: 'System Health', icon: <Activity size={18} /> },
+    ] : []),
     { id: 'consignment', label: 'Titipan Barang (Bagi Hasil)', icon: <TrendingUp size={18} />, disabled: !isOwner },
     { id: 'settings', label: 'Settings', icon: <Settings size={18} />, disabled: !isOwner },
   ];
@@ -242,8 +262,11 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
       {/* Sidebar */}
       <aside className="hidden lg:flex flex-col w-72 bg-white border-r border-slate-200">
         <div className="p-6">
-          <div className="flex items-center gap-3 mb-8 px-2">
-            <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-md border border-slate-100 overflow-hidden p-1">
+          <div className="flex items-center gap-3 mb-8 px-2 select-none">
+            <div 
+              className="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-md border border-slate-100 overflow-hidden p-1 cursor-pointer active:scale-95 transition-transform"
+              onClick={handleLogoClick}
+            >
               <img 
                 src="/assets/aistudio/LOGO_PS_0fc4cc95.png" 
                 alt="Logo" 
@@ -339,15 +362,17 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
             <div className="hidden md:flex items-center gap-3 px-3 py-1 bg-slate-50 rounded-full border border-slate-200">
 
               {/* Terminal & Shift Info */}
-              <div className="flex items-center gap-1 border-r border-slate-200 pr-3 text-[10px] font-bold text-slate-600" title={`Perangkat POS: ${deviceId}`}>
-                <Smartphone size={12} className="text-slate-400" />
-                <span className="uppercase">{deviceId}</span>
-              </div>
-              
               <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500">
                 <ClipboardList size={12} />
                 {currentShift ? `SHIFT: ${currentShift.shiftId.slice(-6).toUpperCase()}` : 'NO SHIFT'}
               </div>
+
+              {isDeveloperMode && (
+                <div className="flex items-center gap-1 border-l border-slate-200 pl-3 text-[10px] font-bold text-slate-400" title={`Perangkat POS: ${deviceId}`}>
+                  <Smartphone size={12} />
+                  <span className="uppercase">{deviceId}</span>
+                </div>
+              )}
             </div>
 
             {/* Shift Actions: Clock In or Clock Out */}

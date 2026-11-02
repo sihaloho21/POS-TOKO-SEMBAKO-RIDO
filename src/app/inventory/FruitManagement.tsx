@@ -223,16 +223,8 @@ export default function FruitManagement() {
   };
 
   const handleSeedDefaults = async () => {
-    try {
-      const added = await FruitService.ensureMinimalFruitProducts(currentUser?.userId);
-      if (added > 0) {
-        addToast(`${added} jenis buah bawaan (Mangga & Jeruk) berhasil dimuat!`, 'success');
-      } else {
-        addToast('Data buah bawaan (Mangga & Jeruk) sudah aktif di sistem.', 'info');
-      }
-    } catch (err: any) {
-      addToast(err.message || 'Gagal memuat buah default.', 'error');
-    }
+    // USER REQUEST: No automatic seeding
+    addToast('Gunakan tombol + Tambah Buah untuk menambah katalog secara manual.', 'info');
   };
 
   const handleSubmitProcurement = async (e: React.FormEvent) => {

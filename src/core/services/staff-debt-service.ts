@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { format } from 'date-fns';
 import { db } from '../database';
+import { cloudSetDoc, cloudUpdateDoc, cloudDeleteDoc } from '../firestore-realtime';
 import type { Receivable, Customer, FinanceEvent, User, CashierShift, ReceivablePayment } from '../types';
 import { AuditEngine } from '../audit-engine';
 
@@ -90,16 +91,7 @@ export class StaffDebtService {
         createdAt: timestamp,
         updatedAt: timestamp
       };
-      await db.customers.add(staffCustomer);
-      await db.syncQueue.add({
-        entityType: 'customers',
-        entityId: customerId,
-        action: 'CREATE',
-        payload: staffCustomer,
-        status: 'PENDING',
-        retryCount: 0,
-        createdAt: timestamp
-      });
+      await cloudSetDoc('customers', customerId, staffCustomer);
     }
 
     // 2. Determine reference and create Receivable
@@ -125,16 +117,7 @@ export class StaffDebtService {
       createdAt: timestamp
     };
 
-    await db.receivables.add(staffReceivable);
-    await db.syncQueue.add({
-      entityType: 'receivables',
-      entityId: receivableId,
-      action: 'CREATE',
-      payload: staffReceivable,
-      status: 'PENDING',
-      retryCount: 0,
-      createdAt: timestamp
-    });
+    await cloudSetDoc('receivables', receivableId, staffReceivable);
 
     // 3. If direct cash advance, register cash out finance event from storage
     if (params.sourceType === 'DIRECT_CASH_ADVANCE') {
@@ -153,16 +136,7 @@ export class StaffDebtService {
         timestamp
       };
 
-      await db.financeEvents.add(financeEvent);
-      await db.syncQueue.add({
-        entityType: 'financeEvents',
-        entityId: financeEventId,
-        action: 'CREATE',
-        payload: financeEvent,
-        status: 'PENDING',
-        retryCount: 0,
-        createdAt: timestamp
-      });
+      await cloudSetDoc('financeEvents', financeEventId, financeEvent);
     }
 
     // 4. If from shift discrepancy, update shift resolution status
@@ -170,7 +144,7 @@ export class StaffDebtService {
       const shift = await db.shifts.get(params.shiftId);
       if (shift) {
         const resolutionNotes = params.notes.trim() || `Selisih kas laci dibebankan ke kasir ${cashierName}`;
-        const updatedShift: CashierShift = {
+        const updatedShift = {
           ...shift,
           discrepancyApprovalStatus: 'CHARGED_TO_CASHIER',
           discrepancyResolvedBy: owner.name,
@@ -181,9 +155,9 @@ export class StaffDebtService {
             ? `${shift.endNotes} | Tanggungan Kasir: Rp ${params.amount.toLocaleString()} (${resolutionNotes})` 
             : `Tanggungan Kasir: Rp ${params.amount.toLocaleString()} (${resolutionNotes})`
         };
-        await db.shifts.put(updatedShift);
+        await cloudUpdateDoc('shifts', params.shiftId, updatedShift);
 
-        // Resolve conflict
+        // Resolve conflict locally
         const conflict = await db.conflicts
           .where('entityId')
           .equals(params.shiftId)
@@ -202,16 +176,6 @@ export class StaffDebtService {
             }
           });
         }
-
-        await db.syncQueue.add({
-          entityType: 'shifts',
-          entityId: params.shiftId,
-          action: 'UPDATE',
-          payload: updatedShift,
-          status: 'PENDING',
-          retryCount: 0,
-          createdAt: timestamp
-        });
       }
     }
 
@@ -251,7 +215,6 @@ export class StaffDebtService {
     const userMap = new Map(users.map(u => [u.userId, u]));
 
     const shifts = await db.shifts.toArray();
-    const shiftMap = new Map(shifts.map(s => [s.shiftId, s]));
 
     const items: StaffDebtItem[] = [];
 
@@ -322,8 +285,7 @@ export class StaffDebtService {
   }
 
   /**
-   * Records a partial or full repayment for a Staff Kasbon,
-   * linking the payment directly back to the original cash difference / shift.
+   * Records a partial or full repayment for a Staff Kasbon
    */
   static async recordStaffKasbonPayment(params: {
     receivableId: string;
@@ -401,125 +363,65 @@ export class StaffDebtService {
       )
     };
 
-    await db.transaction(
-      'rw',
-      [db.receivables, db.receivablePayments, db.financeEvents, db.shifts, db.auditLogs, db.syncQueue],
-      async () => {
-        // 1. Update Receivable
-        const updatedReceivable: Receivable = {
-          ...receivable,
-          paidAmount: newPaidAmount,
-          remainingAmount: newRemainingAmount,
-          status: newStatus
-        };
-        await db.receivables.put(updatedReceivable);
+    // 1. Update Receivable
+    await cloudUpdateDoc('receivables', params.receivableId, {
+      paidAmount: newPaidAmount,
+      remainingAmount: newRemainingAmount,
+      status: newStatus
+    });
 
-        // 2. Add Payment Record
-        await db.receivablePayments.add(paymentRecord);
+    // 2. Add Payment Record
+    await cloudSetDoc('receivablePayments', paymentId, paymentRecord);
 
-        // 3. If Cash or Bank/QRIS, record FinanceEvent (Kas Masuk)
-        if (params.paymentMethod === 'CASH' || params.paymentMethod === 'TRANSFER' || params.paymentMethod === 'QRIS') {
-          const financeEventId = uuidv4();
-          const targetStorage = params.paymentMethod === 'CASH' ? storageId : 'UANG_DIGITAL';
-          const financeEvent: FinanceEvent = {
-            financeEventId,
-            amount: params.amount,
-            storageId: targetStorage,
-            direction: 'IN',
-            referenceId: params.receivableId,
-            referenceType: 'RECEIVABLE_PAYMENT',
-            description: `${isFullSettlement ? 'Pelunasan' : 'Cicilan'} Kasbon Kasir #${receivable.transactionId} (${params.paymentMethod})${
-              linkedShift ? ` [Shift #${linkedShift.shiftId.slice(-6).toUpperCase()}]` : ''
-            }`,
-            userId: params.ownerUserId,
-            deviceId: params.deviceId || 'system',
-            timestamp
-          };
-          await db.financeEvents.add(financeEvent);
+    // 3. If Cash or Bank/QRIS, record FinanceEvent (Kas Masuk)
+    if (params.paymentMethod === 'CASH' || params.paymentMethod === 'TRANSFER' || params.paymentMethod === 'QRIS') {
+      const financeEventId = uuidv4();
+      const targetStorage = params.paymentMethod === 'CASH' ? storageId : 'UANG_DIGITAL';
+      const financeEvent: FinanceEvent = {
+        financeEventId,
+        amount: params.amount,
+        storageId: targetStorage,
+        direction: 'IN',
+        referenceId: params.receivableId,
+        referenceType: 'RECEIVABLE_PAYMENT',
+        description: `${isFullSettlement ? 'Pelunasan' : 'Cicilan'} Kasbon Kasir #${receivable.transactionId} (${params.paymentMethod})${
+          linkedShift ? ` [Shift #${linkedShift.shiftId.slice(-6).toUpperCase()}]` : ''
+        }`,
+        userId: params.ownerUserId,
+        deviceId: params.deviceId || 'system',
+        timestamp
+      };
+      await cloudSetDoc('financeEvents', financeEventId, financeEvent);
+    }
 
-          await db.syncQueue.add({
-            entityType: 'financeEvents',
-            entityId: financeEventId,
-            action: 'CREATE',
-            payload: financeEvent,
-            status: 'PENDING',
-            retryCount: 0,
-            createdAt: timestamp
-          });
-        }
+    // 4. If linked to shift, append repayment note to shift
+    if (linkedShift) {
+      const shiftNote = `[${format(now, 'dd/MM/yyyy HH:mm')}] ${
+        isFullSettlement ? 'LUNAS' : 'Cicilan'
+      } Rp ${params.amount.toLocaleString()} (${params.paymentMethod})`;
+      
+      await cloudUpdateDoc('shifts', linkedShift.shiftId, {
+        endNotes: linkedShift.endNotes ? `${linkedShift.endNotes} | ${shiftNote}` : shiftNote
+      });
+    }
 
-        // 4. If linked to shift, append repayment note to shift
-        if (linkedShift) {
-          const shiftNote = `[${format(now, 'dd/MM/yyyy HH:mm')}] ${
-            isFullSettlement ? 'LUNAS' : 'Cicilan'
-          } Rp ${params.amount.toLocaleString()} (${params.paymentMethod})`;
-          
-          const updatedShift: CashierShift = {
-            ...linkedShift,
-            endNotes: linkedShift.endNotes ? `${linkedShift.endNotes} | ${shiftNote}` : shiftNote
-          };
-          await db.shifts.put(updatedShift);
-
-          await db.syncQueue.add({
-            entityType: 'shifts',
-            entityId: linkedShift.shiftId,
-            action: 'UPDATE',
-            payload: updatedShift,
-            status: 'PENDING',
-            retryCount: 0,
-            createdAt: timestamp
-          });
-        }
-
-        // 5. Audit Log
-        await AuditEngine.log({
-          userId: params.ownerUserId,
-          role: 'OWNER',
-          deviceId: params.deviceId || 'system',
-          action: isFullSettlement ? 'FULL_SETTLE_STAFF_KASBON' : 'PARTIAL_REPAY_STAFF_KASBON',
-          module: 'KASBON_MANAGEMENT',
-          referenceId: params.receivableId,
-          before: {
-            paidAmount: receivable.paidAmount,
-            remainingAmount: receivable.remainingAmount,
-            status: receivable.status
-          },
-          after: {
-            paymentId,
-            amount: params.amount,
-            paymentMethod: params.paymentMethod,
-            paidAmount: newPaidAmount,
-            remainingAmount: newRemainingAmount,
-            status: newStatus,
-            linkedShiftId: linkedShift?.shiftId,
-            originalDiscrepancy: linkedShift?.discrepancy,
-            notes: params.notes,
-            timestamp
-          }
-        });
-
-        // 6. Sync queues
-        await db.syncQueue.add({
-          entityType: 'receivables',
-          entityId: params.receivableId,
-          action: 'UPDATE',
-          payload: updatedReceivable,
-          status: 'PENDING',
-          retryCount: 0,
-          createdAt: timestamp
-        });
-
-        await db.syncQueue.add({
-          entityType: 'receivablePayments',
-          entityId: paymentId,
-          action: 'CREATE',
-          payload: paymentRecord,
-          status: 'PENDING',
-          retryCount: 0,
-          createdAt: timestamp
-        });
+    // 5. Audit Log
+    await AuditEngine.log({
+      userId: params.ownerUserId,
+      role: 'OWNER',
+      deviceId: params.deviceId || 'system',
+      action: isFullSettlement ? 'FULL_SETTLE_STAFF_KASBON' : 'PARTIAL_REPAY_STAFF_KASBON',
+      module: 'KASBON_MANAGEMENT',
+      referenceId: params.receivableId,
+      after: {
+        paymentId,
+        amount: params.amount,
+        paymentMethod: params.paymentMethod,
+        paidAmount: newPaidAmount,
+        remainingAmount: newRemainingAmount,
+        status: newStatus
       }
-    );
+    });
 
     const finalReceivable = (await db.receivables.get(params.receivableId))!;
     return {
@@ -530,8 +432,7 @@ export class StaffDebtService {
   }
 
   /**
-   * Fetches the complete payment and repayment history for all staff kasbon,
-   * linking each payment transaction back to the original cash differences and shifts.
+   * Fetches the complete payment and repayment history for all staff kasbon
    */
   static async getStaffRepaymentHistory(): Promise<{
     payment: ReceivablePayment;
@@ -545,14 +446,13 @@ export class StaffDebtService {
     recorderName: string;
   }[]> {
     const allStaffDebts = await this.getStaffDebts();
-    const staffReceivableIds = new Set(allStaffDebts.map(d => d.receivable.receivableId));
     const debtMap = new Map(allStaffDebts.map(d => [d.receivable.receivableId, d]));
 
     const allPayments = await db.receivablePayments.toArray();
     const users = await db.users.toArray();
     const userMap = new Map(users.map(u => [u.userId, u.name]));
 
-    const staffPayments = allPayments.filter(p => staffReceivableIds.has(p.receivableId));
+    const staffPayments = allPayments.filter(p => debtMap.has(p.receivableId));
 
     // Sort newest first
     staffPayments.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());

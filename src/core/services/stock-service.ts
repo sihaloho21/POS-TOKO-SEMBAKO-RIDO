@@ -242,10 +242,15 @@ export class StockService {
     unit?: string;
     direction: 'IN' | 'OUT';
     userId: string;
+    role: string;
     deviceId?: string;
     notes?: string;
     isOwnerOverride?: boolean;
   }): Promise<StockMovement> {
+    if (params.role !== 'OWNER' && params.role !== 'MANAGER') {
+      throw new Error('Akses Ditolak: Hanya Owner atau Manager yang diperbolehkan melakukan penyesuaian stok manual.');
+    }
+
     const product = await db.products.get(params.productId);
     if (!product) throw new Error('Produk tidak ditemukan.');
 

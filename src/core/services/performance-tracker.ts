@@ -313,7 +313,7 @@ class PerformanceTrackerService {
         severity: 'OPTIMAL',
         title: 'Pemrosesan Transaksi Sangat Cepat (Sub-120ms)',
         description: `Rata-rata eksekusi transaksi lokal berjalan responsif pada ${avgTx}ms.`,
-        recommendation: 'Integritas local-first berjalan optimal tanpa hambatan pada engine transaksi.',
+        recommendation: 'Integritas Realtime Cloud-First (Firestore Live Sync) berjalan optimal tanpa hambatan pada engine transaksi.',
         metricValue: `${avgTx} ms`
       });
     }
@@ -326,7 +326,7 @@ class PerformanceTrackerService {
         severity: 'CRITICAL',
         title: 'Latensi Jaringan Cloud Lambat (> 1.2s)',
         description: `Rata-rata roundtrip write ke Firebase Firestore mencapai ${avgSync}ms.`,
-        recommendation: 'Koneksi internet lambat. Data tetap aman di antrian offline local-first.',
+        recommendation: 'Koneksi internet lambat. Data tetap aman di antrian offline (Firestore Live Sync fallback).',
         metricValue: `${avgSync} ms`
       });
     } else if (avgSync > PERFORMANCE_THRESHOLDS.SYNC_NETWORK_OPTIMAL) {

@@ -286,15 +286,8 @@ export class ProductService {
 
       const updatedProduct = { ...product, normalPrice: newPrice, updatedAt: timestamp };
 
-      await db.syncQueue.add({
-        entityType: 'products',
-        entityId: id,
-        action: 'UPDATE',
-        payload: updatedProduct,
-        status: 'PENDING',
-        retryCount: 0,
-        createdAt: timestamp
-      });
+      // Direct Cloud Firestore write (handles local mirror + sync queue)
+      await cloudUpdateDoc('products', id, { normalPrice: newPrice, updatedAt: timestamp });
     }
 
     await AuditEngine.log({
@@ -327,15 +320,8 @@ export class ProductService {
 
         await db.notifications.put(notif);
         
-        await db.syncQueue.add({
-          entityType: 'notifications',
-          entityId: notificationId,
-          action: 'CREATE',
-          payload: notif,
-          status: 'PENDING',
-          retryCount: 0,
-          createdAt: notif.createdAt
-        });
+        // Direct Cloud Firestore write
+        await cloudSetDoc('notifications', notificationId, notif);
       }
     }
   }
@@ -360,15 +346,8 @@ export class ProductService {
       
       await db.notifications.put(notif);
       
-      await db.syncQueue.add({
-        entityType: 'notifications',
-        entityId: notificationId,
-        action: 'CREATE',
-        payload: notif,
-        status: 'PENDING',
-        retryCount: 0,
-        createdAt: notif.createdAt
-      });
+      // Direct Cloud Firestore write
+      await cloudSetDoc('notifications', notificationId, notif);
     }
   }
 

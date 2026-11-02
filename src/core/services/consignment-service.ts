@@ -1,10 +1,10 @@
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '../database';
+import { cloudSetDoc, cloudUpdateDoc, cloudDeleteDoc } from '../firestore-realtime';
 import type { 
   ConsignmentItem, 
   ConsignmentArrival, 
-  ConsignmentSettlement,
-  SyncQueueItem 
+  ConsignmentSettlement 
 } from '../types';
 import { FinanceService } from './finance-service';
 import { AuditEngine } from '../audit-engine';
@@ -37,19 +37,17 @@ export class ConsignmentService {
       updatedAt: now
     };
 
-    await db.transaction('rw', [db.consignmentItems, db.syncQueue, db.auditLogs], async () => {
-      await db.consignmentItems.add(item);
-      await this.addToQueue('consignmentItems', item.id, 'CREATE', item);
-      
-      await AuditEngine.log({
-        userId: params.userId,
-        role: 'OWNER',
-        deviceId: params.deviceId,
-        action: 'CREATE_CONSIGNMENT_ITEM',
-        module: 'CONSIGNMENT',
-        referenceId: item.id,
-        after: item
-      });
+    // cloudSetDoc mirrors directly to local Dexie and queues to Cloud Firestore
+    await cloudSetDoc('consignmentItems', item.id, item);
+    
+    await AuditEngine.log({
+      userId: params.userId,
+      role: 'OWNER',
+      deviceId: params.deviceId,
+      action: 'CREATE_CONSIGNMENT_ITEM',
+      module: 'CONSIGNMENT',
+      referenceId: item.id,
+      after: item
     });
 
     return item;
@@ -77,22 +75,17 @@ export class ConsignmentService {
       updatedAt: new Date().toISOString()
     };
 
-    await db.transaction('rw', [db.consignmentItems, db.consignmentArrivals, db.syncQueue, db.auditLogs], async () => {
-      await db.consignmentArrivals.add(arrival);
-      await db.consignmentItems.update(params.itemId, updatedItem);
-      
-      await this.addToQueue('consignmentArrivals', arrival.id, 'CREATE', arrival);
-      await this.addToQueue('consignmentItems', item.id, 'UPDATE', updatedItem);
+    await cloudSetDoc('consignmentArrivals', arrival.id, arrival);
+    await cloudUpdateDoc('consignmentItems', params.itemId, updatedItem);
 
-      await AuditEngine.log({
-        userId: params.userId,
-        role: 'OWNER',
-        deviceId: params.deviceId,
-        action: 'RECORD_CONSIGNMENT_ARRIVAL',
-        module: 'CONSIGNMENT',
-        referenceId: arrival.id,
-        after: arrival
-      });
+    await AuditEngine.log({
+      userId: params.userId,
+      role: 'OWNER',
+      deviceId: params.deviceId,
+      action: 'RECORD_CONSIGNMENT_ARRIVAL',
+      module: 'CONSIGNMENT',
+      referenceId: arrival.id,
+      after: arrival
     });
 
     return arrival;
@@ -151,8 +144,6 @@ export class ConsignmentService {
       timestamp: now
     };
 
-    // Reset old cycle (remainingStock is implicitly returned/ignored)
-    // and start new cycle with newStock
     const updatedItem: ConsignmentItem = {
       ...item,
       currentStock: params.newStock,
@@ -161,22 +152,17 @@ export class ConsignmentService {
       updatedAt: now
     };
 
-    await db.transaction('rw', [db.consignmentItems, db.consignmentSettlements, db.syncQueue, db.auditLogs], async () => {
-      await db.consignmentSettlements.add(settlement);
-      await db.consignmentItems.update(params.itemId, updatedItem);
-      
-      await this.addToQueue('consignmentSettlements', settlement.id, 'CREATE', settlement);
-      await this.addToQueue('consignmentItems', item.id, 'UPDATE', updatedItem);
+    await cloudSetDoc('consignmentSettlements', settlement.id, settlement);
+    await cloudUpdateDoc('consignmentItems', params.itemId, updatedItem);
 
-      await AuditEngine.log({
-        userId: params.userId,
-        role: 'OWNER',
-        deviceId: params.deviceId,
-        action: 'PROCESS_CONSIGNMENT_SETTLEMENT',
-        module: 'CONSIGNMENT',
-        referenceId: settlement.id,
-        after: settlement
-      });
+    await AuditEngine.log({
+      userId: params.userId,
+      role: 'OWNER',
+      deviceId: params.deviceId,
+      action: 'PROCESS_CONSIGNMENT_SETTLEMENT',
+      module: 'CONSIGNMENT',
+      referenceId: settlement.id,
+      after: settlement
     });
 
     return settlement;
@@ -203,64 +189,38 @@ export class ConsignmentService {
       updatedAt: new Date().toISOString()
     };
 
-    await db.transaction('rw', [db.consignmentItems, db.syncQueue, db.auditLogs], async () => {
-      await db.consignmentItems.update(params.id, updatedItem);
-      await this.addToQueue('consignmentItems', params.id, 'UPDATE', updatedItem);
-      
-      await AuditEngine.log({
-        userId: params.userId,
-        role: 'OWNER',
-        deviceId: params.deviceId,
-        action: 'UPDATE_CONSIGNMENT_ITEM',
-        module: 'CONSIGNMENT',
-        referenceId: params.id,
-        after: updatedItem
-      });
+    await cloudUpdateDoc('consignmentItems', params.id, updatedItem);
+    
+    await AuditEngine.log({
+      userId: params.userId,
+      role: 'OWNER',
+      deviceId: params.deviceId,
+      action: 'UPDATE_CONSIGNMENT_ITEM',
+      module: 'CONSIGNMENT',
+      referenceId: params.id,
+      after: updatedItem
     });
   }
 
-  static async deleteItem(id: string, userId: string, deviceId: string): Promise<void> {
+  static async deleteItem(id: string, userId: string, deviceId: string, role?: string): Promise<void> {
+    if (role && role !== 'OWNER') {
+      throw new Error('Akses Ditolak: Hanya Owner yang dapat menghapus barang titipan konsinyasi.');
+    }
     console.log('[ConsignmentService] deleteItem called with ID:', id);
     try {
-      await db.transaction('rw', [db.consignmentItems, db.syncQueue, db.auditLogs], async () => {
-        await db.consignmentItems.delete(id);
-        console.log('[ConsignmentService] Deleted from local DB');
-        
-        await ConsignmentService.addToQueue('consignmentItems', id, 'DELETE', null);
-        console.log('[ConsignmentService] Added to sync queue');
-        
-        await AuditEngine.log({
-          userId,
-          role: 'OWNER',
-          deviceId,
-          action: 'DELETE_CONSIGNMENT_ITEM',
-          module: 'CONSIGNMENT',
-          referenceId: id
-        });
-        console.log('[ConsignmentService] Audit log created');
+      await cloudDeleteDoc('consignmentItems', id);
+      
+      await AuditEngine.log({
+        userId,
+        role: role || 'OWNER',
+        deviceId,
+        action: 'DELETE_CONSIGNMENT_ITEM',
+        module: 'CONSIGNMENT',
+        referenceId: id
       });
-      console.log('[ConsignmentService] Transaction committed');
-    } catch (error) {
-      console.error('[ConsignmentService] Transaction failed:', error);
-      throw error;
+    } catch (err) {
+      console.error('[ConsignmentService] deleteItem error:', err);
+      throw err;
     }
-  }
-
-  private static async addToQueue(
-    entityType: string,
-    entityId: string,
-    action: 'CREATE' | 'UPDATE' | 'DELETE',
-    payload: any
-  ) {
-    const queueItem: SyncQueueItem = {
-      entityType,
-      entityId,
-      action,
-      payload,
-      status: 'PENDING',
-      retryCount: 0,
-      createdAt: new Date().toISOString()
-    };
-    await db.syncQueue.add(queueItem);
   }
 }

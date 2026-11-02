@@ -13,11 +13,13 @@ import {
 import { useFirestoreConnection } from '@/hooks/useFirestoreConnection';
 import { useCloudAuthStore, CloudAuthService } from '@/core/services/cloud-auth-service';
 import { useAuthStore } from '@/core/auth-store';
+import { useDevModeStore } from '@/core/dev-mode-store';
 
 export function ConnectionStatusIndicator() {
   const { state, isOnline, isRetrying, latencyMs, lastConnectedAt, errorMessage, retryConnection } = useFirestoreConnection();
   const { firebaseUser, isCloudConnected } = useCloudAuthStore();
   const { currentUser } = useAuthStore();
+  const { isDevMode } = useDevModeStore();
   const [showDetails, setShowDetails] = useState(false);
   const [isLoggingInGoogle, setIsLoggingInGoogle] = useState(false);
 
@@ -52,7 +54,7 @@ export function ConnectionStatusIndicator() {
         }`}
         title={
           state === 'ONLINE'
-            ? `Cloud Firestore Terhubung${latencyMs ? ` (${latencyMs}ms)` : ''} — Klik untuk detail`
+            ? `Cloud Firestore Terhubung${(latencyMs && isDevMode) ? ` (${latencyMs}ms)` : ''} — Klik untuk detail`
             : state === 'RECONNECTING'
             ? 'Menyambungkan kembali ke Firestore Cloud...'
             : 'Koneksi Firestore terputus — Klik untuk info'
@@ -161,7 +163,7 @@ export function ConnectionStatusIndicator() {
                 </span>
               </div>
 
-              {latencyMs !== null && state === 'ONLINE' && (
+              {latencyMs !== null && state === 'ONLINE' && isDevMode && (
                 <div className="flex justify-between items-center text-slate-600">
                   <span>Respon Ping Cloud:</span>
                   <span className="font-mono font-bold text-blue-600">{latencyMs} ms</span>

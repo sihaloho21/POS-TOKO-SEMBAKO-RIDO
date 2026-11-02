@@ -124,6 +124,7 @@ export function StockAdjustmentModal({ initialProductId, onClose, onSuccess }: S
         unit: selectedProduct?.baseUnit || 'PCS',
         direction,
         userId: currentUser?.userId || 'SYSTEM',
+        role: currentUser?.role || 'KASIR',
         deviceId: 'device-1',
         notes: notes.trim(),
         isOwnerOverride: isOwnerOverride && isOwner

@@ -134,7 +134,7 @@ export default function PayrollManagement({ onNavigate }: { onNavigate?: (tab: s
     }
 
     try {
-      await PayrollService.deletePayroll(record.id);
+      await PayrollService.deletePayroll(record.id, currentUser.role);
       addToast(`Catatan penggajian ${record.employeeName} berhasil dihapus`, 'success');
     } catch (err: any) {
       addToast('Gagal menghapus data: ' + (err?.message || ''), 'error');
