@@ -178,6 +178,9 @@ export class FishService {
    * Ensures minimal 5 fish products (Nila, Ikan Mas, Gurame, Lele, Patin) exist in the database.
    */
   static async ensureMinimalFishProducts(userId: string = 'SYSTEM'): Promise<number> {
+    // USER REQUEST 2026-11-01: No automatic fish stock list. Only manual.
+    return 0;
+
     const deletedSetting = await db.settings.get('deleted_product_ids');
     const deletedIds: string[] = deletedSetting?.ids || [];
 

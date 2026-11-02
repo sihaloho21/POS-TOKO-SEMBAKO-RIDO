@@ -20,6 +20,7 @@ export class CloudMigrationService {
     { name: 'prepOrders', idField: 'orderId' },
     { name: 'financeEvents', idField: 'financeEventId' },
     { name: 'receivables', idField: 'receivableId' },
+    { name: 'receivablePayments', idField: 'paymentId' },
     { name: 'bundles', idField: 'bundleId' },
     { name: 'suppliers', idField: 'supplierId' },
     { name: 'settings', idField: 'id' },

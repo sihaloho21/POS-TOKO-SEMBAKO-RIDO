@@ -4,8 +4,9 @@ import { db } from '@/core/database';
 import { useAuthStore } from '@/core/auth-store';
 import { useToastStore } from '@/core/toast-store';
 import { useDeviceId } from '@/core/device-store';
+import { useFirestoreCollection } from '@/core/firestore-realtime';
+import type { CashierShift, Receivable, ReceivablePayment, Customer, User } from '@/core/types';
 import { StaffDebtService, type StaffDebtItem } from '@/core/services/staff-debt-service';
-import type { CashierShift, Receivable, ReceivablePayment } from '@/core/types';
 import { format, isPast, parseISO, differenceInDays } from 'date-fns';
 import { KasbonRepaymentModal } from './KasbonRepaymentModal';
 import {
@@ -17,7 +18,7 @@ import {
   Search,
   Filter,
   DollarSign,
-  User,
+  User as UserIcon,
   Users,
   FileText,
   Lock,
@@ -33,8 +34,10 @@ import {
   Calendar,
   History,
   Receipt,
-  ArrowUpRight
+  ArrowUpRight,
+  Trash2
 } from 'lucide-react';
+import { ReceivableService } from '@/core/services/receivable-service';
 
 interface StaffDebtManagerProps {
   onOpenPaymentModal: (receivable: Receivable) => void;
@@ -82,39 +85,163 @@ export function StaffDebtManager({ onOpenPaymentModal }: StaffDebtManagerProps) 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
 
-  // 1. Fetch Staff Debts
-  const staffDebts = useLiveQuery(
-    () => StaffDebtService.getStaffDebts(),
-    [refreshKey]
-  );
+  // 1. Real-time Cloud Queries (Multi-device Sync)
+  const { data: cloudReceivables } = useFirestoreCollection<Receivable>('receivables');
+  const { data: cloudCustomers } = useFirestoreCollection<Customer>('customers');
+  const { data: cloudUsers } = useFirestoreCollection<User>('users');
+  const { data: cloudShifts } = useFirestoreCollection<CashierShift>('shifts');
+  const { data: cloudPayments } = useFirestoreCollection<ReceivablePayment>('receivablePayments');
 
-  // 2. Fetch Users (Cashiers/Staff)
-  const users = useLiveQuery(() => db.users.toArray(), []);
+  // 2. Enriched Staff Debts (In-memory Join)
+  const staffDebts = useMemo(() => {
+    if (!cloudReceivables || !cloudCustomers) return [];
+    
+    const customerMap = new Map<string, Customer>(cloudCustomers.map(c => [c.customerId, c]));
+    const userMap = new Map<string, User>(cloudUsers?.map(u => [u.userId, u]) || []);
+
+    const items: StaffDebtItem[] = [];
+
+    for (const r of cloudReceivables) {
+      const customer = customerMap.get(r.customerId);
+      const isStaffCustomer = Boolean(
+        customer &&
+        (customer.name.toLowerCase().startsWith('kasir') ||
+         customer.notes?.includes('Akun Piutang Karyawan') ||
+         customer.notes?.includes('Kasbon'))
+      );
+
+      const isShiftReceivable = r.transactionId.startsWith('SHIFT-') || r.transactionId.startsWith('KASBON-');
+
+      if (isStaffCustomer || isShiftReceivable) {
+        let matchedShift: CashierShift | undefined = undefined;
+        let matchedUser: User | undefined = undefined;
+
+        // Try to match shift by staffReceivableId or transactionId
+        if (cloudShifts) {
+          for (const s of cloudShifts) {
+            if (s.staffReceivableId === r.receivableId || (s.shiftId && r.transactionId.includes(s.shiftId.slice(-8).toUpperCase()))) {
+              matchedShift = s;
+              matchedUser = userMap.get(s.userId);
+              break;
+            }
+          }
+        }
+
+        // If no user matched via shift, try parsing from customer notes or name
+        if (!matchedUser && customer && cloudUsers) {
+          for (const u of cloudUsers) {
+            if (customer.name.toLowerCase().includes(u.name.toLowerCase()) || customer.notes?.includes(u.userId)) {
+              matchedUser = u;
+              break;
+            }
+          }
+        }
+
+        const isDiscrepancy = Boolean(matchedShift || r.transactionId.startsWith('SHIFT-'));
+
+        const enrichedCustomer: Customer = customer || {
+          customerId: r.customerId,
+          name: matchedUser ? `Kasir - ${matchedUser.name}` : 'Kasir Toko',
+          phone: '',
+          notes: '',
+          isReseller: false,
+          creditLimit: 0,
+          defaultDueDateDays: 30,
+          loyaltyPoints: 0,
+          status: 'ACTIVE',
+          createdAt: r.createdAt,
+          updatedAt: r.createdAt
+        };
+
+        items.push({
+          receivable: r,
+          customer: enrichedCustomer,
+          cashierUser: matchedUser,
+          shift: matchedShift,
+          sourceType: isDiscrepancy ? 'SHIFT_DISCREPANCY' : 'DIRECT_CASH_ADVANCE',
+          totalAmount: r.totalAmount,
+          paidAmount: r.paidAmount,
+          remainingAmount: r.remainingAmount,
+          dueDate: r.dueDate,
+          status: r.status,
+          createdAt: r.createdAt
+        });
+      }
+    }
+
+    return items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }, [cloudReceivables, cloudCustomers, cloudUsers, cloudShifts]);
+
   const cashierUsers = useMemo(() => {
-    return users?.filter(u => u.status === 'ACTIVE' && (u.role === 'KASIR' || u.role === 'MANAGER' || u.role === 'WAREHOUSE')) || [];
-  }, [users]);
+    return cloudUsers?.filter(u => u.status === 'ACTIVE' && (u.role === 'KASIR' || u.role === 'MANAGER' || u.role === 'WAREHOUSE')) || [];
+  }, [cloudUsers]);
 
-  // 3. Fetch Unassigned Shift Discrepancies
-  const unassignedShiftDiscrepancies = useLiveQuery(async () => {
-    const shifts = await db.shifts
-      .where('status')
-      .equals('CLOSED')
-      .filter(s => Boolean(
-        s.discrepancy &&
-        s.discrepancy < 0 &&
+  const handleDeleteKasbon = async (item: StaffDebtItem) => {
+    if (currentUser?.role !== 'OWNER') {
+      addToast('Akses Ditolak: Hanya Owner yang bisa menghapus data kasbon.', 'error');
+      return;
+    }
+
+    if (!confirm(`Hapus permanen data kasbon ${item.customer.name} (Rp ${item.totalAmount.toLocaleString()})?\nSemua riwayat cicilan & kas masuk terkait akan ikut terhapus.`)) {
+      return;
+    }
+
+    try {
+      await ReceivableService.deleteReceivable(
+        item.receivable.receivableId,
+        currentUser.userId,
+        deviceId,
+        currentUser.role
+      );
+      addToast('Data kasir / kasbon berhasil dihapus', 'success');
+      setRefreshKey(prev => prev + 1);
+    } catch (err: any) {
+      addToast(err.message || 'Gagal menghapus kasbon', 'error');
+    }
+  };
+
+  const handleDeleteHistoryPayment = async (payment: ReceivablePayment) => {
+    if (currentUser?.role !== 'OWNER') {
+      addToast('Akses Ditolak: Hanya Owner yang bisa menghapus data pembayaran.', 'error');
+      return;
+    }
+
+    if (!confirm(`Hapus catatan pembayaran Rp ${payment.amount.toLocaleString()}?\nSaldo kasbon kasir akan dihitung ulang.`)) {
+      return;
+    }
+
+    try {
+      await ReceivableService.deletePayment(
+        payment.paymentId,
+        currentUser.userId,
+        deviceId,
+        currentUser.role
+      );
+      addToast('Data pembayaran berhasil dihapus', 'success');
+      setRefreshKey(prev => prev + 1);
+    } catch (err: any) {
+      addToast(err.message || 'Gagal menghapus pembayaran', 'error');
+    }
+  };
+
+  // 3. Filter Unassigned Shift Discrepancies (from Cloud)
+  const unassignedShiftDiscrepancies = useMemo(() => {
+    if (!cloudShifts || !cloudUsers) return [];
+
+    const userMap = new Map<string, string>(cloudUsers.map(u => [u.userId, u.name]));
+    
+    return cloudShifts
+      .filter(s => 
+        s.status === 'CLOSED' && 
+        Boolean(s.discrepancy && s.discrepancy < 0) &&
         (!s.discrepancyApprovalStatus || s.discrepancyApprovalStatus === 'PENDING' || s.discrepancyApprovalStatus === 'INVESTIGATION_REQUESTED')
-      ))
-      .toArray();
-
-    // Attach cashier user names
-    const userList = await db.users.toArray();
-    const userMap = new Map(userList.map(u => [u.userId, u.name]));
-
-    return shifts.map(s => ({
-      ...s,
-      cashierName: userMap.get(s.userId) || s.userId
-    })).sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
-  }, [refreshKey]);
+      )
+      .map(s => ({
+        ...s,
+        cashierName: userMap.get(s.userId) || s.userId
+      }))
+      .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
+  }, [cloudShifts, cloudUsers]);
 
   // 4. Filtered Staff Debts
   const filteredDebts = useMemo(() => {
@@ -175,23 +302,41 @@ export function StaffDebtManager({ onOpenPaymentModal }: StaffDebtManagerProps) 
   }, [staffDebts]);
 
   // 5. Fetch Repayment History (linked to original cash differences)
-  const repaymentHistory = useLiveQuery(
-    () => StaffDebtService.getStaffRepaymentHistory(),
-    [refreshKey]
-  );
+  const repaymentHistory = useMemo(() => {
+    if (!staffDebts || !cloudPayments || !cloudUsers) return [];
+    
+    const staffReceivableIds = new Set(staffDebts.map(d => d.receivable.receivableId));
+    const debtMap = new Map<string, StaffDebtItem>(staffDebts.map(d => [d.receivable.receivableId, d]));
+    const userMap = new Map<string, string>(cloudUsers.map(u => [u.userId, u.name]));
+
+    const staffPayments = cloudPayments.filter(p => staffReceivableIds.has(p.receivableId));
+
+    return staffPayments.map(p => {
+      const debt = debtMap.get(p.receivableId)!;
+      const isFull = debt.receivable.remainingAmount <= 0;
+      const recorderName = userMap.get(p.userId) || p.userId;
+
+      return {
+        payment: p,
+        receivable: debt.receivable,
+        customer: debt.customer,
+        cashierUser: debt.cashierUser,
+        shift: debt.shift,
+        originalDiscrepancy: debt.shift ? debt.shift.discrepancy : undefined,
+        sourceType: debt.sourceType,
+        isFullSettlement: isFull,
+        recorderName
+      };
+    }).sort((a, b) => new Date(b.payment.timestamp).getTime() - new Date(a.payment.timestamp).getTime());
+  }, [staffDebts, cloudPayments, cloudUsers]);
 
   // 6. Selected Debt Payments (for detail modal)
-  const selectedDebtPayments = useLiveQuery(
-    async () => {
-      if (!selectedStaffDebt) return [];
-      const list = await db.receivablePayments
-        .where('receivableId')
-        .equals(selectedStaffDebt.receivable.receivableId)
-        .toArray();
-      return list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-    },
-    [selectedStaffDebt, refreshKey]
-  );
+  const selectedDebtPayments = useMemo(() => {
+    if (!selectedStaffDebt || !cloudPayments) return [];
+    return cloudPayments
+      .filter(p => p.receivableId === selectedStaffDebt.receivable.receivableId)
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  }, [selectedStaffDebt, cloudPayments]);
 
   // 7. Filtered Repayment History
   const filteredHistory = useMemo(() => {
@@ -705,6 +850,17 @@ export function StaffDebtManager({ onOpenPaymentModal }: StaffDebtManagerProps) 
                           >
                             <Eye size={16} />
                           </button>
+
+                          {currentUser?.role === 'OWNER' && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteKasbon(item)}
+                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
+                              title="Hapus Permanen Kasbon (Owner Only)"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -868,6 +1024,7 @@ export function StaffDebtManager({ onOpenPaymentModal }: StaffDebtManagerProps) 
                 <th className="py-4 px-6 text-center">Metode Pembayaran</th>
                 <th className="py-4 px-6">Otorisasi</th>
                 <th className="py-4 px-6">Keterangan</th>
+                <th className="py-4 px-6 text-right">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -979,12 +1136,24 @@ export function StaffDebtManager({ onOpenPaymentModal }: StaffDebtManagerProps) 
                       <td className="py-4 px-6 text-slate-600 font-medium text-[11px] max-w-xs">
                         {h.payment.notes || '-'}
                       </td>
+                      <td className="py-4 px-6 text-right">
+                        {currentUser?.role === 'OWNER' && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteHistoryPayment(h.payment)}
+                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
+                            title="Hapus Catatan Pembayaran"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   );
                 })
               ) : (
                 <tr>
-                  <td colSpan={8} className="py-16 text-center">
+                  <td colSpan={9} className="py-16 text-center">
                     <div className="flex flex-col items-center justify-center text-slate-300">
                       <History size={40} className="mb-2 opacity-30" />
                       <p className="text-xs font-bold uppercase tracking-wider">

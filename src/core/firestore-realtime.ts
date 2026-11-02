@@ -27,6 +27,7 @@ const PRIMARY_KEYS: Record<string, string> = {
   prepOrders: 'orderId',
   financeEvents: 'financeEventId',
   receivables: 'receivableId',
+  receivablePayments: 'paymentId',
   bundles: 'bundleId',
   suppliers: 'supplierId',
   settings: 'id',

@@ -6,11 +6,16 @@ import {
   browserLocalPersistence, 
   browserPopupRedirectResolver 
 } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { initializeFirestore } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+
+// Use initializeFirestore with forced long polling for maximum stability in restricted network environments
+// This prevents 'INTERNAL ASSERTION FAILED' errors related to websocket stream corruption.
+export const db = initializeFirestore(app, {
+  experimentalForceLongPolling: true,
+}, firebaseConfig.firestoreDatabaseId);
 
 // Use indexedDB persistence with fallback and popupRedirectResolver for iframe & popup compatibility
 let authInstance;

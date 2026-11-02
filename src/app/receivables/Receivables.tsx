@@ -8,6 +8,8 @@ import { TransactionEngine } from '@/core/transaction-engine';
 import { FinanceService } from '@/core/services/finance-service';
 import { AuditEngine } from '@/core/audit-engine';
 import { ShiftService } from '@/core/services/shift-service';
+import { ReceivableService } from '@/core/services/receivable-service';
+import { useFirestoreCollection } from '@/core/firestore-realtime';
 import type { Receivable, Customer, Transaction, ReceivablePayment } from '@/core/types';
 import { RecordPaymentModal } from './RecordPaymentModal';
 import { StaffDebtManager } from './StaffDebtManager';
@@ -34,7 +36,8 @@ import {
   AlertOctagon,
   FileText,
   UserCheck,
-  Edit3
+  Edit3,
+  Trash2
 } from 'lucide-react';
 
 type ViewMode = 'INVOICES' | 'CUSTOMERS' | 'PAYMENTS' | 'KASBON_KASIR';
@@ -78,17 +81,30 @@ export default function Receivables() {
   const [newDueDate, setNewDueDate] = useState('');
   const [dueDateReason, setDueDateReason] = useState('');
 
-  // Queries
-  const receivables = useLiveQuery(
-    async () => {
-      const list = await db.receivables.toArray();
-      return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    },
-    [refreshKey]
-  );
-  const customers = useLiveQuery(() => db.customers.toArray(), [refreshKey]);
-  const transactions = useLiveQuery(() => db.transactions.toArray(), [refreshKey]);
-  const payments = useLiveQuery(() => db.receivablePayments.orderBy('timestamp').reverse().toArray(), [refreshKey]);
+  // Real-time Cloud Queries (Multi-device Sync)
+  const { data: cloudReceivables } = useFirestoreCollection<Receivable>('receivables');
+  const { data: cloudCustomers } = useFirestoreCollection<Customer>('customers');
+  const { data: cloudTransactions } = useFirestoreCollection<Transaction>('transactions');
+  const { data: cloudPayments } = useFirestoreCollection<ReceivablePayment>('receivablePayments');
+
+  // Local Backups / Fallbacks
+  const localReceivables = useLiveQuery(() => db.receivables.toArray(), [refreshKey]);
+  const localCustomers = useLiveQuery(() => db.customers.toArray(), [refreshKey]);
+  const localTransactions = useLiveQuery(() => db.transactions.toArray(), [refreshKey]);
+  const localPayments = useLiveQuery(() => db.receivablePayments.toArray(), [refreshKey]);
+
+  const receivables = useMemo(() => {
+    const list = (cloudReceivables && cloudReceivables.length > 0) ? cloudReceivables : (localReceivables || []);
+    return [...list].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }, [cloudReceivables, localReceivables]);
+
+  const customers = useMemo(() => (cloudCustomers && cloudCustomers.length > 0) ? cloudCustomers : (localCustomers || []), [cloudCustomers, localCustomers]);
+  const transactions = useMemo(() => (cloudTransactions && cloudTransactions.length > 0) ? cloudTransactions : (localTransactions || []), [cloudTransactions, localTransactions]);
+  const payments = useMemo(() => {
+    const list = (cloudPayments && cloudPayments.length > 0) ? cloudPayments : (localPayments || []);
+    return [...list].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  }, [cloudPayments, localPayments]);
+
   const users = useLiveQuery(() => db.users.toArray(), []);
   const currentShift = useLiveQuery(
     () => ShiftService.getCurrentShift(deviceId, currentUser?.userId),
@@ -385,37 +401,15 @@ export default function Receivables() {
     try {
       const localDueDate = new Date(`${newDueDate}T23:59:59`);
       const updatedDueDateIso = localDueDate.toISOString();
-      const now = new Date();
-      const newStatus = localDueDate < now && differenceInDays(now, localDueDate) >= 1
-        ? 'OVERDUE'
-        : selectedReceivable.paidAmount > 0 ? 'PARTIAL' : 'OPEN';
-
-      await db.receivables.update(selectedReceivable.receivableId, {
-        dueDate: updatedDueDateIso,
-        status: newStatus
-      });
-
-      await AuditEngine.log({
-        userId: currentUser.userId,
-        role: currentUser.role,
+      
+      await ReceivableService.updateDueDate(
+        selectedReceivable.receivableId,
+        updatedDueDateIso,
+        dueDateReason || 'Penyesuaian tanggal jatuh tempo oleh Owner',
+        currentUser.userId,
         deviceId,
-        action: 'UPDATE_RECEIVABLE_DUE_DATE',
-        module: 'RECEIVABLES',
-        referenceId: selectedReceivable.receivableId,
-        before: { dueDate: selectedReceivable.dueDate },
-        after: { dueDate: updatedDueDateIso, status: newStatus },
-        reason: dueDateReason || 'Penyesuaian tanggal jatuh tempo oleh Owner'
-      });
-
-      await db.syncQueue.add({
-        entityType: 'receivables',
-        entityId: selectedReceivable.receivableId,
-        action: 'UPDATE',
-        payload: { ...selectedReceivable, dueDate: updatedDueDateIso, status: newStatus },
-        status: 'PENDING',
-        retryCount: 0,
-        createdAt: new Date().toISOString()
-      });
+        currentUser.role
+      );
 
       addToast('Tanggal jatuh tempo berhasil diperbarui', 'success');
       setRefreshKey(prev => prev + 1);
@@ -425,6 +419,54 @@ export default function Receivables() {
       addToast(err.message || 'Gagal mengubah jatuh tempo', 'error');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteReceivable = async (inv: any) => {
+    if (currentUser?.role !== 'OWNER') {
+      addToast('Akses Ditolak: Hanya Owner yang bisa menghapus data piutang.', 'error');
+      return;
+    }
+
+    if (!confirm(`Hapus permanen nota piutang ${inv.receiptNumber}?\nSemua riwayat cicilan & kas masuk terkait akan ikut terhapus.`)) {
+      return;
+    }
+
+    try {
+      await ReceivableService.deleteReceivable(
+        inv.receivableId,
+        currentUser.userId,
+        deviceId,
+        currentUser.role
+      );
+      addToast('Nota piutang berhasil dihapus permanen', 'success');
+      setRefreshKey(prev => prev + 1);
+    } catch (err: any) {
+      addToast(err.message || 'Gagal menghapus piutang', 'error');
+    }
+  };
+
+  const handleDeletePayment = async (payment: any) => {
+    if (currentUser?.role !== 'OWNER') {
+      addToast('Akses Ditolak: Hanya Owner yang bisa menghapus data pembayaran.', 'error');
+      return;
+    }
+
+    if (!confirm(`Hapus catatan pembayaran Rp ${payment.amount.toLocaleString()}?\nSaldo piutang pelanggan akan dihitung ulang.`)) {
+      return;
+    }
+
+    try {
+      await ReceivableService.deletePayment(
+        payment.paymentId,
+        currentUser.userId,
+        deviceId,
+        currentUser.role
+      );
+      addToast('Data pembayaran berhasil dihapus', 'success');
+      setRefreshKey(prev => prev + 1);
+    } catch (err: any) {
+      addToast(err.message || 'Gagal menghapus pembayaran', 'error');
     }
   };
 
@@ -867,6 +909,15 @@ export default function Receivables() {
                               <span>Bayar</span>
                             </button>
                           )}
+                          {currentUser?.role === 'OWNER' && (
+                            <button
+                              onClick={() => handleDeleteReceivable(inv)}
+                              className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
+                              title="Hapus Permanen Nota Piutang (Owner Only)"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -1009,6 +1060,7 @@ export default function Receivables() {
                   <th className="px-6 py-4">Penyimpanan Kas</th>
                   <th className="px-6 py-4">Nominal Masuk</th>
                   <th className="px-6 py-4">Diterima Oleh</th>
+                  <th className="px-6 py-4 text-right">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -1062,6 +1114,17 @@ export default function Receivables() {
                           <span className="text-xs font-bold text-slate-500 uppercase">
                             {userMap.get(p.userId) || p.userId}
                           </span>
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          {currentUser?.role === 'OWNER' && (
+                            <button
+                              onClick={() => handleDeletePayment(p)}
+                              className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
+                              title="Hapus Catatan Pembayaran"
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          )}
                         </td>
                       </tr>
                     );
