@@ -181,6 +181,8 @@ export interface Receivable {
   dueDate: string;
   status: 'OPEN' | 'PARTIAL' | 'PAID' | 'OVERDUE' | 'VOIDED';
   createdAt: string;
+  notes?: string;
+  updatedAt?: string;
 }
 
 export interface ReceivablePayment {
@@ -193,6 +195,7 @@ export interface ReceivablePayment {
   timestamp: string;
   paymentDate?: string;
   notes?: string;
+  deviceId?: string;
 }
 
 export interface Purchase {

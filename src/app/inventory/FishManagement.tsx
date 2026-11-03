@@ -53,6 +53,7 @@ import {
   FishService, 
   type FishProcurementCycle 
 } from '@/core/services/fish-service';
+import { StockService } from '@/core/services/stock-service';
 import { SupplierModal } from '@/app/suppliers/SupplierModal';
 
 const SPECIES_CHART_COLORS: Record<string, string> = {
@@ -143,6 +144,15 @@ export default function FishManagement() {
     []
   );
 
+  // All Fish Movements (Sales, Restocks, Adjustments) for instant visual stock reconciliation
+  const fishMovements = useLiveQuery(
+    () => db.stockMovements
+      .filter(m => m.segmentId === 'IKAN' || m.productId?.startsWith('fish_'))
+      .reverse()
+      .toArray(),
+    []
+  );
+
   // Load Procurement Cycles for WAC Evolution Chart
   const refreshProcurementCycles = async () => {
     try {
@@ -156,6 +166,24 @@ export default function FishManagement() {
   useEffect(() => {
     refreshProcurementCycles();
   }, [allFishProducts]);
+
+  // Reconcile and ensure visual fish stock matches stock movement ledger in real-time
+  useEffect(() => {
+    async function syncFishStock() {
+      try {
+        const fishList = await db.products.filter(p => p.productType === 'FISH').toArray();
+        for (const fish of fishList) {
+          const derived = await StockService.getDerivedStock(fish.productId);
+          if (fish.stock !== derived) {
+            await StockService.reconcileProductStock(fish.productId);
+          }
+        }
+      } catch (err) {
+        console.warn('Sync fish stock notice:', err);
+      }
+    }
+    syncFishStock();
+  }, [fishMovements, deathMovements]);
 
   // Helper cost map
   const costMap = useMemo(() => {

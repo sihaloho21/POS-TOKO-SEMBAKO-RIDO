@@ -8,37 +8,62 @@ import type {
   BusinessConflict 
 } from '../types';
 import { AuditEngine } from '../audit-engine';
+import { cloudUpdateDoc, cloudAddDoc } from '../firestore-realtime';
 
-export function getMovementDelta(movement: { movementType: StockMovementType; baseQty: number }): number {
-  const base = Math.abs(movement.baseQty);
-  switch (movement.movementType) {
-    case 'OPENING_BALANCE':
-    case 'PURCHASE_IN':
-    case 'SALE_RETURN_IN':
-    case 'BUNDLE_RETURN_COMPONENT_IN':
-    case 'STOCK_OPNAME_IN':
-    case 'ADJUSTMENT_IN':
-    case 'VOID_REVERSAL_IN':
-      return base;
+export function getMovementDelta(movement: { 
+  movementType?: StockMovementType | string; 
+  baseQty?: number; 
+  qty?: number; 
+  quantity?: number;
+  type?: 'IN' | 'OUT' | string;
+}): number {
+  const rawBase = movement.baseQty ?? movement.qty ?? (movement.quantity !== undefined ? Math.abs(movement.quantity) : 0);
+  const base = isNaN(rawBase) ? 0 : Math.abs(rawBase);
 
-    case 'SALE_OUT':
-    case 'BUNDLE_COMPONENT_OUT':
-    case 'STOCK_OPNAME_OUT':
-    case 'DAMAGED_OUT':
-    case 'LOST_OUT':
-    case 'EXPIRED_OUT':
-    case 'FISH_DEAD_OUT':
-    case 'ADJUSTMENT_OUT':
-    case 'VOID_REVERSAL_OUT':
-    case 'SUPPLIER_RETURN_OUT':
-      return -base;
+  const mType = (movement.movementType || '').toUpperCase();
 
-    case 'OTHER_VALIDATED_MOVEMENT':
-      return movement.baseQty;
-
-    default:
-      return 0;
+  // Inflow types (Stock Tambah)
+  if ([
+    'OPENING_BALANCE',
+    'PURCHASE_IN',
+    'SALE_RETURN_IN',
+    'BUNDLE_RETURN_COMPONENT_IN',
+    'STOCK_OPNAME_IN',
+    'ADJUSTMENT_IN',
+    'VOID_REVERSAL_IN',
+    'IN'
+  ].includes(mType)) {
+    return base;
   }
+
+  // Outflow types (Stock Berkurang)
+  if ([
+    'SALE_OUT',
+    'SALE',
+    'BUNDLE_COMPONENT_OUT',
+    'STOCK_OPNAME_OUT',
+    'DAMAGED_OUT',
+    'LOST_OUT',
+    'EXPIRED_OUT',
+    'FISH_DEAD_OUT',
+    'ADJUSTMENT_OUT',
+    'VOID_REVERSAL_OUT',
+    'SUPPLIER_RETURN_OUT',
+    'OUT'
+  ].includes(mType)) {
+    return -base;
+  }
+
+  if (mType === 'OTHER_VALIDATED_MOVEMENT') {
+    return base;
+  }
+
+  // Fallback to legacy fields
+  if (movement.type === 'IN') return base;
+  if (movement.type === 'OUT') return -base;
+  if (movement.quantity !== undefined && !isNaN(movement.quantity)) return movement.quantity;
+
+  return 0;
 }
 
 export function isMovementIn(type: StockMovementType): boolean {
@@ -110,6 +135,11 @@ export class StockService {
     await db.products.update(productId, {
       stock: derivedStock,
       updatedAt: timestamp
+    });
+
+    // Update cloud Firestore directly in background
+    cloudUpdateDoc('products', productId, { stock: derivedStock }).catch(err => {
+      console.warn(`Cloud stock reconcile notice for ${productId}:`, err?.message || err);
     });
 
     return derivedStock;
@@ -195,6 +225,14 @@ export class StockService {
     await db.products.update(params.productId, {
       stock: derivedStock,
       updatedAt: timestamp
+    });
+
+    // Cloud Realtime Firestore update for zero latency sync across devices
+    cloudUpdateDoc('products', params.productId, { stock: derivedStock }).catch(err => {
+      console.warn(`Cloud product stock update notice for ${params.productId}:`, err?.message || err);
+    });
+    cloudAddDoc('stockMovements', movement).catch(err => {
+      console.warn('Cloud stock movement upload notice:', err?.message || err);
     });
 
     // 3. Queue for synchronization
