@@ -11,25 +11,39 @@ import {
   Printer,
   Calendar,
   User as UserIcon,
-  Package,
   AlertCircle,
-  Wallet
+  Wallet,
+  Trash2,
+  RotateCcw,
+  AlertTriangle
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { TransactionEngine } from '@/core/transaction-engine';
 import { useAuthStore } from '@/core/auth-store';
 import { PrintService } from '@/core/utils/print-service';
 import { DebtCorrectionModal } from './DebtCorrectionModal';
+import { DataResetService } from '@/core/services/data-reset-service';
+import { useToastStore } from '@/core/toast-store';
 import type { Transaction } from '@/core/types';
 
 export function SalesHistory() {
   const { currentUser } = useAuthStore();
+  const { addToast } = useToastStore();
+  const isOwner = currentUser?.role === 'OWNER';
+
   const [search, setSearch] = useState('');
   const [expandedId, setViewingId] = useState<string | null>(null);
   const [txToCorrect, setTxToCorrect] = useState<Transaction | null>(null);
   const [isCorrectionModalOpen, setIsCorrectionModalOpen] = useState(false);
   const [isVoiding, setIsVoiding] = useState<string | null>(null);
   const [voidReason, setVoidReason] = useState('');
+
+  // Multi-select & Reset State (OWNER only)
+  const [selectedTxIds, setSelectedTxIds] = useState<Set<string>>(new Set());
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
+  const [showResetAllModal, setShowResetAllModal] = useState(false);
+  const [resetConfirmWord, setResetConfirmWord] = useState('');
 
   const transactions = useLiveQuery(
     () => {
@@ -41,6 +55,69 @@ export function SalesHistory() {
     },
     [search]
   );
+
+  const allFilteredTxIds = transactions?.map(t => t.transactionId) || [];
+  const isAllSelected = allFilteredTxIds.length > 0 && allFilteredTxIds.every(id => selectedTxIds.has(id));
+
+  const toggleSelectAll = () => {
+    if (isAllSelected) {
+      setSelectedTxIds(new Set());
+    } else {
+      setSelectedTxIds(new Set(allFilteredTxIds));
+    }
+  };
+
+  const toggleSelect = (id: string) => {
+    const next = new Set(selectedTxIds);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    setSelectedTxIds(next);
+  };
+
+  const handleBulkDelete = async () => {
+    if (!currentUser || !isOwner) return;
+    setIsBulkDeleting(true);
+    try {
+      const res = await DataResetService.deleteTransactions(
+        Array.from(selectedTxIds),
+        currentUser.userId,
+        currentUser.role
+      );
+      addToast(res.message, 'success');
+      setSelectedTxIds(new Set());
+      setShowBulkDeleteModal(false);
+    } catch (err: any) {
+      addToast(err.message || 'Gagal menghapus transaksi.', 'error');
+    } finally {
+      setIsBulkDeleting(false);
+    }
+  };
+
+  const handleResetAll = async () => {
+    if (!currentUser || !isOwner) return;
+    if (resetConfirmWord !== 'RESET') {
+      addToast('Ketik kata konfirmasi "RESET" dengan tepat.', 'error');
+      return;
+    }
+    setIsBulkDeleting(true);
+    try {
+      const res = await DataResetService.resetAllTransactions(
+        currentUser.userId,
+        currentUser.role
+      );
+      addToast(res.message, 'success');
+      setSelectedTxIds(new Set());
+      setShowResetAllModal(false);
+      setResetConfirmWord('');
+    } catch (err: any) {
+      addToast(err.message || 'Gagal me-reset riwayat transaksi.', 'error');
+    } finally {
+      setIsBulkDeleting(false);
+    }
+  };
 
   const handleVoid = async (txId: string) => {
     if (!currentUser || !voidReason) return;
@@ -81,11 +158,65 @@ export function SalesHistory() {
         </div>
       </div>
 
+      {isOwner && (
+        <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 border border-slate-200 p-3 rounded-2xl">
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-2 cursor-pointer text-xs font-black uppercase text-slate-700">
+              <input
+                type="checkbox"
+                checked={isAllSelected}
+                onChange={toggleSelectAll}
+                className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer accent-blue-600"
+              />
+              <span>Pilih Semua ({transactions?.length || 0} Transaksi)</span>
+            </label>
+            {selectedTxIds.size > 0 && (
+              <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-lg border border-blue-200">
+                {selectedTxIds.size} dipilih
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            {selectedTxIds.size > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowBulkDeleteModal(true)}
+                className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-black text-xs uppercase tracking-wider shadow-sm transition-all flex items-center gap-1.5 cursor-pointer animate-pulse"
+              >
+                <Trash2 size={13} />
+                <span>Hapus ({selectedTxIds.size}) Terpilih</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setShowResetAllModal(true)}
+              className="px-3.5 py-2 bg-white hover:bg-rose-50 hover:text-rose-600 border border-slate-200 hover:border-rose-300 text-slate-600 rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer"
+            >
+              <RotateCcw size={13} />
+              <span>Reset Semua Penjualan</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50/50 text-slate-400 text-[10px] uppercase tracking-widest font-black border-b border-slate-100">
+                {isOwner && (
+                  <th className="px-4 py-4 w-12 text-center">
+                    <input 
+                      type="checkbox"
+                      checked={isAllSelected}
+                      onChange={toggleSelectAll}
+                      className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4 cursor-pointer accent-blue-600"
+                      title="Pilih Semua Transaksi"
+                    />
+                  </th>
+                )}
                 <th className="px-6 py-4">Waktu</th>
                 <th className="px-6 py-4">No. Struk</th>
                 <th className="px-6 py-4">Pelanggan</th>
@@ -97,7 +228,17 @@ export function SalesHistory() {
             <tbody className="divide-y divide-slate-100">
               {transactions?.map((tx) => (
                 <React.Fragment key={tx.transactionId}>
-                  <tr className={`hover:bg-slate-50/50 transition-colors ${expandedId === tx.transactionId ? 'bg-slate-50' : ''}`}>
+                  <tr className={`hover:bg-slate-50/50 transition-colors ${selectedTxIds.has(tx.transactionId) ? 'bg-blue-50/50' : expandedId === tx.transactionId ? 'bg-slate-50' : ''}`}>
+                    {isOwner && (
+                      <td className="px-4 py-4 text-center">
+                        <input 
+                          type="checkbox"
+                          checked={selectedTxIds.has(tx.transactionId)}
+                          onChange={() => toggleSelect(tx.transactionId)}
+                          className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4 cursor-pointer accent-blue-600"
+                        />
+                      </td>
+                    )}
                     <td className="px-6 py-4">
                       <p className="text-xs font-bold text-slate-700">{format(new Date(tx.clientTimestamp), 'dd/MM HH:mm')}</p>
                     </td>
@@ -139,6 +280,18 @@ export function SalesHistory() {
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-2">
+                        {isOwner && (
+                          <button
+                            onClick={() => {
+                              setSelectedTxIds(new Set([tx.transactionId]));
+                              setShowBulkDeleteModal(true);
+                            }}
+                            title="Hapus Transaksi"
+                            className="p-2 text-slate-400 hover:text-rose-600 transition-all cursor-pointer"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        )}
                         <button onClick={() => setViewingId(expandedId === tx.transactionId ? null : tx.transactionId)} className="p-2 text-slate-400 hover:text-blue-600 transition-all">
                           {expandedId === tx.transactionId ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
                         </button>
@@ -147,7 +300,7 @@ export function SalesHistory() {
                   </tr>
                   {expandedId === tx.transactionId && (
                     <tr>
-                      <td colSpan={6} className="px-8 py-6 bg-slate-50/30">
+                      <td colSpan={isOwner ? 7 : 6} className="px-8 py-6 bg-slate-50/30">
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                           <div className="space-y-4">
                             <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
@@ -266,7 +419,7 @@ export function SalesHistory() {
               ))}
               {transactions?.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="py-20 text-center">
+                  <td colSpan={isOwner ? 7 : 6} className="py-20 text-center">
                     <div className="flex flex-col items-center justify-center text-slate-300 opacity-20">
                       <History size={64} className="mb-4" />
                       <p className="text-sm font-black uppercase tracking-widest">Belum ada riwayat transaksi</p>
@@ -291,6 +444,100 @@ export function SalesHistory() {
           // Modal will close and refresh list
         }}
       />
+
+      {/* MODAL: Bulk Delete Sales Confirmation */}
+      {showBulkDeleteModal && (
+        <div className="fixed inset-0 z-[600] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden p-6 space-y-6">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0">
+                <Trash2 size={24} />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Hapus Transaksi Penjualan?</h3>
+                <p className="text-xs font-medium text-slate-500 leading-relaxed">
+                  Apakah Anda yakin ingin menghapus <span className="font-black text-rose-600">{selectedTxIds.size}</span> data transaksi penjualan terpilih?
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                disabled={isBulkDeleting}
+                onClick={() => setShowBulkDeleteModal(false)}
+                className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-black text-xs uppercase tracking-widest transition-all"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={isBulkDeleting}
+                onClick={handleBulkDelete}
+                className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-black text-xs uppercase tracking-widest transition-all shadow-lg shadow-rose-200 flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Trash2 size={16} />
+                {isBulkDeleting ? 'Menghapus...' : `Ya, Hapus (${selectedTxIds.size})`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Reset All Sales Confirmation */}
+      {showResetAllModal && (
+        <div className="fixed inset-0 z-[600] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden p-6 space-y-6">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+                <AlertTriangle size={24} />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Reset Semua Penjualan?</h3>
+                <p className="text-xs font-medium text-slate-500 leading-relaxed">
+                  Tindakan ini untuk membersihkan seluruh data transaksi uji coba ({transactions?.length || 0} transaksi) sebelum peluncuran resmi.
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-2 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+              <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block">
+                Ketik <span className="text-rose-600 font-bold">RESET</span> untuk konfirmasi:
+              </label>
+              <input 
+                type="text"
+                placeholder="Ketik RESET"
+                value={resetConfirmWord}
+                onChange={(e) => setResetConfirmWord(e.target.value)}
+                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-black uppercase text-slate-900 outline-none focus:ring-2 focus:ring-rose-500"
+              />
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                disabled={isBulkDeleting}
+                onClick={() => {
+                  setShowResetAllModal(false);
+                  setResetConfirmWord('');
+                }}
+                className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-black text-xs uppercase tracking-widest transition-all"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={isBulkDeleting || resetConfirmWord !== 'RESET'}
+                onClick={handleResetAll}
+                className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl font-black text-xs uppercase tracking-widest transition-all shadow-lg shadow-rose-200 flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <RotateCcw size={16} />
+                {isBulkDeleting ? 'Mereset...' : 'Reset Bersih Semua'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

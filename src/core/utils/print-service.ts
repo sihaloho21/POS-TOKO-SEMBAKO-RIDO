@@ -22,35 +22,48 @@ export interface ShiftSummaryPrintData {
 
 export class PrintService {
   private static executePrint(html: string): void {
-    const printWindow = window.open('', '_blank');
-    if (printWindow) {
-      printWindow.document.write(html);
-      printWindow.document.close();
-      return;
+    const isIframe = typeof window !== 'undefined' && window.self !== window.top;
+    if (!isIframe) {
+      try {
+        const printWindow = window.open('', '_blank');
+        if (printWindow) {
+          printWindow.document.write(html);
+          printWindow.document.close();
+          printWindow.focus();
+          printWindow.print();
+          return;
+        }
+      } catch (e) {
+        console.warn('Popup print blocked or failed, falling back to hidden iframe:', e);
+      }
     }
 
     // Fallback using invisible iframe for environments where window.open is restricted
-    const iframe = document.createElement('iframe');
-    iframe.style.position = 'fixed';
-    iframe.style.right = '0';
-    iframe.style.bottom = '0';
-    iframe.style.width = '0';
-    iframe.style.height = '0';
-    iframe.style.border = '0';
-    document.body.appendChild(iframe);
-    const frameDoc = iframe.contentWindow?.document;
-    if (frameDoc) {
-      frameDoc.open();
-      frameDoc.write(html);
-      frameDoc.close();
-      iframe.contentWindow?.focus();
-      iframe.contentWindow?.print();
-    }
-    setTimeout(() => {
-      if (document.body.contains(iframe)) {
-        document.body.removeChild(iframe);
+    try {
+      const iframe = document.createElement('iframe');
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.border = '0';
+      document.body.appendChild(iframe);
+      const frameDoc = iframe.contentWindow?.document;
+      if (frameDoc) {
+        frameDoc.open();
+        frameDoc.write(html);
+        frameDoc.close();
+        iframe.contentWindow?.focus();
+        iframe.contentWindow?.print();
       }
-    }, 2000);
+      setTimeout(() => {
+        if (document.body.contains(iframe)) {
+          document.body.removeChild(iframe);
+        }
+      }, 2000);
+    } catch (err) {
+      console.warn('Silent print iframe failed:', err);
+    }
   }
 
   static async printReceipt(transaction: Transaction): Promise<void> {

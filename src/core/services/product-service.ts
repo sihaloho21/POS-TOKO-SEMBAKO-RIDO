@@ -241,6 +241,80 @@ export class ProductService {
     await cloudDeleteDoc('productCosts', productId);
   }
 
+  static async bulkDeleteProducts(
+    productIds: string[], 
+    userId: string = 'SYSTEM', 
+    role: string = 'OWNER'
+  ): Promise<{ successCount: number; deletedIds: string[] }> {
+    if (!productIds || productIds.length === 0) {
+      return { successCount: 0, deletedIds: [] };
+    }
+
+    // 1. Fetch current products for audit trail
+    const productsToDelete = await db.products.where('productId').anyOf(productIds).toArray();
+    const foundIds = productsToDelete.map(p => p.productId);
+
+    if (foundIds.length === 0) {
+      return { successCount: 0, deletedIds: [] };
+    }
+
+    // 2. Track deleted product IDs in settings blacklist so initial seeders never resurrect them
+    try {
+      const deletedSetting = await db.settings.get('deleted_product_ids');
+      let ids: string[] = [];
+      if (deletedSetting && Array.isArray(deletedSetting.ids)) {
+        ids = [...deletedSetting.ids];
+      }
+      for (const id of foundIds) {
+        if (!ids.includes(id)) {
+          ids.push(id);
+        }
+      }
+      await db.settings.put({ id: 'deleted_product_ids', ids });
+    } catch (e) {
+      console.warn('Failed to record deleted_product_ids in bulkDeleteProducts:', e);
+    }
+
+    // 3. Delete from Dexie tables (products, productCosts, stockMovements)
+    for (const id of foundIds) {
+      await db.products.delete(id);
+      await db.productCosts.delete(id);
+      try {
+        await db.stockMovements.where('productId').equals(id).delete();
+      } catch (e) {
+        console.warn('Failed to clean up stock movements for deleted product:', id, e);
+      }
+    }
+
+    // 4. Record comprehensive audit log
+    await AuditEngine.log({
+      userId,
+      role,
+      deviceId: 'LOCAL',
+      action: 'BULK_DELETE_PRODUCTS',
+      module: 'INVENTORY',
+      referenceId: `BULK_${foundIds.length}`,
+      before: productsToDelete.map(p => ({
+        productId: p.productId,
+        name: p.name,
+        sku: p.sku,
+        barcode: p.barcode,
+        stock: p.stock,
+        productType: p.productType
+      })),
+      after: null,
+      reason: `Bulk deletion of ${foundIds.length} inventory products (selected >= 2 items).`
+    });
+
+    // 5. Cloud Firestore live sync deletion
+    for (const id of foundIds) {
+      await cloudDeleteDoc('products', id);
+      await cloudDeleteDoc('productCosts', id);
+    }
+
+    return { successCount: foundIds.length, deletedIds: foundIds };
+  }
+
   static async toggleStatus(productId: string): Promise<void> {
     const product = await db.products.get(productId);
     if (!product) return;

@@ -16,7 +16,8 @@ import {
   AlertTriangle,
   Award,
   User,
-  Sparkles
+  Sparkles,
+  RotateCcw
 } from 'lucide-react';
 import { LoyaltyHistory } from './LoyaltyHistory';
 import { RecentActivity } from './RecentActivity';
@@ -26,6 +27,8 @@ import { CustomerProfileModal } from './CustomerProfileModal';
 import { LoyaltyEngine, CustomerLoyaltyStats } from '@/core/loyalty-engine';
 import type { Customer } from '@/core/types';
 import { useToastStore } from '@/core/toast-store';
+import { useAuthStore } from '@/core/auth-store';
+import { DataResetService } from '@/core/services/data-reset-service';
 
 const TIER_BADGE_STYLE: Record<string, { badge: string; bar: string; text: string }> = {
   BRONZE: {
@@ -153,7 +156,10 @@ function CustomerTierCell({
 }
 
 export default function Customers() {
+  const { currentUser } = useAuthStore();
   const { addToast } = useToastStore();
+  const isOwner = currentUser?.role === 'OWNER';
+
   const [search, setSearch] = useState('');
   const [viewingProfileCustomerId, setViewingProfileCustomerId] = useState<string | null>(null);
   const [viewingLoyaltyId, setViewingLoyaltyId] = useState<string | null>(null);
@@ -164,10 +170,79 @@ export default function Customers() {
   const [deletingCustomer, setDeletingCustomer] = useState<Customer | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // Multi-select & Reset State (OWNER only)
+  const [selectedCustomerIds, setSelectedCustomerIds] = useState<Set<string>>(new Set());
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
+  const [showResetAllModal, setShowResetAllModal] = useState(false);
+  const [resetConfirmWord, setResetConfirmWord] = useState('');
+
   const customers = useLiveQuery(
     () => db.customers.filter(c => c.name.toLowerCase().includes(search.toLowerCase()) || (c.phone || '').includes(search)).toArray(),
     [search]
   );
+
+  const allFilteredCustomerIds = customers?.map(c => c.customerId) || [];
+  const isAllSelected = allFilteredCustomerIds.length > 0 && allFilteredCustomerIds.every(id => selectedCustomerIds.has(id));
+
+  const toggleSelectAll = () => {
+    if (isAllSelected) {
+      setSelectedCustomerIds(new Set());
+    } else {
+      setSelectedCustomerIds(new Set(allFilteredCustomerIds));
+    }
+  };
+
+  const toggleSelect = (id: string) => {
+    const next = new Set(selectedCustomerIds);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    setSelectedCustomerIds(next);
+  };
+
+  const handleBulkDelete = async () => {
+    if (!currentUser || !isOwner) return;
+    setIsDeleting(true);
+    try {
+      const res = await DataResetService.deleteCustomers(
+        Array.from(selectedCustomerIds),
+        currentUser.userId,
+        currentUser.role
+      );
+      addToast(res.message, 'success');
+      setSelectedCustomerIds(new Set());
+      setShowBulkDeleteModal(false);
+    } catch (err: any) {
+      addToast(err.message || 'Gagal menghapus pelanggan.', 'error');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleResetAll = async () => {
+    if (!currentUser || !isOwner) return;
+    if (resetConfirmWord !== 'RESET') {
+      addToast('Ketik kata konfirmasi "RESET" dengan tepat.', 'error');
+      return;
+    }
+    setIsDeleting(true);
+    try {
+      const res = await DataResetService.resetAllCustomers(
+        currentUser.userId,
+        currentUser.role
+      );
+      addToast(res.message, 'success');
+      setSelectedCustomerIds(new Set());
+      setShowResetAllModal(false);
+      setResetConfirmWord('');
+    } catch (err: any) {
+      addToast(err.message || 'Gagal me-reset database pelanggan.', 'error');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const handleDeleteCustomer = async () => {
     if (!deletingCustomer) return;
@@ -215,21 +290,48 @@ export default function Customers() {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Database Pelanggan</h2>
           <p className="text-slate-500 text-sm font-medium">Kelola member, loyalty poin, dan piutang pelanggan.</p>
         </div>
-        <button 
-          onClick={() => {
-            setEditingCustomer(undefined);
-            setIsModalOpen(true);
-          }}
-          className="flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-xl font-black text-xs uppercase tracking-widest hover:bg-blue-500 transition-all shadow-lg shadow-blue-200"
-        >
-          <UserPlus size={18} />
-          Tambah Pelanggan
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {isOwner && (
+            <>
+              {selectedCustomerIds.size > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowBulkDeleteModal(true)}
+                  className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-black text-xs uppercase tracking-wider shadow-sm transition-all flex items-center gap-1.5 cursor-pointer animate-pulse"
+                >
+                  <Trash2 size={15} />
+                  <span>Hapus ({selectedCustomerIds.size}) Pelanggan</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setShowResetAllModal(true)}
+                className="px-4 py-2 bg-white hover:bg-rose-50 hover:text-rose-600 border border-slate-200 hover:border-rose-300 text-slate-600 rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer"
+                title="Reset bersih database pelanggan sebelum peluncuran resmi"
+              >
+                <RotateCcw size={15} />
+                <span>Reset Database Pelanggan</span>
+              </button>
+            </>
+          )}
+
+          <button 
+            onClick={() => {
+              setEditingCustomer(undefined);
+              setIsModalOpen(true);
+            }}
+            className="flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-xl font-black text-xs uppercase tracking-widest hover:bg-blue-500 transition-all shadow-lg shadow-blue-200 cursor-pointer"
+          >
+            <UserPlus size={18} />
+            Tambah Pelanggan
+          </button>
+        </div>
       </div>
 
       <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
@@ -250,6 +352,17 @@ export default function Customers() {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50/50 text-slate-400 text-[10px] uppercase tracking-widest font-black border-b border-slate-100">
+                {isOwner && (
+                  <th className="px-4 py-4 w-12 text-center">
+                    <input 
+                      type="checkbox"
+                      checked={isAllSelected}
+                      onChange={toggleSelectAll}
+                      className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4 cursor-pointer accent-blue-600"
+                      title="Pilih Semua Pelanggan"
+                    />
+                  </th>
+                )}
                 <th className="px-6 py-4">Nama Pelanggan</th>
                 <th className="px-6 py-4">Kontak</th>
                 <th className="px-6 py-4 min-w-[220px]">Member Tier & Loyalitas</th>
@@ -260,7 +373,7 @@ export default function Customers() {
             <tbody className="divide-y divide-slate-100">
               {customers?.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-20 text-center">
+                  <td colSpan={isOwner ? 6 : 5} className="px-6 py-20 text-center">
                     <div className="flex flex-col items-center justify-center text-slate-300">
                       <Users size={48} className="mb-4 opacity-20" />
                       <p className="text-sm font-bold uppercase tracking-widest">Belum ada data pelanggan</p>
@@ -270,7 +383,17 @@ export default function Customers() {
               ) : (
                 customers?.map((customer) => (
                   <React.Fragment key={customer.customerId}>
-                    <tr className={`hover:bg-slate-50/50 transition-colors group ${viewingLoyaltyId === customer.customerId ? 'bg-slate-50' : ''}`}>
+                    <tr className={`hover:bg-slate-50/50 transition-colors group ${selectedCustomerIds.has(customer.customerId) ? 'bg-blue-50/50' : viewingLoyaltyId === customer.customerId ? 'bg-slate-50' : ''}`}>
+                      {isOwner && (
+                        <td className="px-4 py-4 text-center">
+                          <input 
+                            type="checkbox"
+                            checked={selectedCustomerIds.has(customer.customerId)}
+                            onChange={() => toggleSelect(customer.customerId)}
+                            className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4 cursor-pointer accent-blue-600"
+                          />
+                        </td>
+                      )}
                       <td className="px-6 py-4">
                         <div 
                           onClick={() => setViewingProfileCustomerId(customer.customerId)}
@@ -375,7 +498,7 @@ export default function Customers() {
                     </tr>
                     {viewingBalanceId === customer.customerId && (
                       <tr>
-                        <td colSpan={5} className="px-6 py-6 bg-slate-50/30">
+                        <td colSpan={isOwner ? 6 : 5} className="px-6 py-6 bg-slate-50/30">
                           <div className="max-w-3xl mx-auto">
                             <CustomerBalance customerId={customer.customerId} />
                           </div>
@@ -384,7 +507,7 @@ export default function Customers() {
                     )}
                     {viewingActivityId === customer.customerId && (
                       <tr>
-                        <td colSpan={5} className="px-6 py-6 bg-slate-50/30">
+                        <td colSpan={isOwner ? 6 : 5} className="px-6 py-6 bg-slate-50/30">
                           <div className="max-w-3xl mx-auto">
                             <RecentActivity customerId={customer.customerId} />
                           </div>
@@ -393,7 +516,7 @@ export default function Customers() {
                     )}
                     {viewingLoyaltyId === customer.customerId && (
                       <tr>
-                        <td colSpan={5} className="px-6 py-6 bg-slate-50/30">
+                        <td colSpan={isOwner ? 6 : 5} className="px-6 py-6 bg-slate-50/30">
                           <div className="max-w-3xl mx-auto">
                             <LoyaltyHistory customerId={customer.customerId} />
                           </div>
@@ -479,6 +602,100 @@ export default function Customers() {
               >
                 <Trash2 size={16} />
                 {isDeleting ? 'Menghapus...' : 'Ya, Hapus'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Bulk Delete Customers Confirmation */}
+      {showBulkDeleteModal && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden p-6 space-y-6">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0">
+                <Trash2 size={24} />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Hapus Pelanggan Terpilih?</h3>
+                <p className="text-xs font-medium text-slate-500 leading-relaxed">
+                  Apakah Anda yakin ingin menghapus <span className="font-black text-rose-600">{selectedCustomerIds.size}</span> pelanggan terpilih dari database? Riwayat loyalitas pelanggan ini juga akan dibersihkan.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => setShowBulkDeleteModal(false)}
+                className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-black text-xs uppercase tracking-widest transition-all"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={handleBulkDelete}
+                className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-black text-xs uppercase tracking-widest transition-all shadow-lg shadow-rose-200 flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Trash2 size={16} />
+                {isDeleting ? 'Menghapus...' : `Ya, Hapus (${selectedCustomerIds.size})`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Reset All Customers Confirmation */}
+      {showResetAllModal && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden p-6 space-y-6">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+                <AlertTriangle size={24} />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Reset Database Pelanggan?</h3>
+                <p className="text-xs font-medium text-slate-500 leading-relaxed">
+                  Tindakan ini untuk membersihkan seluruh data pelanggan uji coba ({customers?.length || 0} pelanggan) sebelum peluncuran resmi.
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-2 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+              <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block">
+                Ketik <span className="text-rose-600 font-bold">RESET</span> untuk konfirmasi:
+              </label>
+              <input 
+                type="text"
+                placeholder="Ketik RESET"
+                value={resetConfirmWord}
+                onChange={(e) => setResetConfirmWord(e.target.value)}
+                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-black uppercase text-slate-900 outline-none focus:ring-2 focus:ring-rose-500"
+              />
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => {
+                  setShowResetAllModal(false);
+                  setResetConfirmWord('');
+                }}
+                className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-black text-xs uppercase tracking-widest transition-all"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting || resetConfirmWord !== 'RESET'}
+                onClick={handleResetAll}
+                className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl font-black text-xs uppercase tracking-widest transition-all shadow-lg shadow-rose-200 flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <RotateCcw size={16} />
+                {isDeleting ? 'Mereset...' : 'Reset Bersih Semua'}
               </button>
             </div>
           </div>

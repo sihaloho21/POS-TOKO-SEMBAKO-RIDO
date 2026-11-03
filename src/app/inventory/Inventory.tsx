@@ -65,6 +65,8 @@ export default function Inventory() {
   const [editingProduct, setEditingProduct] = useState<Product | undefined>(undefined);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isBulkPriceOpen, setIsBulkPriceOpen] = useState(false);
+  const [isBulkDeleteModalOpen, setIsBulkDeleteModalOpen] = useState(false);
+  const [isDeletingBulk, setIsDeletingBulk] = useState(false);
   const [bulkAdjustment, setBulkAdjustment] = useState({ percentage: 5, type: 'INCREASE' as 'INCREASE' | 'DECREASE' });
   const [viewingHistoryId, setViewingHistoryId] = useState<string | null>(null);
   const [viewingQRProduct, setViewingQRProduct] = useState<Product | null>(null);
@@ -204,6 +206,31 @@ export default function Inventory() {
     }
   };
 
+  const selectedProducts = React.useMemo(() => {
+    if (!products || selectedIds.length === 0) return [];
+    return products.filter(p => selectedIds.includes(p.productId));
+  }, [products, selectedIds]);
+
+  const confirmBulkDelete = async () => {
+    if (selectedIds.length < 2) return;
+    setIsDeletingBulk(true);
+    try {
+      const result = await ProductService.bulkDeleteProducts(
+        selectedIds,
+        currentUser?.userId || 'OWNER',
+        currentUser?.role || 'OWNER'
+      );
+      addToast(`Berhasil menghapus ${result.successCount} produk dari inventaris.`, 'success');
+      setSelectedIds([]);
+      setIsBulkDeleteModalOpen(false);
+    } catch (err: any) {
+      console.error('Bulk delete failed:', err);
+      addToast('Gagal menghapus produk massal: ' + (err.message || 'Terjadi kesalahan'), 'error');
+    } finally {
+      setIsDeletingBulk(false);
+    }
+  };
+
   const handleToggleStatus = async (productId: string) => {
     await ProductService.toggleStatus(productId);
   };
@@ -219,10 +246,20 @@ export default function Inventory() {
           {selectedIds.length > 0 && (
             <button 
               onClick={() => setIsBulkPriceOpen(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-amber-500 text-white rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-amber-600 transition-all shadow-lg shadow-amber-200"
+              className="flex items-center gap-2 px-4 py-2 bg-amber-500 text-white rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-amber-600 transition-all shadow-lg shadow-amber-200 cursor-pointer"
             >
               <Filter size={18} />
               Penyesuaian Harga ({selectedIds.length})
+            </button>
+          )}
+          {isOwner && selectedIds.length >= 2 && (
+            <button 
+              onClick={() => setIsBulkDeleteModalOpen(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-bold text-xs uppercase tracking-widest transition-all shadow-lg shadow-rose-200 cursor-pointer"
+              title="Hapus produk yang dipilih (minimal 2 produk)"
+            >
+              <Trash2 size={16} />
+              Hapus Massal ({selectedIds.length})
             </button>
           )}
           <button 
@@ -829,6 +866,114 @@ export default function Inventory() {
                 basePrice={viewingConversionProduct.normalPrice}
                 conversionRules={viewingConversionProduct.conversionRules}
               />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Bulk Action Bar (Active when >= 2 items selected) */}
+      {selectedIds.length >= 2 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] bg-slate-900/95 text-white px-5 py-3 rounded-2xl shadow-2xl backdrop-blur-md flex items-center gap-3 border border-slate-700/80 animate-in fade-in slide-in-from-bottom-4 duration-200">
+          <div className="flex items-center gap-2 text-xs font-bold pl-1">
+            <span className="w-6 h-6 bg-blue-600 rounded-full flex items-center justify-center text-[11px] font-black shrink-0">
+              {selectedIds.length}
+            </span>
+            <span className="text-slate-200 font-bold whitespace-nowrap">Produk Dipilih</span>
+          </div>
+          <div className="h-4 w-px bg-slate-700" />
+          <button
+            onClick={() => setSelectedIds([])}
+            className="text-xs font-bold text-slate-400 hover:text-white px-2 py-1 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+          >
+            Batal
+          </button>
+          <button
+            onClick={() => setIsBulkPriceOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all shadow-sm cursor-pointer"
+          >
+            <Filter size={14} />
+            <span>Harga</span>
+          </button>
+          {isOwner ? (
+            <button
+              onClick={() => setIsBulkDeleteModalOpen(true)}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-lg shadow-rose-900/40 cursor-pointer"
+            >
+              <Trash2 size={14} />
+              <span>Hapus ({selectedIds.length})</span>
+            </button>
+          ) : (
+            <span className="text-[10px] text-slate-400 font-bold bg-slate-800 px-2.5 py-1 rounded-lg">
+              Hapus (Owner Only)
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Bulk Delete Confirmation Modal (Active when >= 2 items selected) */}
+      {isBulkDeleteModalOpen && selectedIds.length >= 2 && (
+        <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl p-6 sm:p-8 space-y-5 border border-slate-100">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 bg-rose-50 border border-rose-100 rounded-2xl flex items-center justify-center text-rose-600 shrink-0">
+                <Trash2 size={24} />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">
+                  Hapus {selectedIds.length} Produk Sekaligus?
+                </h3>
+                <p className="text-slate-500 text-xs font-medium mt-1 leading-relaxed">
+                  Tindakan ini akan menghapus produk terpilih dari master inventaris dan sinkronisasi cloud. Riwayat transaksi kasir dan mutasi terdahulu tetap aman untuk kebutuhan pembukuan.
+                </p>
+              </div>
+            </div>
+
+            {/* List of products to be deleted */}
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 max-h-56 overflow-y-auto divide-y divide-slate-200/70">
+              <div className="text-[10px] font-black uppercase tracking-wider text-slate-400 pb-2 px-1">
+                Daftar Produk ({selectedIds.length} item):
+              </div>
+              {selectedProducts.map((p) => (
+                <div key={p.productId} className="py-2 px-1 flex items-center justify-between text-xs">
+                  <div className="min-w-0 pr-3">
+                    <p className="font-bold text-slate-800 truncate uppercase">{p.name}</p>
+                    <p className="text-[10px] text-slate-400 font-semibold">{p.sku || p.barcode} • {p.productType}</p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <span className="font-bold text-slate-700 tabular-nums">Stok: {p.stock ?? 0}</span>
+                    <span className="text-[10px] text-slate-400 ml-1">{p.baseUnit}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                type="button"
+                disabled={isDeletingBulk}
+                onClick={() => setIsBulkDeleteModalOpen(false)}
+                className="px-5 py-2.5 text-slate-600 font-bold text-xs uppercase tracking-wider rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingBulk}
+                onClick={confirmBulkDelete}
+                className="px-6 py-2.5 bg-rose-600 hover:bg-rose-500 disabled:bg-rose-300 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-rose-200 transition-all flex items-center gap-2 cursor-pointer"
+              >
+                {isDeletingBulk ? (
+                  <>
+                    <RefreshCw size={14} className="animate-spin" />
+                    <span>Menghapus...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 size={14} />
+                    <span>Ya, Hapus {selectedIds.length} Produk</span>
+                  </>
+                )}
+              </button>
             </div>
           </div>
         </div>

@@ -36,7 +36,10 @@ const PRIMARY_KEYS: Record<string, string> = {
   bonusCategories: 'id',
   consignmentItems: 'id',
   consignmentArrivals: 'id',
-  consignmentSettlements: 'id'
+  consignmentSettlements: 'id',
+  stockMovements: 'stockMovementId',
+  loyaltyEvents: 'loyaltyEventId',
+  auditLogs: 'auditId'
 };
 
 /**

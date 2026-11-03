@@ -17,13 +17,24 @@ import {
   CheckCircle,
   X,
   ShieldCheck,
-  FileSearch
+  FileSearch,
+  Trash2,
+  RotateCcw,
+  CheckSquare,
+  Square
 } from 'lucide-react';
 import { format, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
 import ShiftReport from './ShiftReport';
 import { CashDiscrepancyAuditModal } from './CashDiscrepancyAuditModal';
+import { useAuthStore } from '@/core/auth-store';
+import { useToastStore } from '@/core/toast-store';
+import { DataResetService } from '@/core/services/data-reset-service';
 
 export default function ShiftHistory({ onNavigate }: { onNavigate?: (tab: string) => void } = {}) {
+  const { currentUser } = useAuthStore();
+  const { addToast } = useToastStore();
+  const isOwner = currentUser?.role === 'OWNER';
+
   const [search, setSearch] = useState('');
   const [filterDiscrepancyOnly, setFilterDiscrepancyOnly] = useState(false);
   const [dateRange, setDateRange] = useState<{ start: string; end: string }>({
@@ -32,6 +43,13 @@ export default function ShiftHistory({ onNavigate }: { onNavigate?: (tab: string
   });
   const [selectedShiftId, setViewingShiftId] = useState<string | null>(null);
   const [auditingShiftId, setAuditingShiftId] = useState<string | null>(null);
+
+  // Multi-select & Reset State (OWNER only)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
+  const [showResetAllModal, setShowResetAllModal] = useState(false);
+  const [resetConfirmWord, setResetConfirmWord] = useState('');
 
   const shifts = useLiveQuery(async () => {
     let all = await db.shifts.toArray();
@@ -88,6 +106,69 @@ export default function ShiftHistory({ onNavigate }: { onNavigate?: (tab: string
     0
   );
 
+  const allShiftIds = shifts?.map(s => s.shiftId) || [];
+  const isAllSelected = allShiftIds.length > 0 && allShiftIds.every(id => selectedIds.has(id));
+
+  const toggleSelectAll = () => {
+    if (isAllSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(allShiftIds));
+    }
+  };
+
+  const toggleSelect = (id: string) => {
+    const next = new Set(selectedIds);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    setSelectedIds(next);
+  };
+
+  const handleBulkDelete = async () => {
+    if (!currentUser || !isOwner) return;
+    setIsDeleting(true);
+    try {
+      const res = await DataResetService.deleteShifts(
+        Array.from(selectedIds),
+        currentUser.userId,
+        currentUser.role
+      );
+      addToast(res.message, 'success');
+      setSelectedIds(new Set());
+      setShowBulkDeleteModal(false);
+    } catch (err: any) {
+      addToast(err.message || 'Gagal menghapus shift.', 'error');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleResetAll = async () => {
+    if (!currentUser || !isOwner) return;
+    if (resetConfirmWord !== 'RESET') {
+      addToast('Ketik kata konfirmasi "RESET" dengan huruf kapital.', 'error');
+      return;
+    }
+    setIsDeleting(true);
+    try {
+      const res = await DataResetService.resetAllShifts(
+        currentUser.userId,
+        currentUser.role
+      );
+      addToast(res.message, 'success');
+      setSelectedIds(new Set());
+      setShowResetAllModal(false);
+      setResetConfirmWord('');
+    } catch (err: any) {
+      addToast(err.message || 'Gagal me-reset riwayat shift.', 'error');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header & High-level Stats */}
@@ -103,6 +184,32 @@ export default function ShiftHistory({ onNavigate }: { onNavigate?: (tab: string
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
+          {/* Owner-only Reset & Bulk Actions */}
+          {isOwner && (
+            <>
+              {selectedIds.size > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowBulkDeleteModal(true)}
+                  className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-2xl font-black text-xs uppercase tracking-wider shadow-sm transition-all flex items-center gap-1.5 cursor-pointer animate-pulse"
+                >
+                  <Trash2 size={14} />
+                  <span>Hapus ({selectedIds.size}) Shift Terpilih</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setShowResetAllModal(true)}
+                className="px-3.5 py-2 bg-slate-100 hover:bg-rose-50 hover:text-rose-600 border border-slate-200 hover:border-rose-300 text-slate-600 rounded-2xl font-black text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer"
+                title="Reset bersih data histori shift sebelum launching resmi"
+              >
+                <RotateCcw size={14} />
+                <span>Reset Semua Shift</span>
+              </button>
+            </>
+          )}
+
           {onNavigate && (
             <button
               onClick={() => {
@@ -212,6 +319,17 @@ export default function ShiftHistory({ onNavigate }: { onNavigate?: (tab: string
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50/50 border-b border-slate-100 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                {isOwner && (
+                  <th className="py-5 px-4 w-12 text-center">
+                    <input 
+                      type="checkbox"
+                      checked={isAllSelected}
+                      onChange={toggleSelectAll}
+                      className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer accent-indigo-600"
+                      title="Pilih Semua Shift"
+                    />
+                  </th>
+                )}
                 <th className="py-5 px-6">Waktu & Sesi</th>
                 <th className="py-5 px-6">Kasir Bertugas</th>
                 <th className="py-5 px-6 text-right">Omzet (Sales)</th>
@@ -223,7 +341,17 @@ export default function ShiftHistory({ onNavigate }: { onNavigate?: (tab: string
             <tbody className="divide-y divide-slate-100">
               {shifts && shifts.length > 0 ? (
                 shifts.map((s) => (
-                  <tr key={s.shiftId} className="hover:bg-slate-50/50 transition-colors group">
+                  <tr key={s.shiftId} className={`hover:bg-slate-50/50 transition-colors group ${selectedIds.has(s.shiftId) ? 'bg-indigo-50/40' : ''}`}>
+                    {isOwner && (
+                      <td className="py-4 px-4 text-center">
+                        <input 
+                          type="checkbox"
+                          checked={selectedIds.has(s.shiftId)}
+                          onChange={() => toggleSelect(s.shiftId)}
+                          className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer accent-indigo-600"
+                        />
+                      </td>
+                    )}
                     <td className="py-4 px-6">
                       <div className="flex items-center gap-3">
                         <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${s.status === 'OPEN' ? 'bg-emerald-100 text-emerald-600 animate-pulse' : 'bg-slate-100 text-slate-400'}`}>
@@ -335,13 +463,26 @@ export default function ShiftHistory({ onNavigate }: { onNavigate?: (tab: string
                         >
                           <ChevronRight size={20} />
                         </button>
+                        {isOwner && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedIds(new Set([s.shiftId]));
+                              setShowBulkDeleteModal(true);
+                            }}
+                            className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
+                            title="Hapus Data Shift Ini"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan={6} className="py-20 text-center">
+                  <td colSpan={isOwner ? 7 : 6} className="py-20 text-center">
                     <div className="flex flex-col items-center justify-center text-slate-300">
                       <History size={48} className="mb-4 opacity-20" />
                       <p className="text-sm font-bold uppercase tracking-widest">Tidak ada data shift ditemukan</p>
@@ -375,6 +516,100 @@ export default function ShiftHistory({ onNavigate }: { onNavigate?: (tab: string
           shiftId={auditingShiftId}
           onClose={() => setAuditingShiftId(null)}
         />
+      )}
+
+      {/* MODAL: Bulk Delete Confirmation */}
+      {showBulkDeleteModal && (
+        <div className="fixed inset-0 z-[600] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden p-6 space-y-6">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0">
+                <Trash2 size={24} />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Hapus Data Shift?</h3>
+                <p className="text-xs font-medium text-slate-500 leading-relaxed">
+                  Apakah Anda yakin ingin menghapus <span className="font-black text-rose-600">{selectedIds.size}</span> riwayat sesi shift terpilih? Data yang dihapus tidak dapat dipulihkan.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => setShowBulkDeleteModal(false)}
+                className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-black text-xs uppercase tracking-widest transition-all"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={handleBulkDelete}
+                className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-black text-xs uppercase tracking-widest transition-all shadow-lg shadow-rose-200 flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Trash2 size={16} />
+                {isDeleting ? 'Menghapus...' : `Ya, Hapus (${selectedIds.size})`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Reset All Shifts Confirmation */}
+      {showResetAllModal && (
+        <div className="fixed inset-0 z-[600] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden p-6 space-y-6">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+                <AlertTriangle size={24} />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Reset Semua Riwayat Shift?</h3>
+                <p className="text-xs font-medium text-slate-500 leading-relaxed">
+                  Tindakan ini ditujukan untuk membersihkan seluruh data percobaan sebelum peluncuran resmi sistem. Semua riwayat shift ({shifts?.length || 0} data) akan dihapus permanen.
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-2 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+              <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block">
+                Ketik <span className="text-rose-600 font-bold">RESET</span> untuk konfirmasi:
+              </label>
+              <input 
+                type="text"
+                placeholder="Ketik RESET"
+                value={resetConfirmWord}
+                onChange={(e) => setResetConfirmWord(e.target.value)}
+                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-black uppercase text-slate-900 outline-none focus:ring-2 focus:ring-rose-500"
+              />
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => {
+                  setShowResetAllModal(false);
+                  setResetConfirmWord('');
+                }}
+                className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-black text-xs uppercase tracking-widest transition-all"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting || resetConfirmWord !== 'RESET'}
+                onClick={handleResetAll}
+                className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl font-black text-xs uppercase tracking-widest transition-all shadow-lg shadow-rose-200 flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <RotateCcw size={16} />
+                {isDeleting ? 'Mereset...' : 'Reset Bersih Semua'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

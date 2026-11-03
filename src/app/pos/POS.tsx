@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '@/core/database';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useFirestoreCollection } from '@/core/firestore-realtime';
@@ -257,13 +257,24 @@ export default function POS() {
 
   const searchInputRef = React.useRef<HTMLInputElement>(null);
 
-  // Auto-focus search on mount and after certain actions
+  // Auto-focus search on mount and after modal dismissal
   useEffect(() => {
     const focusSearch = () => {
-      // Don't focus if a modal is open or another input is focused
       const activeEl = document.activeElement;
       const isInput = activeEl?.tagName === 'INPUT' || activeEl?.tagName === 'TEXTAREA' || activeEl?.tagName === 'SELECT';
-      const hasModal = !!(isPaymentModalOpen || isQuickAddProductOpen || isHeldModalOpen || isGajianApprovalOpen || isSalesHistoryModalOpen || weightProduct || overrideStockPrompt || isQuickSaleOpen || isClockInModalOpen);
+      const hasModal = !!(
+        isPaymentModalOpen || 
+        isQuickAddProductOpen || 
+        isHeldModalOpen || 
+        isGajianApprovalOpen || 
+        isSalesHistoryModalOpen || 
+        weightProduct || 
+        overrideStockPrompt || 
+        isQuickSaleOpen || 
+        isClockInModalOpen ||
+        inspectBundle ||
+        isCorrectionModalOpen
+      );
       
       if (!isInput && !hasModal) {
         searchInputRef.current?.focus();
@@ -271,9 +282,21 @@ export default function POS() {
     };
 
     focusSearch();
-    const interval = setInterval(focusSearch, 2000); // Re-focus every 2s if lost
-    return () => clearInterval(interval);
-  }, [isPaymentModalOpen, isQuickAddProductOpen, isHeldModalOpen, isGajianApprovalOpen, isSalesHistoryModalOpen, weightProduct, overrideStockPrompt, isQuickSaleOpen, isClockInModalOpen]);
+    window.addEventListener('focus', focusSearch);
+    return () => window.removeEventListener('focus', focusSearch);
+  }, [
+    isPaymentModalOpen, 
+    isQuickAddProductOpen, 
+    isHeldModalOpen, 
+    isGajianApprovalOpen, 
+    isSalesHistoryModalOpen, 
+    weightProduct, 
+    overrideStockPrompt, 
+    isQuickSaleOpen, 
+    isClockInModalOpen,
+    inspectBundle,
+    isCorrectionModalOpen
+  ]);
 
   // Hotkeys handling (PRD 97) + Global Scanner Redirect
   useEffect(() => {
@@ -366,8 +389,8 @@ export default function POS() {
   useEffect(() => {
     let isMounted = true;
     const calculateStocks = async () => {
-      if (!products) return;
-      const bundleProds = products.filter(p => p.productType === 'BUNDLE');
+      if (!rawProducts) return;
+      const bundleProds = rawProducts.filter(p => p.productType === 'BUNDLE' && p.status === 'ACTIVE');
       const stocks: Record<string, number> = {};
       for (const bp of bundleProds) {
         try {
@@ -380,7 +403,7 @@ export default function POS() {
     };
     calculateStocks();
     return () => { isMounted = false; };
-  }, [products]);
+  }, [rawProducts]);
 
   const handleInspectBundle = async (bundleId: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
@@ -783,6 +806,7 @@ export default function POS() {
       setPartialDebtCustomerPhone('');
       setSelectedCustomerIdInCheckout('');
       setOverrideStockPrompt(null);
+      setMoneyStorageId('WARUNG');
       addToast(successMsg, 'success');
       setShowSuccess(true);
       setTimeout(() => setShowSuccess(false), 5000);
@@ -1007,8 +1031,18 @@ export default function POS() {
           setSearch('');
         }
       } else {
-        // PRODUCT NOT FOUND -> Prompt registration modal
-        addToast(`Barcode "${val}" tidak ditemukan.`, 'warning');
+        // If search results currently displayed on screen has exactly 1 product, select it!
+        if (products && products.length === 1) {
+          addToCart(products[0]);
+          setSearch('');
+          return;
+        } else if (products && products.length > 1) {
+          addToast(`Ditemukan ${products.length} produk untuk "${val}". Silakan klik produk yang diinginkan.`, 'info');
+          return;
+        }
+
+        // Only prompt quick registration if absolutely no products found in catalog
+        addToast(`Produk atau barcode "${val}" tidak ditemukan.`, 'warning');
         setNewProductBarcode(val);
         setIsQuickAddProductOpen(true);
       }
@@ -1191,14 +1225,26 @@ export default function POS() {
     setIsQuickAddProductOpen(false);
   };
 
-  const quickCashOptions = [
-    payableTotal,
-    Math.ceil(payableTotal / 10000) * 10000,
-    Math.ceil(payableTotal / 50000) * 50000,
-    100000,
-    200000,
-    500000
-  ].filter((v, idx, arr) => v >= payableTotal && arr.indexOf(v) === idx);
+  const quickCashOptions = useMemo<number[]>(() => {
+    const baseOptions: number[] = [
+      payableTotal,
+      Math.ceil(payableTotal / 5000) * 5000,
+      Math.ceil(payableTotal / 10000) * 10000,
+      Math.ceil(payableTotal / 20000) * 20000,
+      Math.ceil(payableTotal / 50000) * 50000,
+      Math.ceil(payableTotal / 100000) * 100000,
+      10000,
+      20000,
+      50000,
+      100000,
+      200000,
+      500000
+    ];
+    return Array.from(new Set(baseOptions))
+      .filter((v): v is number => v >= payableTotal)
+      .sort((a, b) => a - b)
+      .slice(0, 7);
+  }, [payableTotal]);
 
   const changeDue = Math.max(0, cashTendered - payableTotal);
 
@@ -1314,7 +1360,7 @@ export default function POS() {
                   setSelectedCustomer(cust || null);
                 }}
               >
-                <option value="">PELANGGAN UMUM (F4)</option>
+                <option value="">PELANGGAN UMUM</option>
                 {customers?.map(c => (
                   <option key={c.customerId} value={c.customerId}>
                     {c.name} {c.isReseller ? '★ Reseller' : ''} {c.creditLimit > 0 ? `(Gajian: Rp ${c.creditLimit.toLocaleString()})` : ''}
@@ -1492,7 +1538,7 @@ export default function POS() {
                       <div className="mt-auto pt-1 border-t border-slate-50 space-y-0.5">
                         <div className="flex justify-between items-center">
                           <span className="font-black text-blue-600 text-[10px] tabular-nums">
-                            Rp {product.normalPrice.toLocaleString()}
+                            Rp {product.normalPrice.toLocaleString()} {product.productType === 'FISH' || product.productType === 'FRUIT' || product.baseUnit === 'KG' ? '/ kg' : `/${product.baseUnit || 'PCS'}`}
                           </span>
                         </div>
 
@@ -1544,10 +1590,10 @@ export default function POS() {
                 onClick={handleHold} 
                 disabled={cart.length === 0} 
                 className="px-2.5 py-1 text-amber-600 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors disabled:opacity-40" 
-                title="Hold Keranjang (F6)"
+                title="Hold Keranjang (F7)"
               >
                 <PauseCircle size={14} />
-                <span>Hold</span>
+                <span>Hold (F7)</span>
               </button>
 
               {/* View Held Carts */}
@@ -1564,9 +1610,13 @@ export default function POS() {
 
               {/* Clear Cart */}
               <button 
-                onClick={() => setCart([])} 
+                onClick={() => {
+                  setCart([]);
+                  setMoneyStorageId('WARUNG');
+                  setLoyaltyPointsToRedeem(0);
+                }} 
                 disabled={cart.length === 0}
-                className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-40"
+                className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-40 cursor-pointer"
                 title="Kosongkan Keranjang"
               >
                 <Trash2 size={16} />
@@ -1706,11 +1756,21 @@ export default function POS() {
                       </div>
                     </div>
 
-                    {!selectedCustomer.isReseller && LoyaltyEngine.calculatePointsForAmount(payableTotal, selectedCustomer.isReseller, loyaltyConfig?.pointsPerAmount || 10000, excludeReseller) > 0 && (
-                      <span className="px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black uppercase tracking-wider animate-pulse shrink-0">
-                        +{LoyaltyEngine.calculatePointsForAmount(payableTotal, selectedCustomer.isReseller, loyaltyConfig?.pointsPerAmount || 10000, excludeReseller)} PTS
-                      </span>
-                    )}
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {!selectedCustomer.isReseller && LoyaltyEngine.calculatePointsForAmount(payableTotal, selectedCustomer.isReseller, loyaltyConfig?.pointsPerAmount || 10000, excludeReseller) > 0 && (
+                        <span className="px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black uppercase tracking-wider animate-pulse shrink-0">
+                          +{LoyaltyEngine.calculatePointsForAmount(payableTotal, selectedCustomer.isReseller, loyaltyConfig?.pointsPerAmount || 10000, excludeReseller)} PTS
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setSelectedCustomer(null)}
+                        className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                        title="Lepas Pelanggan (Ganti ke Umum)"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
                   </div>
 
                   {/* Pay-with-Points (Redemption) Selector */}
@@ -1894,8 +1954,18 @@ export default function POS() {
               {(['CASH', 'QRIS', 'TRANSFER'] as const).map((method) => (
                 <button
                   key={method}
-                  onClick={() => setPaymentMethod(method)}
-                  className={`py-2.5 rounded-xl font-black text-xs uppercase tracking-wider border transition-all ${
+                  type="button"
+                  onClick={() => {
+                    setPaymentMethod(method);
+                    if (method === 'QRIS' || method === 'TRANSFER') {
+                      setMoneyStorageId('UANG_DIGITAL');
+                    } else {
+                      const hasFruit = cart.some(i => i.unit === 'KG' || products?.find(p => p.productId === i.productId)?.productType === 'FRUIT');
+                      const hasFish = cart.some(i => products?.find(p => p.productId === i.productId)?.productType === 'FISH');
+                      setMoneyStorageId(hasFruit ? 'BUAH' : (hasFish ? 'IKAN' : 'WARUNG'));
+                    }
+                  }}
+                  className={`py-2.5 rounded-xl font-black text-xs uppercase tracking-wider border transition-all cursor-pointer ${
                     paymentMethod === method
                       ? 'bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-200'
                       : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
@@ -1910,19 +1980,30 @@ export default function POS() {
               <div className="space-y-3 mb-5">
                 <div>
                   <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
-                    Uang Diterima (Rp)
+                    Uang Diterima (Rp) <span className="text-[9px] text-slate-400 font-normal italic">— Tekan Enter untuk langsung bayar & cetak</span>
                   </label>
                   <input
                     type="number"
+                    autoFocus
                     value={cashTendered === 0 && !allowPartialDebt ? '' : cashTendered}
                     onChange={(e) => setCashTendered(Number(e.target.value))}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        if (cashTendered >= payableTotal) {
+                          executeFinalSale('CASH', false, undefined, true);
+                        } else if (allowPartialDebt) {
+                          handleConfirmPartialPayment(true);
+                        }
+                      }
+                    }}
                     className="w-full text-xl font-black text-center p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 tabular-nums"
                   />
                 </div>
 
                 {/* Quick Cash Chips */}
                 <div className="flex flex-wrap gap-1.5">
-                  {quickCashOptions.map((opt) => (
+                  {quickCashOptions.map((opt: number) => (
                     <button
                       key={opt}
                       onClick={() => {
@@ -2123,6 +2204,48 @@ export default function POS() {
                     )}
                   </div>
                 )}
+              </div>
+            )}
+
+            {paymentMethod === 'QRIS' && (
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-center space-y-3 mb-5 animate-in fade-in">
+                <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center mx-auto shadow-sm">
+                  <QrCode size={26} />
+                </div>
+                <div>
+                  <h4 className="font-black text-slate-900 text-sm uppercase">Pembayaran Non-Tunai QRIS</h4>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Arahkan pelanggan scan QRIS Statis toko senilai:
+                  </p>
+                  <p className="text-xl font-black text-blue-600 tabular-nums mt-1">
+                    Rp {payableTotal.toLocaleString()}
+                  </p>
+                </div>
+                <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-left text-[11px] text-amber-900 flex items-start gap-2">
+                  <span className="text-sm">⚠️</span>
+                  <span>Pastikan notifikasi dana masuk telah terkonfirmasi di HP / dashboard QRIS sebelum menekan tombol Selesai.</span>
+                </div>
+              </div>
+            )}
+
+            {paymentMethod === 'TRANSFER' && (
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-center space-y-3 mb-5 animate-in fade-in">
+                <div className="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto shadow-sm">
+                  <CreditCard size={26} />
+                </div>
+                <div>
+                  <h4 className="font-black text-slate-900 text-sm uppercase">Transfer Bank</h4>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Nominal transfer wajib sesuai total belanja:
+                  </p>
+                  <p className="text-xl font-black text-indigo-600 tabular-nums mt-1">
+                    Rp {payableTotal.toLocaleString()}
+                  </p>
+                </div>
+                <div className="p-2.5 bg-blue-50 border border-blue-200 rounded-xl text-left text-[11px] text-blue-900 flex items-start gap-2">
+                  <span className="text-sm">ℹ️</span>
+                  <span>Periksa bukti transfer atau mutasi rekening masuk sebelum menyelesaikan pesanan.</span>
+                </div>
               </div>
             )}
 
