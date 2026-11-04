@@ -15,7 +15,8 @@ import {
   Wallet,
   Trash2,
   RotateCcw,
-  AlertTriangle
+  AlertTriangle,
+  Package
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { TransactionEngine } from '@/core/transaction-engine';

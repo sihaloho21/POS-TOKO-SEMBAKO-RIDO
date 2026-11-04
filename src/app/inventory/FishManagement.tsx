@@ -30,7 +30,8 @@ import {
   FileText,
   ArrowUpRight,
   ArrowDownRight,
-  BadgePercent
+  BadgePercent,
+  RotateCcw
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -55,6 +56,7 @@ import {
 } from '@/core/services/fish-service';
 import { StockService } from '@/core/services/stock-service';
 import { SupplierModal } from '@/app/suppliers/SupplierModal';
+import { DataResetService } from '@/core/services/data-reset-service';
 
 const SPECIES_CHART_COLORS: Record<string, string> = {
   fish_nila: '#10b981',    // Emerald
@@ -88,6 +90,13 @@ export default function FishManagement() {
   const [deathSuccessMsg, setDeathSuccessMsg] = useState('');
   const [deathDateFilter, setDeathDateFilter] = useState<'TODAY' | 'WEEK' | 'MONTH' | 'ALL'>('ALL');
   const [deathSpeciesFilter, setDeathSpeciesFilter] = useState<string>('ALL');
+
+  // Multi-select & Reset State for Fish History (OWNER only)
+  const [selectedDeathLogIds, setSelectedDeathLogIds] = useState<Set<string>>(new Set());
+  const [isDeletingDeathLogs, setIsDeletingDeathLogs] = useState(false);
+  const [showBulkDeleteDeathModal, setShowBulkDeleteDeathModal] = useState(false);
+  const [showResetFishModal, setShowResetFishModal] = useState(false);
+  const [resetFishConfirmWord, setResetFishConfirmWord] = useState('');
 
   // Quick Restock & WAC Modal
   const [isRestockModalOpen, setIsRestockModalOpen] = useState(false);
@@ -232,6 +241,69 @@ export default function FishManagement() {
       return matchPeriod && matchSpecies;
     });
   }, [deathMovements, deathDateFilter, deathSpeciesFilter, todayPrefix, currentMonthPrefix]);
+
+  const allFilteredDeathLogIds = useMemo(() => filteredDeathMovements.map(m => m.stockMovementId), [filteredDeathMovements]);
+  const isAllDeathSelected = allFilteredDeathLogIds.length > 0 && allFilteredDeathLogIds.every(id => selectedDeathLogIds.has(id));
+
+  const toggleSelectAllDeath = () => {
+    if (isAllDeathSelected) {
+      setSelectedDeathLogIds(new Set());
+    } else {
+      setSelectedDeathLogIds(new Set(allFilteredDeathLogIds));
+    }
+  };
+
+  const toggleSelectDeath = (id: string) => {
+    const next = new Set(selectedDeathLogIds);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    setSelectedDeathLogIds(next);
+  };
+
+  const handleBulkDeleteDeathLogs = async () => {
+    if (!currentUser || !isOwner) return;
+    setIsDeletingDeathLogs(true);
+    try {
+      const res = await DataResetService.deleteFishDeathLogs(
+        Array.from(selectedDeathLogIds),
+        currentUser.userId,
+        currentUser.role
+      );
+      addToast(res.message, 'success');
+      setSelectedDeathLogIds(new Set());
+      setShowBulkDeleteDeathModal(false);
+    } catch (err: any) {
+      addToast(err.message || 'Gagal menghapus log kematian ikan.', 'error');
+    } finally {
+      setIsDeletingDeathLogs(false);
+    }
+  };
+
+  const handleResetFishHistory = async () => {
+    if (!currentUser || !isOwner) return;
+    if (resetFishConfirmWord !== 'RESET') {
+      addToast('Ketik kata konfirmasi "RESET" dengan tepat.', 'error');
+      return;
+    }
+    setIsDeletingDeathLogs(true);
+    try {
+      const res = await DataResetService.resetFishHistory(
+        currentUser.userId,
+        currentUser.role
+      );
+      addToast(res.message, 'success');
+      setSelectedDeathLogIds(new Set());
+      setShowResetFishModal(false);
+      setResetFishConfirmWord('');
+    } catch (err: any) {
+      addToast(err.message || 'Gagal me-reset riwayat ikan.', 'error');
+    } finally {
+      setIsDeletingDeathLogs(false);
+    }
+  };
 
   // Death Statistics
   const deathStats = useMemo(() => {
@@ -1148,6 +1220,27 @@ export default function FishManagement() {
                   ))}
                 </select>
 
+                {isOwner && selectedDeathLogIds.size > 0 && (
+                  <button
+                    onClick={() => setShowBulkDeleteDeathModal(true)}
+                    className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-xs flex items-center gap-1.5 whitespace-nowrap animate-pulse"
+                  >
+                    <Trash2 size={13} />
+                    <span>Hapus ({selectedDeathLogIds.size}) Log</span>
+                  </button>
+                )}
+
+                {isOwner && (
+                  <button
+                    onClick={() => setShowResetFishModal(true)}
+                    className="px-3 py-1.5 bg-white hover:bg-rose-50 hover:text-rose-600 border border-slate-200 hover:border-rose-300 text-slate-600 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1.5 whitespace-nowrap"
+                    title="Reset seluruh log kematian dan riwayat siklus ikan untuk launching resmi"
+                  >
+                    <RotateCcw size={13} />
+                    <span>Reset Riwayat Ikan</span>
+                  </button>
+                )}
+
                 <button
                   onClick={() => {
                     setDeathProductId(allFishProducts?.[0]?.productId || '');
@@ -1164,6 +1257,17 @@ export default function FishManagement() {
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="bg-slate-50/50 text-slate-400 text-[10px] uppercase tracking-widest font-black border-b border-slate-100">
+                    {isOwner && (
+                      <th className="px-4 py-4 w-12 text-center">
+                        <input 
+                          type="checkbox"
+                          checked={isAllDeathSelected}
+                          onChange={toggleSelectAllDeath}
+                          className="rounded text-rose-600 focus:ring-rose-500 w-4 h-4 cursor-pointer accent-rose-600"
+                          title="Pilih Semua Log"
+                        />
+                      </th>
+                    )}
                     <th className="px-6 py-4">Waktu</th>
                     <th className="px-6 py-4">Jenis Ikan</th>
                     <th className="px-6 py-4 text-center">Bobot Mati (KG)</th>
@@ -1177,7 +1281,7 @@ export default function FishManagement() {
                 <tbody className="divide-y divide-slate-100">
                   {filteredDeathMovements.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="px-6 py-12 text-center text-slate-400 text-xs font-bold">
+                      <td colSpan={isOwner ? 9 : 8} className="px-6 py-12 text-center text-slate-400 text-xs font-bold">
                         Tidak ada catatan kematian ikan pada filter yang dipilih.
                       </td>
                     </tr>
@@ -1189,7 +1293,17 @@ export default function FishManagement() {
                       const lossAmount = qty * wac;
 
                       return (
-                        <tr key={m.stockMovementId} className="hover:bg-slate-50/50 transition-colors">
+                        <tr key={m.stockMovementId} className={`hover:bg-slate-50/50 transition-colors ${selectedDeathLogIds.has(m.stockMovementId) ? 'bg-rose-50/40' : ''}`}>
+                          {isOwner && (
+                            <td className="px-4 py-4 text-center">
+                              <input 
+                                type="checkbox"
+                                checked={selectedDeathLogIds.has(m.stockMovementId)}
+                                onChange={() => toggleSelectDeath(m.stockMovementId)}
+                                className="rounded text-rose-600 focus:ring-rose-500 w-4 h-4 cursor-pointer accent-rose-600"
+                              />
+                            </td>
+                          )}
                           <td className="px-6 py-4 text-xs font-bold text-slate-600 whitespace-nowrap">
                             {new Date(m.clientTimestamp || m.createdAt || '').toLocaleString('id-ID', {
                               dateStyle: 'medium',
@@ -1225,8 +1339,22 @@ export default function FishManagement() {
                               Memotong Net Profit
                             </span>
                           </td>
-                          <td className="px-6 py-4 text-right text-xs font-mono font-bold text-slate-400">
-                            {m.userId}
+                          <td className="px-6 py-4 text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <span className="text-xs font-mono font-bold text-slate-400">{m.userId}</span>
+                              {isOwner && (
+                                <button
+                                  onClick={() => {
+                                    setSelectedDeathLogIds(new Set([m.stockMovementId]));
+                                    setShowBulkDeleteDeathModal(true);
+                                  }}
+                                  className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
+                                  title="Hapus Log Kematian Ini"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );
@@ -2191,6 +2319,100 @@ export default function FishManagement() {
           isOpen={isAddSupplierOpen}
           onClose={() => setIsAddSupplierOpen(false)}
         />
+      )}
+
+      {/* MODAL: Bulk Delete Death Logs Confirmation */}
+      {showBulkDeleteDeathModal && (
+        <div className="fixed inset-0 z-[600] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden p-6 space-y-6">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0">
+                <Trash2 size={24} />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Hapus Log Kematian Ikan?</h3>
+                <p className="text-xs font-medium text-slate-500 leading-relaxed">
+                  Apakah Anda yakin ingin menghapus <span className="font-black text-rose-600">{selectedDeathLogIds.size}</span> catatan mortalitas ikan terpilih?
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                disabled={isDeletingDeathLogs}
+                onClick={() => setShowBulkDeleteDeathModal(false)}
+                className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-black text-xs uppercase tracking-widest transition-all"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingDeathLogs}
+                onClick={handleBulkDeleteDeathLogs}
+                className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-black text-xs uppercase tracking-widest transition-all shadow-lg shadow-rose-200 flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Trash2 size={16} />
+                {isDeletingDeathLogs ? 'Menghapus...' : `Ya, Hapus (${selectedDeathLogIds.size})`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Reset All Fish History Confirmation */}
+      {showResetFishModal && (
+        <div className="fixed inset-0 z-[600] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden p-6 space-y-6">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+                <AlertTriangle size={24} />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Reset Riwayat Ikan?</h3>
+                <p className="text-xs font-medium text-slate-500 leading-relaxed">
+                  Tindakan ini untuk membersihkan seluruh data catatan kematian ikan percobaan dan riwayat siklus pengadaan WAC sebelum peluncuran resmi. Master SKU ikan dan stok saat ini tetap aman.
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-2 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+              <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block">
+                Ketik <span className="text-rose-600 font-bold">RESET</span> untuk konfirmasi:
+              </label>
+              <input 
+                type="text"
+                placeholder="Ketik RESET"
+                value={resetFishConfirmWord}
+                onChange={(e) => setResetFishConfirmWord(e.target.value)}
+                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-black uppercase text-slate-900 outline-none focus:ring-2 focus:ring-rose-500"
+              />
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                disabled={isDeletingDeathLogs}
+                onClick={() => {
+                  setShowResetFishModal(false);
+                  setResetFishConfirmWord('');
+                }}
+                className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-black text-xs uppercase tracking-widest transition-all"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingDeathLogs || resetFishConfirmWord !== 'RESET'}
+                onClick={handleResetFishHistory}
+                className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl font-black text-xs uppercase tracking-widest transition-all shadow-lg shadow-rose-200 flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <RotateCcw size={16} />
+                {isDeletingDeathLogs ? 'Mereset...' : 'Reset Bersih Riwayat Ikan'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

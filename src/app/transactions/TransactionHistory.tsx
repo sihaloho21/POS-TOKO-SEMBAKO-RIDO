@@ -102,6 +102,8 @@ export default function TransactionHistory() {
       }
       return true;
     });
+  }, [rawTransactions, statusFilter, search]);
+
   const allFilteredTxIds = React.useMemo(() => transactions.map(t => t.transactionId), [transactions]);
   const isAllSelected = allFilteredTxIds.length > 0 && allFilteredTxIds.every(id => selectedTxIds.has(id));
 
@@ -707,6 +709,8 @@ export default function TransactionHistory() {
                                 Menunggu Owner
                               </span>
                             )
+                          )}
+
                           {/* OWNER Single Delete */}
                           {isOwner && (
                             <button
