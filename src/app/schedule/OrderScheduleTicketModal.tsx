@@ -43,7 +43,7 @@ export function OrderScheduleTicketModal({ order, isOpen, onClose }: OrderSchedu
           >
             {/* Header Store */}
             <div className="text-center pb-3 border-b border-dashed border-slate-300">
-              <h2 className="text-base font-black tracking-tight text-slate-900 uppercase">HARAPAN JAYA</h2>
+              <h2 className="text-base font-black tracking-tight text-slate-900 uppercase">TOKO SEMBAKO RIAMA</h2>
               <p className="text-[10px] text-slate-500 font-sans">Ikan Segar • Buah Segar • Sembako Murah</p>
               <div className="mt-2 inline-flex items-center gap-2 px-3 py-1 bg-slate-100 rounded-full font-sans font-bold text-[11px] text-slate-800">
                 <span>{order.orderNumber}</span>

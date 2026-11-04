@@ -71,12 +71,12 @@ export default function DigitalServices() {
       // 1. Save Service Record
       await db.digitalServices.add(serviceData);
 
-      // 2. Finance Events (PRD 29 & 64: Proper Double-Entry Cash vs Digital Storage Accounting)
+      // 2. Finance Events: Strictly UANG_DIGITAL storage vault (Pemisahan 4 Kas Toko: WARUNG, IKAN, BUAH, UANG_DIGITAL)
       const financeEvents: any[] = [];
       const serviceLabel = SERVICES.find(s => s.type === selectedType)?.label || selectedType;
 
       if (selectedType === 'TARIK_TUNAI') {
-        // Tarik Tunai: Customer transfers (principal + fee) into UANG_DIGITAL, receives physical cash (principal) from WARUNG
+        // Tarik Tunai: Uang masuk saldo rekening/e-wallet pos digital & uang fisik ditarik dari kas digital toko
         financeEvents.push({
           financeEventId: uuidv4(),
           amount: principal,
@@ -92,7 +92,7 @@ export default function DigitalServices() {
         financeEvents.push({
           financeEventId: uuidv4(),
           amount: principal,
-          storageId: 'WARUNG',
+          storageId: 'UANG_DIGITAL',
           direction: 'OUT',
           referenceId: serviceId,
           referenceType: 'INTERNAL_TRANSFER',
@@ -117,7 +117,7 @@ export default function DigitalServices() {
         }
       } else {
         // PULSA / PAKET_DATA / TOKEN_LISTRIK / TOPUP / TRANSFER:
-        // Customer pays cash (principal + fee) into WARUNG, store deducts principal from UANG_DIGITAL
+        // Seluruh mutasi pokok dan fee admin masuk eksklusif ke storage UANG_DIGITAL (Kas Digital)
         financeEvents.push({
           financeEventId: uuidv4(),
           amount: principal,
@@ -133,7 +133,7 @@ export default function DigitalServices() {
         financeEvents.push({
           financeEventId: uuidv4(),
           amount: principal,
-          storageId: 'WARUNG',
+          storageId: 'UANG_DIGITAL',
           direction: 'IN',
           referenceId: serviceId,
           referenceType: 'INTERNAL_TRANSFER',
@@ -146,7 +146,7 @@ export default function DigitalServices() {
           financeEvents.push({
             financeEventId: uuidv4(),
             amount: fee,
-            storageId: 'WARUNG',
+            storageId: 'UANG_DIGITAL',
             direction: 'IN',
             referenceId: serviceId,
             referenceType: 'SERVICE_REVENUE',

@@ -1,5 +1,6 @@
 import { db } from '@/core/database';
 import { cloudSetDoc, cloudUpdateDoc, cloudDeleteDoc } from '@/core/firestore-realtime';
+import { format, addDays } from 'date-fns';
 import type { 
   PrepOrder, 
   PrepOrderItem, 
@@ -15,7 +16,7 @@ export class PrepOrderService {
    * Generate next order number, e.g. ORD-20261030-001 or SPK-20261030-001
    */
   static async generateOrderNumber(dateStr?: string, category?: ScheduleCategory): Promise<string> {
-    const targetDate = dateStr || new Date().toISOString().split('T')[0];
+    const targetDate = dateStr || format(new Date(), 'yyyy-MM-dd');
     const prefixLetter = category === 'IKAN' ? 'IKN' : category === 'BUAH' ? 'BUH' : category === 'SEMBAKO' ? 'SBK' : 'ORD';
     const prefix = `${prefixLetter}-${targetDate.replace(/-/g, '')}`;
     
@@ -191,12 +192,12 @@ export class PrepOrderService {
     let msg = `Halo Kak ${order.customerName},\n\n`;
     if (order.status === 'READY') {
       if (isPickup) {
-        msg += `Pesanan Anda di *Harapan Jaya* sudah *SIAP DIAMBIL* di toko!\n\n`;
+        msg += `Pesanan Anda di *Toko Sembako Riama* sudah *SIAP DIAMBIL* di toko!\n\n`;
       } else {
-        msg += `Pesanan Anda di *Harapan Jaya* sudah siap dan sedang dipersiapkan untuk *DIKIRIM* ke alamat Anda!\n\n`;
+        msg += `Pesanan Anda di *Toko Sembako Riama* sudah siap dan sedang dipersiapkan untuk *DIKIRIM* ke alamat Anda!\n\n`;
       }
     } else {
-      msg += `Konfirmasi pesanan Anda di *Harapan Jaya* (${order.orderNumber}):\n\n`;
+      msg += `Konfirmasi pesanan Anda di *Toko Sembako Riama* (${order.orderNumber}):\n\n`;
     }
 
     msg += `*Detail Pesanan:*\n${itemsList}\n`;
@@ -214,7 +215,7 @@ export class PrepOrderService {
       msg += `Estimasi Total: Rp ${(order.totalEstimatedPrice || 0).toLocaleString('id-ID')} (Bayar saat pengambilan/sampai)\n`;
     }
 
-    msg += `\nTerima kasih telah berbelanja di Harapan Jaya!`;
+    msg += `\nTerima kasih telah berbelanja di Toko Sembako Riama!`;
     return encodeURIComponent(msg);
   }
 
@@ -298,11 +299,17 @@ export class PrepOrderService {
    */
   static async seedInitialOrdersIfEmpty(): Promise<void> {
     try {
+      if (typeof window !== 'undefined' && localStorage.getItem('riama_prep_orders_seeded_v1') === 'true') {
+        return;
+      }
       const count = await db.prepOrders.count();
-      if (count > 0) return;
+      if (count > 0) {
+        if (typeof window !== 'undefined') localStorage.setItem('riama_prep_orders_seeded_v1', 'true');
+        return;
+      }
 
-      const today = new Date().toISOString().split('T')[0];
-      const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+      const today = format(new Date(), 'yyyy-MM-dd');
+      const tomorrow = format(addDays(new Date(), 1), 'yyyy-MM-dd');
 
       // Sample 1: IKAN (Nila & Gurame)
       await this.createOrder({
@@ -461,6 +468,10 @@ export class PrepOrderService {
           }
         ]
       });
+
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('riama_prep_orders_seeded_v1', 'true');
+      }
     } catch (err) {
       console.warn('Error seeding initial prep orders:', err);
     }

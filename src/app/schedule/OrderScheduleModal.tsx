@@ -21,6 +21,7 @@ import {
 import { useAuthStore } from '@/core/auth-store';
 import { useToastStore } from '@/core/toast-store';
 import { PrepOrderService } from '@/core/services/prep-order-service';
+import { format } from 'date-fns';
 import type { 
   PrepOrder, 
   PrepOrderItem, 
@@ -82,7 +83,7 @@ export function OrderScheduleModal({ isOpen, onClose, orderToEdit, onSaved }: Or
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerAddress, setCustomerAddress] = useState('');
   const [deliveryFee, setDeliveryFee] = useState<number>(0);
-  const [scheduledDate, setScheduledDate] = useState(new Date().toISOString().split('T')[0]);
+  const [scheduledDate, setScheduledDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [scheduledTime, setScheduledTime] = useState('10:00');
   const [priority, setPriority] = useState<PrepOrderPriority>('NORMAL');
   const [assignedStaffName, setAssignedStaffName] = useState('');
@@ -104,7 +105,7 @@ export function OrderScheduleModal({ isOpen, onClose, orderToEdit, onSaved }: Or
       setCustomerPhone(orderToEdit.customerPhone || '');
       setCustomerAddress(orderToEdit.customerAddress || '');
       setDeliveryFee(orderToEdit.deliveryFee || 0);
-      setScheduledDate(orderToEdit.scheduledDate || new Date().toISOString().split('T')[0]);
+      setScheduledDate(orderToEdit.scheduledDate || format(new Date(), 'yyyy-MM-dd'));
       setScheduledTime(orderToEdit.scheduledTime || '10:00');
       setPriority(orderToEdit.priority || 'NORMAL');
       setAssignedStaffName(orderToEdit.assignedStaffName || '');
@@ -120,7 +121,7 @@ export function OrderScheduleModal({ isOpen, onClose, orderToEdit, onSaved }: Or
       setCustomerPhone('');
       setCustomerAddress('');
       setDeliveryFee(0);
-      setScheduledDate(new Date().toISOString().split('T')[0]);
+      setScheduledDate(format(new Date(), 'yyyy-MM-dd'));
       setScheduledTime('10:00');
       setPriority('NORMAL');
       setAssignedStaffName(currentUser?.name || '');
@@ -152,29 +153,30 @@ export function OrderScheduleModal({ isOpen, onClose, orderToEdit, onSaved }: Or
 
   // Add Item to list
   const handleAddItem = () => {
-    const defaultProduct = selectedCategory === 'IKAN' 
+    const defaultCategory: ScheduleCategory = selectedCategory === 'CAMPURAN' ? 'IKAN' : selectedCategory;
+    const defaultProduct = defaultCategory === 'IKAN' 
       ? 'Ikan Nila Segar' 
-      : selectedCategory === 'BUAH' 
+      : defaultCategory === 'BUAH' 
       ? 'Mangga Arum Manis' 
       : 'Beras Ramos Super (5 Kg)';
 
     const newItem: Omit<PrepOrderItem, 'itemId'> = {
       productName: defaultProduct,
-      category: selectedCategory,
-      weightKg: selectedCategory === 'IKAN' ? 1 : selectedCategory === 'BUAH' ? 2 : 5,
-      quantityValue: selectedCategory === 'IKAN' ? 1 : selectedCategory === 'BUAH' ? 2 : 1,
-      quantityUnit: selectedCategory === 'SEMBAKO' ? 'SAK' : 'KG',
-      sizeSpec: selectedCategory === 'IKAN' ? '1 kg isi 2-3 ekor' : '',
-      cleanScale: selectedCategory === 'IKAN',
-      cleanGills: selectedCategory === 'IKAN',
-      cleanGut: selectedCategory === 'IKAN',
-      cuttingStyle: selectedCategory === 'IKAN' ? 'UTUH' : undefined,
-      fruitSpecs: selectedCategory === 'BUAH' ? {
+      category: defaultCategory,
+      weightKg: defaultCategory === 'IKAN' ? 1 : defaultCategory === 'BUAH' ? 2 : 5,
+      quantityValue: defaultCategory === 'IKAN' ? 1 : defaultCategory === 'BUAH' ? 2 : 1,
+      quantityUnit: defaultCategory === 'SEMBAKO' ? 'SAK' : 'KG',
+      sizeSpec: defaultCategory === 'IKAN' ? '1 kg isi 2-3 ekor' : '',
+      cleanScale: defaultCategory === 'IKAN',
+      cleanGills: defaultCategory === 'IKAN',
+      cleanGut: defaultCategory === 'IKAN',
+      cuttingStyle: defaultCategory === 'IKAN' ? 'UTUH' : undefined,
+      fruitSpecs: defaultCategory === 'BUAH' ? {
         ripeness: 'MATANG_POHON',
         grade: 'SUPER_A',
         packaging: 'KANTONG_PLASTIK'
       } : undefined,
-      sembakoSpecs: selectedCategory === 'SEMBAKO' ? {
+      sembakoSpecs: defaultCategory === 'SEMBAKO' ? {
         packagingType: 'SAK_UTUH',
         sealCheck: true
       } : undefined,
@@ -237,7 +239,7 @@ export function OrderScheduleModal({ isOpen, onClose, orderToEdit, onSaved }: Or
           downPaymentAmount: Number(downPaymentAmount) || 0,
           items: items.map((it, idx) => ({
             ...it,
-            itemId: (orderToEdit.items[idx]?.itemId) || `item-${Date.now()}-${idx}`
+            itemId: (it as any).itemId || (orderToEdit.items[idx]?.itemId) || `item-${Date.now()}-${idx}`
           })) as PrepOrderItem[]
         });
         addToast('Jadwal pemesanan berhasil diperbarui', 'success');
@@ -542,7 +544,7 @@ export function OrderScheduleModal({ isOpen, onClose, orderToEdit, onSaved }: Or
             {/* Items Loop */}
             <div className="space-y-3">
               {items.map((item, index) => {
-                const itemCat = item.category || selectedCategory;
+                const itemCat = item.category || (selectedCategory === 'CAMPURAN' ? 'IKAN' : selectedCategory);
 
                 return (
                   <div 
@@ -557,6 +559,28 @@ export function OrderScheduleModal({ isOpen, onClose, orderToEdit, onSaved }: Or
                         <span className="text-xs font-bold text-slate-800">
                           {item.productName || 'Produk Baru'}
                         </span>
+                        {selectedCategory === 'CAMPURAN' && (
+                          <select
+                            value={item.category || 'IKAN'}
+                            onChange={e => {
+                              const newCat = e.target.value as ScheduleCategory;
+                              handleUpdateItem(index, { 
+                                category: newCat,
+                                cuttingStyle: newCat === 'IKAN' ? (item.cuttingStyle || 'UTUH') : undefined,
+                                cleanScale: newCat === 'IKAN' ? (item.cleanScale ?? true) : undefined,
+                                cleanGills: newCat === 'IKAN' ? (item.cleanGills ?? true) : undefined,
+                                cleanGut: newCat === 'IKAN' ? (item.cleanGut ?? true) : undefined,
+                                fruitSpecs: newCat === 'BUAH' ? (item.fruitSpecs || { ripeness: 'MATANG_POHON', grade: 'SUPER_A', packaging: 'KANTONG_PLASTIK' }) : undefined,
+                                sembakoSpecs: newCat === 'SEMBAKO' ? (item.sembakoSpecs || { packagingType: 'SAK_UTUH', sealCheck: true }) : undefined,
+                              });
+                            }}
+                            className="ml-2 px-2 py-0.5 bg-white border border-slate-300 rounded text-[10px] font-bold text-slate-700 outline-none"
+                          >
+                            <option value="IKAN">🐟 Ikan</option>
+                            <option value="BUAH">🍎 Buah</option>
+                            <option value="SEMBAKO">📦 Sembako</option>
+                          </select>
+                        )}
                       </div>
 
                       <div className="flex items-center gap-2">
@@ -638,7 +662,7 @@ export function OrderScheduleModal({ isOpen, onClose, orderToEdit, onSaved }: Or
                     </div>
 
                     {/* DYNAMIC SPECIFICATIONS: IKAN */}
-                    {(itemCat === 'IKAN' || selectedCategory === 'IKAN') && (
+                    {(itemCat === 'IKAN') && (
                       <div className="p-3 bg-cyan-50/50 rounded-xl border border-cyan-200/70 space-y-3">
                         <div className="text-[11px] font-bold text-cyan-900 flex items-center gap-1.5">
                           <Fish size={14} className="text-cyan-700" />
@@ -716,7 +740,7 @@ export function OrderScheduleModal({ isOpen, onClose, orderToEdit, onSaved }: Or
                     )}
 
                     {/* DYNAMIC SPECIFICATIONS: BUAH */}
-                    {(itemCat === 'BUAH' || selectedCategory === 'BUAH') && (
+                    {(itemCat === 'BUAH') && (
                       <div className="p-3 bg-amber-50/50 rounded-xl border border-amber-200/70 space-y-3">
                         <div className="text-[11px] font-bold text-amber-900 flex items-center gap-1.5">
                           <Apple size={14} className="text-amber-700" />
@@ -808,7 +832,7 @@ export function OrderScheduleModal({ isOpen, onClose, orderToEdit, onSaved }: Or
                     )}
 
                     {/* DYNAMIC SPECIFICATIONS: SEMBAKO */}
-                    {(itemCat === 'SEMBAKO' || selectedCategory === 'SEMBAKO') && (
+                    {(itemCat === 'SEMBAKO') && (
                       <div className="p-3 bg-emerald-50/50 rounded-xl border border-emerald-200/70 space-y-3">
                         <div className="text-[11px] font-bold text-emerald-900 flex items-center gap-1.5">
                           <Package size={14} className="text-emerald-700" />

@@ -28,6 +28,9 @@ interface OrderScheduleCardProps {
   onPrint: (order: PrepOrder) => void;
   onDelete: (orderId: string) => void;
   onStatusChange: (orderId: string, status: PrepOrderStatus) => void;
+  isSelected?: boolean;
+  onToggleSelect?: (orderId: string) => void;
+  showCheckbox?: boolean;
 }
 
 export function OrderScheduleCard({
@@ -35,7 +38,10 @@ export function OrderScheduleCard({
   onEdit,
   onPrint,
   onDelete,
-  onStatusChange
+  onStatusChange,
+  isSelected,
+  onToggleSelect,
+  showCheckbox
 }: OrderScheduleCardProps) {
   const isDelivery = order.fulfillmentType === 'DELIVERY';
   const remaining = (order.totalEstimatedPrice || 0) - (order.downPaymentAmount || 0);
@@ -144,6 +150,14 @@ export function OrderScheduleCard({
       {/* Top Header: Category, Order #, Priority, Status */}
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-1.5 flex-wrap">
+          {showCheckbox && (
+            <input
+              type="checkbox"
+              checked={Boolean(isSelected)}
+              onChange={() => onToggleSelect && onToggleSelect(order.orderId)}
+              className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer accent-blue-600 mr-1"
+            />
+          )}
           {getCategoryBadge()}
           <span className="font-mono text-xs font-bold text-slate-700">
             {order.orderNumber}

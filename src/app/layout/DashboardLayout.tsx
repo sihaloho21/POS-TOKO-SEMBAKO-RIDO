@@ -41,7 +41,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { ShiftService } from '@/core/services/shift-service';
 import { StoreStatusService } from '@/core/services/store-status-service';
 import { StaffDebtService } from '@/core/services/staff-debt-service';
-import { isPast, parseISO } from 'date-fns';
+import { isPast, parseISO, format } from 'date-fns';
 import { useDeviceId } from '@/core/device-store';
 import { useFirestoreCollection } from '@/core/firestore-realtime';
 import ClockInModal from '@/app/shift/ClockInModal';
@@ -212,7 +212,7 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
   const currentShift = useLiveQuery(() => ShiftService.getCurrentShift(deviceId, currentUser?.userId), [deviceId, currentUser?.userId]);
 
   const { data: cloudPrepOrders } = useFirestoreCollection<any>('prepOrders');
-  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
+  const todayStr = useMemo(() => format(new Date(), 'yyyy-MM-dd'), []);
   const pendingPrepCount = useMemo(() => {
     if (!cloudPrepOrders || cloudPrepOrders.length === 0) return 0;
     return cloudPrepOrders.filter(o => 

@@ -20,13 +20,17 @@ import {
   RotateCcw,
   Sparkles,
   Layers,
-  ArrowRight
+  ArrowRight,
+  Edit,
+  Trash2
 } from 'lucide-react';
+import { format, addDays } from 'date-fns';
 import { db } from '@/core/database';
 import { useAuthStore } from '@/core/auth-store';
 import { useToastStore } from '@/core/toast-store';
 import { useFirestoreCollection } from '@/core/firestore-realtime';
 import { PrepOrderService } from '@/core/services/prep-order-service';
+import { DataResetService } from '@/core/services/data-reset-service';
 import { OrderScheduleCard } from './OrderScheduleCard';
 import { OrderScheduleModal } from './OrderScheduleModal';
 import { OrderScheduleTicketModal } from './OrderScheduleTicketModal';
@@ -43,12 +47,8 @@ export function OrderScheduleManagement() {
     PrepOrderService.seedInitialOrdersIfEmpty();
   }, []);
 
-  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
-  const tomorrowStr = useMemo(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 1);
-    return d.toISOString().split('T')[0];
-  }, []);
+  const todayStr = useMemo(() => format(new Date(), 'yyyy-MM-dd'), []);
+  const tomorrowStr = useMemo(() => format(addDays(new Date(), 1), 'yyyy-MM-dd'), []);
 
   // UI state
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
@@ -58,6 +58,13 @@ export function OrderScheduleManagement() {
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'KANBAN' | 'TABLE'>('KANBAN');
+
+  // Multi-select & Data Reset State (Owner Only)
+  const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
+  const [showResetAllModal, setShowResetAllModal] = useState(false);
+  const [resetConfirmWord, setResetConfirmWord] = useState('');
 
   // Modals state
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -134,13 +141,16 @@ export function OrderScheduleManagement() {
         const q = searchQuery.toLowerCase();
         const matchName = order.customerName.toLowerCase().includes(q);
         const matchNum = order.orderNumber.toLowerCase().includes(q);
+        const matchPhone = (order.customerPhone || '').toLowerCase().includes(q);
+        const matchStatus = (order.status || '').toLowerCase().includes(q);
+        const matchStaff = (order.assignedStaffName || '').toLowerCase().includes(q);
         const matchItems = order.items.some(it => 
           it.productName.toLowerCase().includes(q) || 
           (it.sizeSpec || '').toLowerCase().includes(q)
         );
         const matchNotes = (order.generalNotes || '').toLowerCase().includes(q);
         const matchAddress = (order.customerAddress || '').toLowerCase().includes(q);
-        if (!matchName && !matchNum && !matchItems && !matchNotes && !matchAddress) {
+        if (!matchName && !matchNum && !matchPhone && !matchStatus && !matchStaff && !matchItems && !matchNotes && !matchAddress) {
           return false;
         }
       }
@@ -154,6 +164,70 @@ export function OrderScheduleManagement() {
       return a.scheduledTime.localeCompare(b.scheduledTime);
     });
   }, [allOrders, selectedCategory, fulfillmentFilter, statusFilter, dateFilter, customDate, searchQuery, todayStr, tomorrowStr]);
+
+  // Multi-select helpers
+  const allFilteredOrderIds = useMemo(() => filteredOrders.map(o => o.orderId), [filteredOrders]);
+  const isAllSelected = allFilteredOrderIds.length > 0 && allFilteredOrderIds.every(id => selectedOrderIds.has(id));
+
+  const toggleSelectAll = () => {
+    if (isAllSelected) {
+      setSelectedOrderIds(new Set());
+    } else {
+      setSelectedOrderIds(new Set(allFilteredOrderIds));
+    }
+  };
+
+  const toggleSelect = (id: string) => {
+    const next = new Set(selectedOrderIds);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    setSelectedOrderIds(next);
+  };
+
+  const handleBulkDelete = async () => {
+    if (!currentUser || !isOwner) return;
+    setIsDeleting(true);
+    try {
+      const res = await DataResetService.deletePrepOrders(
+        Array.from(selectedOrderIds),
+        currentUser.userId,
+        currentUser.role
+      );
+      addToast(res.message, 'success');
+      setSelectedOrderIds(new Set());
+      setShowBulkDeleteModal(false);
+    } catch (err: any) {
+      addToast(err.message || 'Gagal menghapus jadwal pesanan.', 'error');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleResetAll = async () => {
+    if (!currentUser || !isOwner) return;
+    if (resetConfirmWord !== 'RESET') {
+      addToast('Ketik kata konfirmasi "RESET" dengan tepat.', 'error');
+      return;
+    }
+    setIsDeleting(true);
+    try {
+      const res = await DataResetService.resetAllPrepOrders(
+        currentUser.userId,
+        currentUser.role
+      );
+      addToast(res.message, 'success');
+      setSelectedOrderIds(new Set());
+      setShowResetAllModal(false);
+      setResetConfirmWord('');
+    } catch (err: any) {
+      addToast(err.message || 'Gagal me-reset jadwal pesanan.', 'error');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   // Status handlers
   const handleStatusChange = async (orderId: string, newStatus: PrepOrderStatus) => {
@@ -523,6 +597,51 @@ export function OrderScheduleManagement() {
         </div>
       </div>
 
+      {/* Owner Bulk Action Bar */}
+      {isOwner && (
+        <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 border border-slate-200 p-3 rounded-2xl">
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-2 cursor-pointer text-xs font-black uppercase text-slate-700">
+              <input
+                type="checkbox"
+                checked={isAllSelected}
+                onChange={toggleSelectAll}
+                className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer accent-blue-600"
+              />
+              <span>Pilih Semua ({filteredOrders.length} Jadwal)</span>
+            </label>
+            {selectedOrderIds.size > 0 && (
+              <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-lg border border-blue-200">
+                {selectedOrderIds.size} dipilih
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            {selectedOrderIds.size > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowBulkDeleteModal(true)}
+                className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-black text-xs uppercase tracking-wider shadow-sm transition-all flex items-center gap-1.5 cursor-pointer animate-pulse"
+              >
+                <Trash2 size={14} />
+                <span>Hapus ({selectedOrderIds.size}) Jadwal Terpilih</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setShowResetAllModal(true)}
+              className="px-3.5 py-2 bg-white hover:bg-rose-50 hover:text-rose-600 border border-slate-200 hover:border-rose-300 text-slate-600 rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer"
+              title="Reset bersih seluruh jadwal pesanan untuk launching resmi"
+            >
+              <RotateCcw size={14} />
+              <span>Reset Semua Jadwal Pesanan</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Main Content Area: Kanban or Table */}
       {viewMode === 'KANBAN' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-start">
@@ -564,6 +683,9 @@ export function OrderScheduleManagement() {
                       onPrint={handleOpenPrintModal}
                       onDelete={handleDeleteOrder}
                       onStatusChange={handleStatusChange}
+                      showCheckbox={isOwner}
+                      isSelected={selectedOrderIds.has(order.orderId)}
+                      onToggleSelect={toggleSelect}
                     />
                   ))
                 )}
@@ -578,6 +700,16 @@ export function OrderScheduleManagement() {
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase text-[10px]">
                 <tr>
+                  {isOwner && (
+                    <th className="py-3 px-3 w-10 text-center">
+                      <input
+                        type="checkbox"
+                        checked={isAllSelected}
+                        onChange={toggleSelectAll}
+                        className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer accent-blue-600"
+                      />
+                    </th>
+                  )}
                   <th className="py-3 px-4">No. Order & Jadwal</th>
                   <th className="py-3 px-4">Kategori & Produk</th>
                   <th className="py-3 px-4">Pemesan</th>
@@ -590,7 +722,7 @@ export function OrderScheduleManagement() {
               <tbody className="divide-y divide-slate-100">
                 {filteredOrders.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="text-center py-12 text-slate-400">
+                    <td colSpan={isOwner ? 8 : 7} className="text-center py-12 text-slate-400">
                       Tidak ada jadwal pesanan yang sesuai dengan filter yang dipilih.
                     </td>
                   </tr>
@@ -600,7 +732,22 @@ export function OrderScheduleManagement() {
                     const remaining = (order.totalEstimatedPrice || 0) - (order.downPaymentAmount || 0);
 
                     return (
-                      <tr key={order.orderId} className="hover:bg-slate-50/80 transition-all">
+                      <tr 
+                        key={order.orderId} 
+                        className={`hover:bg-slate-50/80 transition-all ${
+                          selectedOrderIds.has(order.orderId) ? 'bg-blue-50/50' : ''
+                        }`}
+                      >
+                        {isOwner && (
+                          <td className="py-3.5 px-3 text-center">
+                            <input
+                              type="checkbox"
+                              checked={selectedOrderIds.has(order.orderId)}
+                              onChange={() => toggleSelect(order.orderId)}
+                              className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer accent-blue-600"
+                            />
+                          </td>
+                        )}
                         <td className="py-3.5 px-4">
                           <div className="font-mono font-bold text-slate-900">{order.orderNumber}</div>
                           <div className="flex items-center gap-1.5 text-slate-500 font-medium mt-0.5">
@@ -621,7 +768,7 @@ export function OrderScheduleManagement() {
                               <div key={idx} className="flex items-baseline gap-1 text-[11px]">
                                 <span className="font-bold text-slate-800">{it.productName}:</span>
                                 <span className="text-blue-700 font-black">
-                                  {it.quantityValue || it.weightKg} {it.quantityUnit || 'KG'}
+                                   {it.quantityValue || it.weightKg} {it.quantityUnit || 'KG'}
                                 </span>
                               </div>
                             ))}
@@ -719,14 +866,14 @@ export function OrderScheduleManagement() {
                               className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
                               title="Edit"
                             >
-                              <Filter size={14} />
+                              <Edit size={14} />
                             </button>
                             <button
                               onClick={() => handleDeleteOrder(order.orderId)}
                               className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
                               title="Hapus"
                             >
-                              <RotateCcw size={14} />
+                              <Trash2 size={14} />
                             </button>
                           </div>
                         </td>
@@ -752,6 +899,100 @@ export function OrderScheduleManagement() {
         onClose={() => setOrderToPrint(null)}
         order={orderToPrint}
       />
+
+      {/* MODAL: Bulk Delete Confirmation */}
+      {showBulkDeleteModal && (
+        <div className="fixed inset-0 z-[600] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden p-6 space-y-6">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0">
+                <Trash2 size={24} />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Hapus Jadwal Pesanan?</h3>
+                <p className="text-xs font-medium text-slate-500 leading-relaxed">
+                  Apakah Anda yakin ingin menghapus <span className="font-black text-rose-600">{selectedOrderIds.size}</span> jadwal pesanan terpilih? Data yang dihapus tidak dapat dipulihkan.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => setShowBulkDeleteModal(false)}
+                className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-black text-xs uppercase tracking-widest transition-all"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={handleBulkDelete}
+                className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-black text-xs uppercase tracking-widest transition-all shadow-lg shadow-rose-200 flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Trash2 size={16} />
+                {isDeleting ? 'Menghapus...' : `Ya, Hapus (${selectedOrderIds.size})`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Reset All Prep Orders Confirmation */}
+      {showResetAllModal && (
+        <div className="fixed inset-0 z-[600] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden p-6 space-y-6">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+                <AlertTriangle size={24} />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Reset Semua Jadwal Pesanan?</h3>
+                <p className="text-xs font-medium text-slate-500 leading-relaxed">
+                  Tindakan ini ditujukan untuk membersihkan seluruh data pesanan percobaan ({allOrders.length} data) sebelum peluncuran resmi. Jadwal pesanan akan dihapus bersih permanen.
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-2 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+              <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block">
+                Ketik <span className="text-rose-600 font-bold">RESET</span> untuk konfirmasi:
+              </label>
+              <input 
+                type="text"
+                placeholder="Ketik RESET"
+                value={resetConfirmWord}
+                onChange={(e) => setResetConfirmWord(e.target.value)}
+                className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-black uppercase text-slate-900 outline-none focus:ring-2 focus:ring-rose-500"
+              />
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => {
+                  setShowResetAllModal(false);
+                  setResetConfirmWord('');
+                }}
+                className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-black text-xs uppercase tracking-widest transition-all"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting || resetConfirmWord !== 'RESET'}
+                onClick={handleResetAll}
+                className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl font-black text-xs uppercase tracking-widest transition-all shadow-lg shadow-rose-200 flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <RotateCcw size={16} />
+                {isDeleting ? 'Mereset...' : 'Reset Bersih Semua'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

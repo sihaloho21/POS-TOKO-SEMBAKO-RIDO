@@ -474,4 +474,84 @@ export class DataResetService {
       message: `Seluruh buku kas (${count} transaksi finansial) berhasil di-reset bersih ke saldo awal.`
     };
   }
+
+  // ==========================================
+  // 6. ORDER SCHEDULE & TO-DO LIST
+  // ==========================================
+
+  /**
+   * Delete specific scheduled prep orders by their IDs.
+   */
+  static async deletePrepOrders(
+    orderIds: string[],
+    userId: string,
+    role: string,
+    deviceId: string = 'device-1'
+  ): Promise<DataResetResult> {
+    this.assertOwner(role);
+    if (!orderIds || orderIds.length === 0) {
+      return { success: true, count: 0, message: 'Tidak ada jadwal pesanan yang dipilih.' };
+    }
+
+    let deletedCount = 0;
+    for (const orderId of orderIds) {
+      await db.prepOrders.delete(orderId);
+      await cloudDeleteDoc('prepOrders', orderId).catch(() => {});
+      deletedCount++;
+    }
+
+    await AuditEngine.log({
+      userId,
+      role,
+      deviceId,
+      action: 'BULK_DELETE_PREP_ORDERS',
+      module: 'SCHEDULE_TO_DO',
+      after: { orderIds, count: deletedCount }
+    });
+
+    return {
+      success: true,
+      count: deletedCount,
+      message: `Berhasil menghapus ${deletedCount} jadwal pesanan.`
+    };
+  }
+
+  /**
+   * Reset all prep orders / to-do list (clean slate for official launch).
+   */
+  static async resetAllPrepOrders(
+    userId: string,
+    role: string,
+    deviceId: string = 'device-1'
+  ): Promise<DataResetResult> {
+    this.assertOwner(role);
+
+    const allOrders = await db.prepOrders.toArray();
+    const count = allOrders.length;
+
+    for (const order of allOrders) {
+      await db.prepOrders.delete(order.orderId);
+      await cloudDeleteDoc('prepOrders', order.orderId).catch(() => {});
+    }
+
+    // Mark as seeded so initial sample orders are not recreated after reset
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('riama_prep_orders_seeded_v1', 'true');
+    }
+
+    await AuditEngine.log({
+      userId,
+      role,
+      deviceId,
+      action: 'RESET_ALL_PREP_ORDERS',
+      module: 'SCHEDULE_TO_DO',
+      after: { count }
+    });
+
+    return {
+      success: true,
+      count,
+      message: `Seluruh jadwal pesanan & to-do (${count} data) berhasil di-reset bersih untuk peluncuran resmi.`
+    };
+  }
 }
