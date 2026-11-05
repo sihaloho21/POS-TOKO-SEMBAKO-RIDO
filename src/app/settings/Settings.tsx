@@ -2,12 +2,13 @@ import React, { useState } from 'react';
 import ReceiptSettings from './ReceiptSettings';
 import PaymentMethods from './PaymentMethods';
 import LoyaltySettings from './LoyaltySettings';
+import DigitalFeeSettings from './DigitalFeeSettings';
 import SystemHealth from '../system/SystemHealth';
-import { Printer, CreditCard, Trophy, Cpu } from 'lucide-react';
+import { Printer, CreditCard, Trophy, Cpu, Sliders } from 'lucide-react';
 import { useDevModeStore } from '@/core/dev-mode-store';
 
 export default function Settings() {
-  const [activeTab, setActiveTab] = useState<'RECEIPT' | 'PAYMENT' | 'LOYALTY' | 'DIAGNOSTICS'>('RECEIPT');
+  const [activeTab, setActiveTab] = useState<'RECEIPT' | 'PAYMENT' | 'LOYALTY' | 'DIGITAL_FEES' | 'DIAGNOSTICS'>('RECEIPT');
   const { isDevMode, toggleDevMode } = useDevModeStore();
   const [clickCount, setClickCount] = useState(0);
 
@@ -80,6 +81,21 @@ export default function Settings() {
           )}
         </button>
 
+        <button 
+          onClick={() => setActiveTab('DIGITAL_FEES')}
+          className={`pb-4 px-2 font-black text-xs uppercase tracking-widest transition-all relative ${
+            activeTab === 'DIGITAL_FEES' ? 'text-indigo-600' : 'text-slate-400 hover:text-slate-600'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <Sliders size={16} />
+            Tarif & Biaya Digital
+          </div>
+          {activeTab === 'DIGITAL_FEES' && (
+            <div className="absolute bottom-0 left-0 right-0 h-1 bg-indigo-600 rounded-t-full" />
+          )}
+        </button>
+
         {isDevMode && (
           <button 
             onClick={() => setActiveTab('DIAGNOSTICS')}
@@ -105,6 +121,8 @@ export default function Settings() {
           <PaymentMethods />
         ) : activeTab === 'LOYALTY' ? (
           <LoyaltySettings />
+        ) : activeTab === 'DIGITAL_FEES' ? (
+          <DigitalFeeSettings />
         ) : isDevMode ? (
           <SystemHealth />
         ) : (

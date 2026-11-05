@@ -408,10 +408,42 @@ export interface SyncQueueItem {
   createdAt: string;
 }
 
+export type DigitalServiceType = 'PULSA' | 'PAKET_DATA' | 'TOKEN_LISTRIK' | 'TOPUP' | 'TRANSFER' | 'TARIK_TUNAI';
+
+export interface DigitalFeeTier {
+  id: string;
+  minAmount: number;
+  maxAmount: number; // 0 or Infinity means no upper limit (e.g. 100k+)
+  feeAmount: number;
+  label?: string;
+}
+
+export type DigitalPricingModel = 'FLAT' | 'TIERED';
+
+export interface DigitalServiceConfigItem {
+  serviceType: DigitalServiceType;
+  label: string;
+  pricingModel: DigitalPricingModel;
+  flatFee: number;
+  tiers: DigitalFeeTier[];
+  fallbackFee: number;
+  isEnabled: boolean;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+export interface DigitalFeeSettings {
+  id: 'digital_fee_settings';
+  configs: Record<DigitalServiceType, DigitalServiceConfigItem>;
+  allowCashierManualOverride: boolean;
+  updatedAt: string;
+  updatedBy: string;
+}
+
 export interface DigitalService {
   serviceId: string;
   transactionId: string;
-  serviceType: 'PULSA' | 'PAKET_DATA' | 'TOKEN_LISTRIK' | 'TOPUP' | 'TRANSFER' | 'TARIK_TUNAI';
+  serviceType: DigitalServiceType;
   customerReference: string;
   principal: number;
   fee: number;

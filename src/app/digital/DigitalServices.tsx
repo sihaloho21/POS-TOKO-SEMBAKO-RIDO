@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '@/core/database';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { 
@@ -7,18 +7,30 @@ import {
   Wifi, 
   Send, 
   ArrowDownToLine, 
-  CheckCircle,
-  AlertCircle,
-  Clock,
-  Banknote
+  CheckCircle, 
+  AlertCircle, 
+  Clock, 
+  Banknote,
+  Sliders,
+  X,
+  Lock,
+  Sparkles,
+  Info
 } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { useAuthStore } from '@/core/auth-store';
 import { AuditEngine } from '@/core/audit-engine';
 import { useDeviceId } from '@/core/device-store';
 import { useToastStore } from '@/core/toast-store';
+import type { DigitalServiceType } from '@/core/types';
+import { 
+  DigitalFeeService, 
+  DIGITAL_FEE_SETTINGS_ID, 
+  DEFAULT_DIGITAL_FEE_SETTINGS 
+} from '@/core/services/digital-fee-service';
+import DigitalFeeSettings from '../settings/DigitalFeeSettings';
 
-type ServiceType = 'PULSA' | 'PAKET_DATA' | 'TOKEN_LISTRIK' | 'TOPUP' | 'TRANSFER' | 'TARIK_TUNAI';
+type ServiceType = DigitalServiceType;
 
 const SERVICES: { type: ServiceType; label: string; icon: any; color: string }[] = [
   { type: 'PULSA', label: 'Pulsa', icon: <Smartphone size={24} />, color: 'bg-blue-500' },
@@ -33,11 +45,35 @@ export default function DigitalServices() {
   const { currentUser } = useAuthStore();
   const { addToast } = useToastStore();
   const deviceId = useDeviceId();
+  const isOwner = currentUser?.role === 'OWNER';
+
   const [selectedType, setSelectedType] = useState<ServiceType | null>(null);
   const [formData, setFormData] = useState({ ref: '', principal: '', fee: '2000' });
   const [isProcessing, setIsProcessing] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+
+  // Live subscription to digital fee settings from database
+  const liveSettings = useLiveQuery(() => db.settings.get(DIGITAL_FEE_SETTINGS_ID));
+  const feeSettings = liveSettings || DEFAULT_DIGITAL_FEE_SETTINGS;
 
   const recentServices = useLiveQuery(() => db.digitalServices.orderBy('serviceId').reverse().limit(10).toArray());
+
+  // Realtime fee calculation based on selectedType and principal
+  const calculatedFeeInfo = useMemo(() => {
+    if (!selectedType) return null;
+    const principalNum = Number(formData.principal) || 0;
+    return DigitalFeeService.calculateFee(selectedType, principalNum, feeSettings);
+  }, [selectedType, formData.principal, feeSettings]);
+
+  // Automatically sync fee input when service or principal changes
+  useEffect(() => {
+    if (calculatedFeeInfo && selectedType) {
+      setFormData(prev => ({
+        ...prev,
+        fee: String(calculatedFeeInfo.fee)
+      }));
+    }
+  }, [selectedType, formData.principal, calculatedFeeInfo?.fee]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -204,11 +240,26 @@ export default function DigitalServices() {
     }
   };
 
+  const isFeeLocked = !feeSettings?.allowCashierManualOverride && !isOwner;
+
   return (
     <div className="space-y-8">
-      <div>
-        <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Layanan Digital</h2>
-        <p className="text-slate-500 text-sm font-medium">Pulsa, Paket Data, Token Listrik, dan Top-up.</p>
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+          <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Layanan Digital</h2>
+          <p className="text-slate-500 text-sm font-medium">Pulsa, Paket Data, Token Listrik, dan Transaksi Finansial (Transfer, Top-up, Tarik Tunai).</p>
+        </div>
+
+        {isOwner && (
+          <button
+            type="button"
+            onClick={() => setShowSettingsModal(true)}
+            className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs uppercase tracking-wider rounded-xl shadow-md shadow-indigo-200 transition-all hover:scale-105 active:scale-95 shrink-0"
+          >
+            <Sliders size={16} />
+            ⚙️ Atur Tarif & Biaya Admin (Tiered)
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
@@ -238,14 +289,67 @@ export default function DigitalServices() {
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-6">
-              <div className="flex items-center gap-3 mb-6">
-                <div className={`p-3 rounded-xl bg-blue-500 text-white`}>
-                  {SERVICES.find(s => s.type === selectedType)?.icon}
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div className={`p-3 rounded-xl bg-blue-500 text-white`}>
+                    {SERVICES.find(s => s.type === selectedType)?.icon}
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">
+                      {SERVICES.find(s => s.type === selectedType)?.label}
+                    </h3>
+                    <p className="text-[11px] text-slate-500">
+                      {calculatedFeeInfo?.pricingModel === 'TIERED' ? 'Model Tarif Bertingkat (Nominal-Based)' : 'Model Tarif Flat'}
+                    </p>
+                  </div>
                 </div>
-                <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">
-                  {SERVICES.find(s => s.type === selectedType)?.label}
-                </h3>
+
+                {isOwner && (
+                  <button
+                    type="button"
+                    onClick={() => setShowSettingsModal(true)}
+                    className="text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 p-1 hover:bg-indigo-50 rounded-lg transition-colors"
+                    title="Ubah aturan tarif untuk layanan ini"
+                  >
+                    <Sliders size={13} />
+                    Ubah Tarif
+                  </button>
+                )}
               </div>
+
+              {/* Dynamic Tier Indicator Banner */}
+              {calculatedFeeInfo && (
+                <div className="p-3 bg-gradient-to-r from-slate-50 to-indigo-50/50 rounded-2xl border border-indigo-100 flex items-center justify-between gap-2 text-xs">
+                  <div className="flex items-center gap-2">
+                    <Sparkles size={15} className="text-amber-500 shrink-0" />
+                    <div>
+                      <div className="font-bold text-slate-800 flex items-center gap-1.5">
+                        {calculatedFeeInfo.pricingModel === 'TIERED' ? (
+                          <>
+                            <span>Tier Aktif:</span>
+                            <span className="text-indigo-700 font-black">
+                              {calculatedFeeInfo.matchedTier?.label || 'Rentang Standar'}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="text-slate-800">Tarif Flat Tetap</span>
+                        )}
+                      </div>
+                      {calculatedFeeInfo.matchedTier && (
+                        <div className="text-[10px] text-slate-500">
+                          Rentang Rp {Number(calculatedFeeInfo.matchedTier.minAmount).toLocaleString('id-ID')} s/d {calculatedFeeInfo.matchedTier.maxAmount > 0 ? `Rp ${Number(calculatedFeeInfo.matchedTier.maxAmount).toLocaleString('id-ID')}` : 'Tanpa Batas (∞)'}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="text-right">
+                    <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 font-black text-[11px] inline-block">
+                      Fee: Rp {calculatedFeeInfo.fee.toLocaleString('id-ID')}
+                    </span>
+                  </div>
+                </div>
+              )}
 
               <div className="space-y-2">
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Nomor Tujuan / Referensi</label>
@@ -254,37 +358,60 @@ export default function DigitalServices() {
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-bold text-slate-900"
                   value={formData.ref ?? ''}
                   onChange={(e) => setFormData({ ...formData, ref: e.target.value })}
-                  placeholder="0812xxxx atau ID Pelanggan"
+                  placeholder="0812xxxx atau ID Pelanggan / Rekening"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Nominal (Principal)</label>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Nominal Pokok (Principal)</label>
                   <input
                     type="number"
                     required
+                    min="1"
+                    placeholder="Contoh: 50000"
                     className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-bold text-slate-900 tabular-nums"
                     value={formData.principal ?? ''}
                     onChange={(e) => setFormData({ ...formData, principal: e.target.value })}
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Biaya Admin (Fee)</label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Biaya Admin (Fee)</label>
+                    {isFeeLocked && (
+                      <span className="text-[9px] font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded flex items-center gap-1">
+                        <Lock size={10} /> Auto
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="number"
                     required
-                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-bold text-slate-900 tabular-nums"
+                    readOnly={isFeeLocked}
+                    className={`w-full px-4 py-3 rounded-xl border tabular-nums font-bold text-slate-900 ${
+                      isFeeLocked
+                        ? 'bg-slate-100 border-slate-200 text-slate-600 cursor-not-allowed'
+                        : 'bg-slate-50 border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none'
+                    }`}
                     value={formData.fee ?? ''}
-                    onChange={(e) => setFormData({ ...formData, fee: e.target.value })}
+                    onChange={(e) => {
+                      if (!isFeeLocked) {
+                        setFormData({ ...formData, fee: e.target.value });
+                      }
+                    }}
                   />
+                  {isFeeLocked && (
+                    <p className="text-[10px] text-slate-400">
+                      Terkunci sesuai pengaturan tarif Owner.
+                    </p>
+                  )}
                 </div>
               </div>
 
               <div className="p-4 bg-slate-900 rounded-2xl text-white flex justify-between items-center">
-                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Total Bayar</span>
-                <span className="text-xl font-black tabular-nums">
-                  Rp {(Number(formData.principal || 0) + Number(formData.fee || 0)).toLocaleString()}
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Total Transaksi</span>
+                <span className="text-xl font-black tabular-nums text-emerald-400">
+                  Rp {(Number(formData.principal || 0) + Number(formData.fee || 0)).toLocaleString('id-ID')}
                 </span>
               </div>
 
@@ -292,7 +419,7 @@ export default function DigitalServices() {
                 disabled={isProcessing}
                 className="w-full py-4 bg-blue-600 text-white font-black uppercase tracking-widest rounded-2xl hover:bg-blue-500 shadow-lg shadow-blue-200 transition-all disabled:bg-slate-200 disabled:text-slate-400"
               >
-                {isProcessing ? 'Memproses...' : 'Kirim / Proses'}
+                {isProcessing ? 'Memproses...' : 'Kirim / Proses Transaksi'}
               </button>
             </form>
           )}
@@ -311,20 +438,17 @@ export default function DigitalServices() {
               recentServices?.map((s) => (
                 <div key={s.serviceId} className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors">
                   <div className="flex items-center gap-3">
-                    <div className={`p-2 rounded-lg ${SERVICES.find(serv => serv.type === s.serviceType)?.color} text-white`}>
-                      {SERVICES.find(serv => serv.type === s.serviceType)?.icon}
+                    <div className="p-2 rounded-xl bg-slate-100 text-slate-600">
+                      {SERVICES.find(srv => srv.type === s.serviceType)?.icon || <Banknote size={16} />}
                     </div>
                     <div>
-                      <p className="text-sm font-bold text-slate-900">{s.customerReference}</p>
-                      <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">{s.serviceType}</p>
+                      <div className="font-bold text-xs text-slate-900">{s.customerReference}</div>
+                      <div className="text-[10px] text-slate-400 font-semibold">{s.serviceType}</div>
                     </div>
                   </div>
                   <div className="text-right">
-                    <p className="text-sm font-black text-slate-900 tabular-nums">Rp {s.total.toLocaleString()}</p>
-                    <div className="flex items-center gap-1 justify-end text-[10px] font-bold text-emerald-500 uppercase">
-                      <CheckCircle size={10} />
-                      {s.status}
-                    </div>
+                    <div className="font-black text-xs text-slate-900 tabular-nums">Rp {s.total?.toLocaleString('id-ID')}</div>
+                    <div className="text-[10px] text-emerald-600 font-bold tabular-nums">+Fee Rp {s.fee?.toLocaleString('id-ID')}</div>
                   </div>
                 </div>
               ))
@@ -332,6 +456,25 @@ export default function DigitalServices() {
           </div>
         </div>
       </div>
+
+      {/* Modal Pengaturan Biaya Admin (Owner Only) */}
+      {showSettingsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-slate-50 rounded-3xl shadow-2xl border border-slate-200 w-full max-w-5xl max-h-[90vh] overflow-y-auto p-6 relative">
+            <button
+              onClick={() => setShowSettingsModal(false)}
+              className="absolute top-6 right-6 p-2 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 transition-colors z-20"
+              title="Tutup Modal Pengaturan"
+            >
+              <X size={20} />
+            </button>
+
+            <div className="mt-2">
+              <DigitalFeeSettings />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
