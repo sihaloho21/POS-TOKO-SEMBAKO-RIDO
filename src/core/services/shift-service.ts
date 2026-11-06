@@ -164,6 +164,7 @@ export class ShiftService {
     const storageBreakdown: Record<string, number> = {
       WARUNG: 0,
       IKAN: 0,
+      BUAH: 0,
       UANG_DIGITAL: 0
     };
 
@@ -178,7 +179,7 @@ export class ShiftService {
       }
       if (tx.type === 'RETURN') {
         const method = (tx.paymentMethodId || 'CASH').toUpperCase();
-        if (method === 'CASH' && (storage === 'WARUNG' || storage === 'IKAN')) {
+        if (method === 'CASH' && (storage === 'WARUNG' || storage === 'IKAN' || storage === 'BUAH')) {
           cashReturns += (tx.total || 0);
         }
         storageBreakdown[storage] = (storageBreakdown[storage] || 0) - (tx.total || 0);
@@ -187,12 +188,12 @@ export class ShiftService {
       const method = (tx.paymentMethodId || 'CASH').toUpperCase();
       paymentBreakdown[method] = (paymentBreakdown[method] || 0) + (tx.total || 0);
       storageBreakdown[storage] = (storageBreakdown[storage] || 0) + (tx.total || 0);
-      if (method === 'CASH' && (storage === 'WARUNG' || storage === 'IKAN')) {
+      if (method === 'CASH' && (storage === 'WARUNG' || storage === 'IKAN' || storage === 'BUAH')) {
         cashSales += (tx.total || 0);
       }
     }
 
-    // Cash in from receivable payments during this shift into WARUNG drawer
+    // Cash in from receivable payments during this shift into drawer (WARUNG, IKAN, BUAH)
     const shiftPayments = await db.receivablePayments
       .filter(p => Boolean(p.timestamp >= shift.startTime && (!shift.endTime || p.timestamp <= shift.endTime)))
       .toArray();
@@ -200,14 +201,14 @@ export class ShiftService {
     let cashFromReceivables = 0;
     for (const p of shiftPayments) {
       const storage = p.moneyStorageId || 'WARUNG';
-      if ((p.paymentMethodId || 'CASH').toUpperCase() === 'CASH' && (storage === 'WARUNG' || storage === 'IKAN')) {
+      if ((p.paymentMethodId || 'CASH').toUpperCase() === 'CASH' && (storage === 'WARUNG' || storage === 'IKAN' || storage === 'BUAH')) {
         cashFromReceivables += (p.amount || 0);
       }
     }
 
     // Cash out: expenses or petty cash out during this shift
     const expenses = await db.financeEvents
-      .filter(e => Boolean(e.referenceId === shiftId && e.direction === 'OUT' && (e.storageId === 'WARUNG' || e.storageId === 'IKAN')))
+      .filter(e => Boolean(e.referenceId === shiftId && e.direction === 'OUT' && (e.storageId === 'WARUNG' || e.storageId === 'IKAN' || e.storageId === 'BUAH')))
       .toArray();
     const cashOut = expenses.reduce((acc, e) => acc + (e.amount || 0), 0);
 
@@ -312,6 +313,7 @@ export class ShiftService {
       cashIn: metrics.cashIn,
       cashOut: metrics.cashOut,
       paymentBreakdown: metrics.paymentBreakdown,
+      storageBreakdown: metrics.storageBreakdown,
       expectedCash,
       actualCash,
       discrepancy,
@@ -327,6 +329,52 @@ export class ShiftService {
 
     await db.shifts.put(updatedShift);
     await cloudSetDoc('shifts', params.shiftId, updatedShift);
+
+    // If discrepancy occurred, dispatch notification and create business conflict if not approved yet
+    if (discrepancy !== 0) {
+      try {
+        const cashierUser = await db.users.get(shift.userId);
+        await DiscrepancyNotificationService.notifyOwnerSignificantDiscrepancy({
+          shiftId: params.shiftId,
+          cashierId: shift.userId,
+          cashierName: cashierUser?.name,
+          deviceId: params.currentDeviceId || shift.deviceId,
+          expectedCash,
+          actualCash,
+          discrepancy,
+          reason: params.discrepancyReason || 'Selisih penutupan shift kasir'
+        });
+      } catch (notifyErr) {
+        console.warn('Failed to dispatch discrepancy alert:', notifyErr);
+      }
+
+      if (!params.approvedByOwner) {
+        try {
+          const conflictId = uuidv4();
+          const conflict: BusinessConflict = {
+            conflictId,
+            type: 'SHIFT_DISCREPANCY',
+            entityType: 'shift',
+            entityId: params.shiftId,
+            timestamp: endTimestamp,
+            deviceId: params.currentDeviceId || shift.deviceId,
+            userId: shift.userId,
+            details: {
+              shiftId: params.shiftId,
+              cashierId: shift.userId,
+              expectedCash,
+              actualCash,
+              discrepancy,
+              reason: params.discrepancyReason
+            },
+            status: 'PENDING'
+          };
+          await db.conflicts.add(conflict);
+        } catch (conflictErr) {
+          console.warn('Failed to record shift discrepancy conflict:', conflictErr);
+        }
+      }
+    }
 
     return updatedShift;
   }
@@ -508,6 +556,25 @@ export class ShiftService {
     await db.shifts.put(updatedShift);
     await cloudSetDoc('shifts', params.shiftId, updatedShift);
 
+    // Resolve corresponding conflict in db.conflicts if exists
+    const conflict = await db.conflicts
+      .where('entityId')
+      .equals(params.shiftId)
+      .first();
+
+    if (conflict) {
+      await db.conflicts.update(conflict.conflictId, {
+        status: 'RESOLVED',
+        resolvedBy: ownerUser.name,
+        resolvedAt: timestamp,
+        details: {
+          ...conflict.details,
+          resolution: 'CHARGED_TO_CASHIER',
+          notes: resolutionNotes
+        }
+      });
+    }
+
     return { shift: updatedShift, receivable: staffReceivable };
   }
 
@@ -546,6 +613,25 @@ export class ShiftService {
 
     await db.shifts.put(updatedShift);
     await cloudSetDoc('shifts', params.shiftId, updatedShift);
+
+    // Resolve corresponding conflict in db.conflicts if exists
+    const conflict = await db.conflicts
+      .where('entityId')
+      .equals(params.shiftId)
+      .first();
+
+    if (conflict) {
+      await db.conflicts.update(conflict.conflictId, {
+        status: 'RESOLVED',
+        resolvedBy: ownerUser.name,
+        resolvedAt: timestamp,
+        details: {
+          ...conflict.details,
+          resolution: 'STORE_EXPENSE',
+          notes: resolutionNotes
+        }
+      });
+    }
 
     return updatedShift;
   }

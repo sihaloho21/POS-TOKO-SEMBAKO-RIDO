@@ -171,7 +171,10 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
         const list = await db.shifts
           .where('status')
           .equals('CLOSED')
-          .filter(s => Boolean(s.discrepancy && s.discrepancy !== 0 && (s.discrepancyApprovalStatus || 'PENDING') !== 'APPROVED'))
+          .filter(s => {
+            const isResolved = ['APPROVED', 'CHARGED_TO_CASHIER', 'STORE_EXPENSE'].includes(s.discrepancyApprovalStatus || '');
+            return Boolean(s.discrepancy && s.discrepancy !== 0 && !isResolved);
+          })
           .toArray();
         return list.length;
       } catch {

@@ -67,6 +67,7 @@ export default function Shift({ onNavigate }: { onNavigate?: (tab: string) => vo
     const breakdown: Record<string, number> = {
       WARUNG: 0,
       IKAN: 0,
+      BUAH: 0,
       UANG_DIGITAL: 0
     };
 
@@ -217,11 +218,24 @@ export default function Shift({ onNavigate }: { onNavigate?: (tab: string) => vo
                   </div>
                 </div>
 
-                <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-2xl flex justify-between items-center">
+                <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-2xl flex justify-between items-center mb-4">
                   <span className="text-[10px] font-black uppercase tracking-wider text-emerald-700">Total Modal Awal</span>
                   <span className="text-xl font-black text-emerald-900 tabular-nums">
                     Rp {((Number(startingCashBills) || 0) + (Number(startingCashCoins) || 0)).toLocaleString()}
                   </span>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">
+                    Catatan Pembukaan Shift (Opsional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Contoh: Shift pagi kasir 1, uang kembalian lengkap..."
+                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-xs font-medium text-slate-800"
+                    value={openShiftNotes}
+                    onChange={(e) => setOpenShiftNotes(e.target.value)}
+                  />
                 </div>
               </div>
 
@@ -261,27 +275,33 @@ export default function Shift({ onNavigate }: { onNavigate?: (tab: string) => vo
                   <Wallet size={16} className="text-slate-400" />
                   <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Live Omzet per Storage</span>
                 </div>
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   <div className="space-y-1">
                     <span className="text-[9px] font-black text-slate-500 uppercase block">Warung</span>
                     <span className="text-sm font-black text-slate-200 tabular-nums">
                       Rp {(liveMetrics?.storageBreakdown?.['WARUNG'] || 0).toLocaleString()} 
                     </span>
                   </div>
-                  <div className="space-y-1 border-l border-slate-800 pl-4">
+                  <div className="space-y-1 sm:border-l border-slate-800 sm:pl-3">
                     <span className="text-[9px] font-black text-slate-500 uppercase block">Ikan</span>
                     <span className="text-sm font-black text-blue-400 tabular-nums">
                       Rp {(liveMetrics?.storageBreakdown?.['IKAN'] || 0).toLocaleString()}
                     </span>
                   </div>
-                  <div className="space-y-1 border-l border-slate-800 pl-4">
+                  <div className="space-y-1 border-t sm:border-t-0 sm:border-l border-slate-800 pt-2 sm:pt-0 sm:pl-3">
+                    <span className="text-[9px] font-black text-slate-500 uppercase block">Buah</span>
+                    <span className="text-sm font-black text-amber-400 tabular-nums">
+                      Rp {(liveMetrics?.storageBreakdown?.['BUAH'] || 0).toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="space-y-1 border-t sm:border-t-0 sm:border-l border-slate-800 pt-2 sm:pt-0 sm:pl-3">
                     <span className="text-[9px] font-black text-slate-500 uppercase block">Digital</span>
                     <span className="text-sm font-black text-emerald-400 tabular-nums">
                       Rp {(liveMetrics?.storageBreakdown?.['UANG_DIGITAL'] || 0).toLocaleString()}
                     </span>
                   </div>
                 </div>
-                <p className="text-[9px] text-slate-500 mt-4 italic">* Data real-time dari transaksi berjalan</p>
+                <p className="text-[9px] text-slate-500 mt-4 italic">* Data real-time dari transaksi berjalan terpisah 4 kas (Warung, Ikan, Buah, Digital)</p>
               </div>
 
               <div className="p-6 bg-gradient-to-br from-rose-50 to-amber-50 rounded-2xl border border-rose-100 space-y-4">

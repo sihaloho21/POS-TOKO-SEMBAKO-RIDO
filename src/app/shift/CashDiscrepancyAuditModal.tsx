@@ -83,11 +83,11 @@ export function CashDiscrepancyAuditModal({ shiftId, onClose, onSuccess }: CashD
     return list.sort((a, b) => new Date(b.clientTimestamp).getTime() - new Date(a.clientTimestamp).getTime());
   }, [shiftId]);
 
-  // Fetch petty cash expenses for this shift
+  // Fetch petty cash expenses for this shift (WARUNG, IKAN, BUAH)
   const shiftExpenses = useLiveQuery(async () => {
     if (!shiftId) return [];
     return db.financeEvents
-      .filter(e => e.referenceId === shiftId && e.storageId === 'WARUNG')
+      .filter(e => Boolean(e.referenceId === shiftId && (e.storageId === 'WARUNG' || e.storageId === 'IKAN' || e.storageId === 'BUAH')))
       .toArray();
   }, [shiftId]);
 

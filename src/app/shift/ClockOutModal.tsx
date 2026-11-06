@@ -329,7 +329,7 @@ export default function ClockOutModal({ isOpen, shiftId, onClose, onSuccess }: C
                   <span className="text-[10px] font-bold text-slate-400 italic">* Berdasarkan kategori transaksi</span>
                 </div>
 
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   <div className="bg-white p-3 rounded-xl border border-slate-200 text-center shadow-sm">
                     <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block mb-0.5">
                       WARUNG
@@ -344,6 +344,14 @@ export default function ClockOutModal({ isOpen, shiftId, onClose, onSuccess }: C
                     </span>
                     <span className="text-sm font-black text-blue-700 tabular-nums">
                       Rp {(metrics.storageBreakdown['IKAN'] || 0).toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="bg-white p-3 rounded-xl border border-slate-200 text-center shadow-sm">
+                    <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block mb-0.5">
+                      BUAH
+                    </span>
+                    <span className="text-sm font-black text-amber-700 tabular-nums">
+                      Rp {(metrics.storageBreakdown['BUAH'] || 0).toLocaleString()}
                     </span>
                   </div>
                   <div className="bg-white p-3 rounded-xl border border-slate-200 text-center shadow-sm">

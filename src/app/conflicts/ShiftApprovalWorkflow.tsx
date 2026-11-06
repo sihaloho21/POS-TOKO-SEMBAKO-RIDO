@@ -134,7 +134,11 @@ export function ShiftApprovalWorkflow({ highlightShiftId }: ShiftApprovalWorkflo
   const filteredShifts = discrepancyShifts?.filter((shift) => {
     // Status filter
     const status = shift.discrepancyApprovalStatus || 'PENDING';
-    if (filterStatus !== 'ALL' && status !== filterStatus) {
+    if (filterStatus === 'APPROVED') {
+      if (!['APPROVED', 'CHARGED_TO_CASHIER', 'STORE_EXPENSE'].includes(status)) {
+        return false;
+      }
+    } else if (filterStatus !== 'ALL' && status !== filterStatus) {
       return false;
     }
 
@@ -321,12 +325,24 @@ export function ShiftApprovalWorkflow({ highlightShiftId }: ShiftApprovalWorkflo
                           ? 'bg-amber-100 text-amber-800 border border-amber-200'
                           : status === 'INVESTIGATION_REQUESTED'
                           ? 'bg-rose-100 text-rose-800 border border-rose-200'
+                          : status === 'CHARGED_TO_CASHIER'
+                          ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                          : status === 'STORE_EXPENSE'
+                          ? 'bg-slate-200 text-slate-800 border border-slate-300'
                           : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
                       }`}>
                         {status === 'PENDING' && <AlertTriangle size={12} />}
                         {status === 'INVESTIGATION_REQUESTED' && <FileSearch size={12} />}
-                        {status === 'APPROVED' && <CheckCircle2 size={12} />}
-                        {status === 'PENDING' ? 'Menunggu Approval' : status === 'INVESTIGATION_REQUESTED' ? 'Investigasi Manual Diminta' : 'Disetujui Owner'}
+                        {(status === 'APPROVED' || status === 'CHARGED_TO_CASHIER' || status === 'STORE_EXPENSE') && <CheckCircle2 size={12} />}
+                        {status === 'PENDING' 
+                          ? 'Menunggu Approval' 
+                          : status === 'INVESTIGATION_REQUESTED' 
+                          ? 'Investigasi Manual Diminta' 
+                          : status === 'CHARGED_TO_CASHIER'
+                          ? 'Dibebankan ke Kasir (Kasbon)'
+                          : status === 'STORE_EXPENSE'
+                          ? 'Disetujui Beban Toko'
+                          : 'Disetujui Owner'}
                       </span>
 
                       <span className="text-xs font-mono font-bold text-slate-400">

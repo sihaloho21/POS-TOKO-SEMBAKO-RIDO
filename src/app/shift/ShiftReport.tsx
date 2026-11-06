@@ -18,7 +18,8 @@ import {
   ShieldCheck,
   Smartphone,
   Calculator,
-  UserMinus
+  UserMinus,
+  Wallet
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { CashDiscrepancyAuditModal } from './CashDiscrepancyAuditModal';
@@ -66,6 +67,16 @@ export default function ShiftReport({ shiftId }: ShiftReportProps) {
     acc[m] = (acc[m] || 0) + (tx.total || 0);
     return acc;
   }, {} as Record<string, number>);
+
+  const storageBreakdown = shift.storageBreakdown || transactions.reduce((acc, tx) => {
+    const s = tx.moneyStorageId || 'WARUNG';
+    if (tx.type === 'RETURN') {
+      acc[s] = (acc[s] || 0) - (tx.total || 0);
+    } else {
+      acc[s] = (acc[s] || 0) + (tx.total || 0);
+    }
+    return acc;
+  }, { WARUNG: 0, IKAN: 0, BUAH: 0, UANG_DIGITAL: 0 } as Record<string, number>);
 
   const cashIn = shift.cashIn ?? (shift.startingCash + (paymentBreakdown['CASH'] || 0));
   const cashOut = shift.cashOut ?? 0;
@@ -298,6 +309,34 @@ export default function ShiftReport({ shiftId }: ShiftReportProps) {
               {Object.keys(paymentBreakdown).length === 0 && (
                 <p className="text-[10px] text-slate-400 italic">Belum ada transaksi</p>
               )}
+            </div>
+          </div>
+        </div>
+
+        {/* Omzet per Storage Keuangan (Warung, Ikan, Buah, Digital) */}
+        <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-black uppercase tracking-widest text-slate-600 flex items-center gap-1.5">
+              <Wallet size={14} className="text-indigo-600" /> Omzet per Storage Kas (Terpisah)
+            </span>
+            <span className="text-[10px] text-slate-400 italic font-medium">* 4 Pos Keuangan Toko</span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div className="p-3 bg-white rounded-xl border border-slate-200 text-center">
+              <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block mb-0.5">WARUNG</span>
+              <span className="text-sm font-black text-slate-900 tabular-nums">Rp {(storageBreakdown['WARUNG'] || 0).toLocaleString()}</span>
+            </div>
+            <div className="p-3 bg-white rounded-xl border border-slate-200 text-center">
+              <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block mb-0.5">IKAN</span>
+              <span className="text-sm font-black text-blue-700 tabular-nums">Rp {(storageBreakdown['IKAN'] || 0).toLocaleString()}</span>
+            </div>
+            <div className="p-3 bg-white rounded-xl border border-slate-200 text-center">
+              <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block mb-0.5">BUAH</span>
+              <span className="text-sm font-black text-amber-700 tabular-nums">Rp {(storageBreakdown['BUAH'] || 0).toLocaleString()}</span>
+            </div>
+            <div className="p-3 bg-white rounded-xl border border-slate-200 text-center">
+              <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block mb-0.5">DIGITAL</span>
+              <span className="text-sm font-black text-emerald-700 tabular-nums">Rp {(storageBreakdown['UANG_DIGITAL'] || 0).toLocaleString()}</span>
             </div>
           </div>
         </div>

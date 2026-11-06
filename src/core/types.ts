@@ -389,6 +389,7 @@ export interface CashierShift {
   cashIn?: number;
   cashOut?: number;
   paymentBreakdown?: Record<string, number>;
+  storageBreakdown?: Record<string, number>;
   startNotes?: string;
   endNotes?: string;
   notes?: string;
@@ -651,6 +652,8 @@ export interface ConsignmentItem {
   currentStock: number;
   totalSold: number;
   status: 'ACTIVE' | 'INACTIVE';
+  barcode?: string;
+  description?: string;
   lastSettlementAt?: string;
   createdAt: string;
   updatedAt: string;
@@ -660,6 +663,8 @@ export interface ConsignmentArrival {
   id: string;
   itemId: string;
   qty: number;
+  notes?: string;
+  userId?: string;
   timestamp: string;
 }
 
@@ -673,5 +678,10 @@ export interface ConsignmentSettlement {
   totalPayment: number; // soldQty * costPrice
   totalProfit: number; // soldQty * (salePrice - costPrice)
   financeEventId: string;
+  storageId?: string;
+  keepRemaining?: boolean;
+  notes?: string;
+  userId?: string;
   timestamp: string;
 }
+

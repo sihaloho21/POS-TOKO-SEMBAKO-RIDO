@@ -54,6 +54,7 @@ export default function ShiftClosingShareModal({ isOpen, metrics, onClose }: Shi
     text += `*OMZET PER STORAGE*\n`;
     text += `- WARUNG: Rp ${(storageBreakdown?.['WARUNG'] || 0).toLocaleString()}\n`;
     text += `- IKAN: Rp ${(storageBreakdown?.['IKAN'] || 0).toLocaleString()}\n`;
+    text += `- BUAH: Rp ${(storageBreakdown?.['BUAH'] || 0).toLocaleString()}\n`;
     text += `- DIGITAL: Rp ${(storageBreakdown?.['UANG_DIGITAL'] || 0).toLocaleString()}\n\n`;
 
     text += `*REKONSILIASI KAS*\n`;
@@ -69,7 +70,7 @@ export default function ShiftClosingShareModal({ isOpen, metrics, onClose }: Shi
       text += `*Catatan Akhir:* ${shift.endNotes}\n`;
     }
 
-    text += `\n_Laporan dikirim secara otomatis via Harapan Jaya POS_`;
+    text += `\n_Laporan dikirim secara otomatis via Toko Sembako & Ikan Riama_`;
     
     return text;
   };
