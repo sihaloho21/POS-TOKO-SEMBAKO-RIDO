@@ -17,12 +17,14 @@ import {
   ChevronRight
 } from 'lucide-react';
 
+import type { MoneyStorageId } from '@/core/types';
+
 export default function SupplierReturn() {
   const { currentUser } = useAuthStore();
   const { addToast } = useToastStore();
   const deviceId = useDeviceId();
   const [selectedSupplierId, setSelectedSupplierId] = useState('');
-  const [selectedStorage, setSelectedStorage] = useState<'WARUNG' | 'IKAN' | 'UANG_DIGITAL'>('WARUNG');
+  const [selectedStorage, setSelectedStorage] = useState<MoneyStorageId>('WARUNG');
   const [productSearch, setProductSearch] = useState('');
   const [items, setItems] = useState<{ productId: string; name: string; quantity: number; unit: string; price: number }[]>([]);
   const [reason, setReason] = useState('');
@@ -105,8 +107,8 @@ export default function SupplierReturn() {
 
             <div className="space-y-2">
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Penyimpanan Refund (Storage)</label>
-              <div className="grid grid-cols-3 gap-2">
-                {(['WARUNG', 'IKAN', 'UANG_DIGITAL'] as const).map(s => (
+              <div className="grid grid-cols-4 gap-2">
+                {(['WARUNG', 'IKAN', 'BUAH', 'UANG_DIGITAL'] as const).map(s => (
                   <button
                     key={s}
                     onClick={() => setSelectedStorage(s)}
@@ -114,7 +116,7 @@ export default function SupplierReturn() {
                       selectedStorage === s ? 'bg-blue-600 text-white border-blue-600 shadow-lg shadow-blue-200' : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300'
                     }`}
                   >
-                    {s.split('_')[0]}
+                    {s === 'UANG_DIGITAL' ? 'DIGITAL' : s}
                   </button>
                 ))}
               </div>

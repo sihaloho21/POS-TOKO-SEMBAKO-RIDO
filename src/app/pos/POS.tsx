@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '@/core/database';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useFirestoreCollection } from '@/core/firestore-realtime';
+import { useFirestoreCollection, cloudSetDoc } from '@/core/firestore-realtime';
 import { TransactionEngine } from '@/core/transaction-engine';
 import { PricingEngine } from '@/core/pricing-engine';
 import { useAuthStore } from '@/core/auth-store';
@@ -219,6 +219,7 @@ export default function POS() {
   const [newProductPrice, setNewProductPrice] = useState('');
   const [newProductCategory, setNewProductCategory] = useState<'SEMBAKO' | 'FISH' | 'MINUMAN' | 'LAINNYA'>('SEMBAKO');
   const [newProductUnit, setNewProductUnit] = useState('PCS');
+  const [newProductStock, setNewProductStock] = useState('');
 
   // Camera Barcode Scanner
   const [isCameraScannerOpen, setIsCameraScannerOpen] = useState(false);
@@ -356,10 +357,27 @@ export default function POS() {
 
   const { data: cloudProducts } = useFirestoreCollection<Product>('products');
   const localProducts = useLiveQuery(() => db.products.toArray(), []);
+  const consignmentItems = useLiveQuery(() => db.consignmentItems.toArray(), []);
+
   const rawProducts = React.useMemo(() => {
-    if (cloudProducts && cloudProducts.length > 0) return cloudProducts;
-    return localProducts || [];
-  }, [cloudProducts, localProducts]);
+    const baseProds = (cloudProducts && cloudProducts.length > 0) ? cloudProducts : (localProducts || []);
+    const mappedConsignment = (consignmentItems || [])
+      .filter(ci => ci.status === 'ACTIVE')
+      .map(ci => ({
+        productId: ci.id,
+        name: ci.name,
+        barcode: ci.barcode || '',
+        sku: ci.barcode || '',
+        normalPrice: ci.salePrice,
+        hpp: ci.costPrice,
+        baseUnit: 'PCS',
+        productType: 'SIDE_PRODUCT' as const, // Treat as side product or generic
+        status: 'ACTIVE' as const,
+        isConsignment: true, // Custom internal flag
+        stock: ci.currentStock
+      }));
+    return [...baseProds, ...mappedConsignment] as (Product & { isConsignment?: boolean })[];
+  }, [cloudProducts, localProducts, consignmentItems]);
 
   const products = React.useMemo(() => {
     return rawProducts.filter(p => {
@@ -538,7 +556,8 @@ export default function POS() {
         netPrice: pricing.price,
         subtotal: Math.round(pricing.price * quantity),
         hppSnapshot: product.hpp,
-        isBundle: product.productType === 'BUNDLE'
+        isBundle: product.productType === 'BUNDLE',
+        isConsignment: (product as any).isConsignment
       }]);
     }
 
@@ -634,7 +653,7 @@ export default function POS() {
       discount: 0,
       total: subtotal,
       paymentMethodId: 'CASH',
-      moneyStorageId: 'WARUNG',
+      moneyStorageId: moneyStorageId || 'WARUNG',
       loyaltyPointsEarned: 0,
       clientTimestamp: new Date().toISOString()
     };
@@ -646,6 +665,9 @@ export default function POS() {
   const resumeHold = (tx: Transaction) => {
     setCart(tx.items);
     setTransactionType(tx.type as any);
+    if (tx.moneyStorageId) {
+      setMoneyStorageId(tx.moneyStorageId as MoneyStorageId);
+    }
     if (tx.customerId) {
       const cust = customers?.find(c => c.customerId === tx.customerId);
       setSelectedCustomer(cust || null);
@@ -1156,9 +1178,9 @@ export default function POS() {
     const prodId = uuidv4();
     const priceNum = Number(newProductPrice) || 0;
     const hppEst = Math.round(priceNum * 0.85);
-    const barcodeVal = newProductBarcode.trim() || `888${Date.now().toString().slice(-6)}`;
+    const barcodeVal = newProductBarcode.trim();
     const now = new Date().toISOString();
-    const initialStock = 20;
+    const initialStock = Math.max(0, Number(newProductStock) || 0);
 
     const newProd: Product = {
       productId: prodId,
@@ -1172,48 +1194,39 @@ export default function POS() {
       conversionRules: [],
       normalPrice: priceNum,
       hpp: hppEst,
-      stock: 0, // Will be derived from OPENING_BALANCE movement below
-      minimumStock: 5,
-      targetStock: 25,
+      stock: 0,
+      minimumStock: 0,
+      targetStock: 0,
       status: 'ACTIVE',
       createdAt: now,
       updatedAt: now
     };
 
-    await db.products.add(newProd);
-    await db.productCosts.put({
+    await cloudSetDoc('products', prodId, newProd);
+    await cloudSetDoc('productCosts', prodId, {
       productId: prodId,
       hpp: hppEst,
       updatedAt: now
     });
 
-    // Record Opening Balance Stock Movement so getDerivedStock matches 20
-    await StockService.recordMovement({
-      productId: prodId,
-      movementType: 'OPENING_BALANCE',
-      qty: initialStock,
-      unit: newProductUnit,
-      baseQty: initialStock,
-      referenceId: `quick_add_${prodId}`,
-      segmentId: newProductCategory === 'FISH' ? 'IKAN' : 'WARUNG',
-      reason: 'Stok Awal Tambah Produk Cepat (POS)',
-      costSnapshot: hppEst,
-      userId: currentUser?.userId || 'SYSTEM',
-      deviceId: deviceId,
-      timestamp: now
-    });
+    if (initialStock > 0) {
+      await StockService.recordMovement({
+        productId: prodId,
+        movementType: 'OPENING_BALANCE',
+        qty: initialStock,
+        unit: newProductUnit,
+        baseQty: initialStock,
+        referenceId: `quick_add_${prodId}`,
+        segmentId: newProductCategory === 'FISH' ? 'IKAN' : 'WARUNG',
+        reason: 'Stok Awal Tambah Produk Cepat (POS)',
+        costSnapshot: hppEst,
+        userId: currentUser?.userId || 'SYSTEM',
+        deviceId: deviceId,
+        timestamp: now
+      });
+    }
 
     const updatedProd = (await db.products.get(prodId)) || { ...newProd, stock: initialStock };
-
-    await db.syncQueue.add({
-      entityType: 'products',
-      entityId: prodId,
-      action: 'CREATE',
-      payload: updatedProd,
-      status: 'PENDING',
-      retryCount: 0,
-      createdAt: now
-    });
 
     // Auto add to cart
     addToCart(updatedProd);
@@ -1222,6 +1235,7 @@ export default function POS() {
     setNewProductName('');
     setNewProductBarcode('');
     setNewProductPrice('');
+    setNewProductStock('');
     setIsQuickAddProductOpen(false);
   };
 
@@ -2394,7 +2408,7 @@ export default function POS() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-3 gap-2">
                 <div>
                   <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
                     Kategori
@@ -2425,6 +2439,21 @@ export default function POS() {
                     <option value="DUS">DUS</option>
                     <option value="BUNGKUS">BUNGKUS</option>
                   </select>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                    Stok Awal
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    placeholder="0"
+                    value={newProductStock}
+                    onChange={(e) => setNewProductStock(e.target.value)}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold tabular-nums outline-none focus:border-blue-500"
+                  />
                 </div>
               </div>
             </div>

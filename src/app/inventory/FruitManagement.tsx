@@ -4,9 +4,10 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { useAuthStore } from '@/core/auth-store';
 import { useDeviceId } from '@/core/device-store';
 import { useToastStore } from '@/core/toast-store';
-import { FruitService, DEFAULT_FRUIT_SPECIES } from '@/core/services/fruit-service';
+import { FruitService } from '@/core/services/fruit-service';
 import { ProductService } from '@/core/services/product-service';
 import { FinanceService } from '@/core/services/finance-service';
+import { useFirestoreCollection, cloudSetDoc, cloudUpdateDoc } from '@/core/firestore-realtime';
 import type { Product } from '@/core/types';
 import { 
   Apple, 
@@ -20,16 +21,14 @@ import {
   ShoppingBag, 
   Wallet, 
   Search,
-  RefreshCw,
   X,
   CheckCircle,
   ArrowDownLeft,
-  ArrowUpRight,
-  ShieldCheck,
-  ShieldAlert
+  ArrowUpRight
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { v4 as uuidv4 } from 'uuid';
+import ConfirmModal from '@/app/components/ConfirmModal';
 
 export default function FruitManagement() {
   const { currentUser } = useAuthStore();
@@ -42,6 +41,8 @@ export default function FruitManagement() {
   const [isProcurementModalOpen, setIsProcurementModalOpen] = useState(false);
   const [isWasteModalOpen, setIsWasteModalOpen] = useState(false);
   const [isCashModalOpen, setIsCashModalOpen] = useState(false);
+  const [productToDelete, setProductToDelete] = useState<Product | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Add/Edit Form State
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -51,7 +52,7 @@ export default function FruitManagement() {
   const [formNormalPrice, setFormNormalPrice] = useState('');
   const [formHpp, setFormHpp] = useState('');
   const [formStock, setFormStock] = useState('');
-  const [formMinStock, setFormMinStock] = useState('10');
+  const [formMinStock, setFormMinStock] = useState('');
   const [formBaseUnit, setFormBaseUnit] = useState('KG');
 
   // Procurement Form State
@@ -75,31 +76,39 @@ export default function FruitManagement() {
   const [cashDesc, setCashDesc] = useState('');
   const [isSubmittingCash, setIsSubmittingCash] = useState(false);
 
+  // Sync Fruit Products with Cloud Firestore
+  const { data: cloudProducts } = useFirestoreCollection<Product>('products');
+
   // Live Query Fruit Products
-  const fruits = useLiveQuery(
-    () => db.products.filter(p => 
+  const localFruits = useLiveQuery(
+    () => db.products.filter(p => p.productType === 'FRUIT').toArray(),
+    []
+  );
+
+  const fruits = React.useMemo(() => {
+    const source = (cloudProducts && cloudProducts.length > 0) ? cloudProducts : (localFruits || []);
+    return source.filter(p =>
       p.productType === 'FRUIT' && Boolean(
         !search ||
         p.name.toLowerCase().includes(search.toLowerCase()) ||
-        p.barcode.includes(search) ||
+        (p.barcode && p.barcode.includes(search)) ||
         (p.sku && p.sku.toLowerCase().includes(search.toLowerCase()))
       )
-    ).toArray(),
-    [search]
-  );
+    );
+  }, [cloudProducts, localFruits, search]);
 
   // Live Query Fruit Ledger Balances & Summaries
-  const summary = useLiveQuery(() => FruitService.getFruitSummary(), []);
+  const summary = useLiveQuery(() => FruitService.getFruitSummary(), [fruits]);
 
   const openAddModal = () => {
     setEditingProduct(null);
     setFormName('');
-    setFormBarcode(Math.floor(100000 + Math.random() * 900000).toString());
-    setFormSku(`BUAH-${Date.now().toString().slice(-4)}`);
+    setFormBarcode('');
+    setFormSku('');
     setFormNormalPrice('');
     setFormHpp('');
-    setFormStock('0');
-    setFormMinStock('10');
+    setFormStock('');
+    setFormMinStock('');
     setFormBaseUnit('KG');
     setIsAddEditModalOpen(true);
   };
@@ -132,28 +141,35 @@ export default function FruitManagement() {
 
     try {
       const now = new Date().toISOString();
+      const minStockNum = formMinStock.trim() ? Number(formMinStock) : 0;
+
       if (editingProduct) {
-        // Update product
-        await db.products.update(editingProduct.productId, {
+        // Update product & sync to Firestore
+        await cloudUpdateDoc('products', editingProduct.productId, {
           name: formName.trim(),
           barcode: formBarcode.trim(),
           sku: formSku.trim() || undefined,
           normalPrice: price,
           hpp,
-          minimumStock: Number(formMinStock) || 5,
+          minimumStock: minStockNum,
           baseUnit: formBaseUnit,
           updatedAt: now
         });
-        await db.productCosts.put({
+        await cloudSetDoc('productCosts', editingProduct.productId, {
           productId: editingProduct.productId,
           hpp,
           updatedAt: now
         });
         addToast(`Produk buah ${formName} berhasil diperbarui!`, 'success');
       } else {
-        // Create product
-        const newId = `fruit_${uuidv4().slice(0, 8)}`;
+        // Create product & sync to Firestore
         const initialStockNum = Number(formStock) || 0;
+        if (initialStockNum > 0 && hpp <= 0) {
+          addToast('Stok awal buah (> 0) wajib memiliki Harga Modal / HPP lebih dari Rp 0.', 'error');
+          return;
+        }
+
+        const newId = `fruit_${uuidv4().slice(0, 8)}`;
         const newProduct: Product = {
           productId: newId,
           name: formName.trim(),
@@ -162,20 +178,20 @@ export default function FruitManagement() {
           categoryId: 'BUAH',
           productType: 'FRUIT',
           baseUnit: formBaseUnit,
-          saleUnits: ['KG', 'GRAM'],
-          conversionRules: [{ fromUnit: 'GRAM', toUnit: 'KG', factor: 0.001 }],
+          saleUnits: [formBaseUnit, ...(formBaseUnit === 'KG' ? ['GRAM'] : [])],
+          conversionRules: formBaseUnit === 'KG' ? [{ fromUnit: 'GRAM', toUnit: 'KG', factor: 0.001 }] : [],
           normalPrice: price,
           hpp,
-          stock: initialStockNum,
-          minimumStock: Number(formMinStock) || 5,
-          targetStock: (Number(formMinStock) || 5) * 3,
+          stock: 0,
+          minimumStock: minStockNum,
+          targetStock: minStockNum > 0 ? minStockNum * 3 : 0,
           status: 'ACTIVE',
           createdAt: now,
           updatedAt: now
         };
 
-        await db.products.put(newProduct);
-        await db.productCosts.put({
+        await cloudSetDoc('products', newId, newProduct);
+        await cloudSetDoc('productCosts', newId, {
           productId: newId,
           hpp,
           updatedAt: now
@@ -206,25 +222,18 @@ export default function FruitManagement() {
     }
   };
 
-  const handleDeleteProduct = async (product: Product) => {
-    if (!isOwner) {
-      addToast('Hanya OWNER yang diizinkan menghapus data produk buah.', 'error');
-      return;
+  const handleConfirmDelete = async () => {
+    if (!productToDelete) return;
+    setIsDeleting(true);
+    try {
+      await ProductService.deleteProduct(productToDelete.productId);
+      addToast(`Master buah ${productToDelete.name} berhasil dihapus.`, 'success');
+      setProductToDelete(null);
+    } catch (err: any) {
+      addToast(err.message || 'Gagal menghapus produk.', 'error');
+    } finally {
+      setIsDeleting(false);
     }
-
-    if (window.confirm(`Yakin ingin menghapus master data buah "${product.name}"? Data penjualan historis tetap tersimpan.`)) {
-      try {
-        await ProductService.deleteProduct(product.productId);
-        addToast(`Master buah ${product.name} berhasil dihapus.`, 'success');
-      } catch (err: any) {
-        addToast(err.message || 'Gagal menghapus produk.', 'error');
-      }
-    }
-  };
-
-  const handleSeedDefaults = async () => {
-    // USER REQUEST: No automatic seeding
-    addToast('Gunakan tombol + Tambah Buah untuk menambah katalog secara manual.', 'info');
   };
 
   const handleSubmitProcurement = async (e: React.FormEvent) => {
@@ -361,16 +370,6 @@ export default function FruitManagement() {
         <div className="flex flex-wrap items-center gap-2.5">
           <button
             type="button"
-            onClick={handleSeedDefaults}
-            className="px-3.5 py-2.5 bg-white/15 hover:bg-white/25 text-white rounded-xl text-xs font-bold flex items-center gap-2 border border-white/20 transition-all"
-            title="Muat Ulang Mangga Arum Manis & Jeruk Berastagi jika belum ada"
-          >
-            <RefreshCw size={14} />
-            <span>Reset Buah Bawaan</span>
-          </button>
-
-          <button
-            type="button"
             onClick={() => setIsCashModalOpen(true)}
             className="px-3.5 py-2.5 bg-white/15 hover:bg-white/25 text-white rounded-xl text-xs font-bold flex items-center gap-2 border border-white/20 transition-all"
             title="Kelola Saldo Kas Khusus Buah"
@@ -502,7 +501,7 @@ export default function FruitManagement() {
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={17} />
             <input 
               type="text"
-              placeholder="Cari Buah (Mangga, Jeruk, Barcode)..."
+              placeholder="Cari nama buah, SKU, atau barcode..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-emerald-500 outline-none shadow-sm"
@@ -602,7 +601,7 @@ export default function FruitManagement() {
                           {isOwner && (
                             <button
                               type="button"
-                              onClick={() => handleDeleteProduct(item)}
+                              onClick={() => setProductToDelete(item)}
                               className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
                               title="Hapus Buah (Owner Only)"
                             >
@@ -619,13 +618,13 @@ export default function FruitManagement() {
                   <td colSpan={10} className="py-12 text-center text-slate-400">
                     <Apple size={36} className="mx-auto mb-2 text-slate-300" />
                     <p className="font-bold text-sm text-slate-600">Belum ada katalog buah</p>
-                    <p className="text-xs text-slate-400 mt-1">Klik tombol "Reset Buah Bawaan" untuk memuat Mangga Arum Manis & Jeruk Berastagi.</p>
+                    <p className="text-xs text-slate-400 mt-1">Tambahkan produk buah secara manual menggunakan tombol &quot;+ Tambah Buah&quot;.</p>
                     <button
                       type="button"
-                      onClick={handleSeedDefaults}
-                      className="mt-4 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-sm"
+                      onClick={openAddModal}
+                      className="mt-4 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-sm cursor-pointer"
                     >
-                      Muat Mangga & Jeruk Sekarang
+                      + Tambah Buah
                     </button>
                   </td>
                 </tr>
@@ -661,7 +660,7 @@ export default function FruitManagement() {
                   <input
                     type="text"
                     required
-                    placeholder="Contoh: Mangga Arum Manis, Jeruk Berastagi..."
+                    placeholder="Masukkan nama buah..."
                     value={formName}
                     onChange={(e) => setFormName(e.target.value)}
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
@@ -673,7 +672,7 @@ export default function FruitManagement() {
                     <label className="block text-xs font-bold text-slate-700 mb-1">Barcode</label>
                     <input
                       type="text"
-                      required
+                      placeholder="Opsional / scan barcode"
                       value={formBarcode}
                       onChange={(e) => setFormBarcode(e.target.value)}
                       className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-medium focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
@@ -685,7 +684,7 @@ export default function FruitManagement() {
                       type="text"
                       value={formSku}
                       onChange={(e) => setFormSku(e.target.value)}
-                      placeholder="BUAH-001"
+                      placeholder="Opsional (misal: BUAH-001)"
                       className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-medium focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
                     />
                   </div>
@@ -698,7 +697,7 @@ export default function FruitManagement() {
                       type="number"
                       required
                       min="0"
-                      placeholder="20000"
+                      placeholder="0"
                       value={formHpp}
                       onChange={(e) => setFormHpp(e.target.value)}
                       className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold tabular-nums focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
@@ -710,7 +709,7 @@ export default function FruitManagement() {
                       type="number"
                       required
                       min="0"
-                      placeholder="28000"
+                      placeholder="0"
                       value={formNormalPrice}
                       onChange={(e) => setFormNormalPrice(e.target.value)}
                       className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-emerald-700 tabular-nums focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
@@ -1086,6 +1085,15 @@ export default function FruitManagement() {
           </div>
         )}
       </AnimatePresence>
+      <ConfirmModal
+        isOpen={Boolean(productToDelete)}
+        onClose={() => setProductToDelete(null)}
+        onConfirm={handleConfirmDelete}
+        isProcessing={isDeleting}
+        title="Hapus Master Buah?"
+        message={productToDelete ? `Yakin ingin menghapus master data buah "${productToDelete.name}"? Data penjualan historis tetap tersimpan, namun produk ini tidak akan muncul lagi di POS atau katalog.` : ''}
+        confirmText="Ya, Hapus"
+      />
     </div>
   );
 }

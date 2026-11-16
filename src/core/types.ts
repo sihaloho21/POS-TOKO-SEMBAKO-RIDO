@@ -133,6 +133,7 @@ export interface TransactionItem {
   subtotal: number;
   hppSnapshot?: number; 
   isBundle?: boolean;
+  isConsignment?: boolean;
   bundleComponentsSnapshot?: TransactionBundleComponentSnapshot[];
 }
 
@@ -451,6 +452,8 @@ export interface DigitalService {
   total: number;
   providerReference?: string;
   status: 'PENDING' | 'SUCCESS' | 'FAILED';
+  createdAt?: string;
+  timestamp?: string;
 }
 
 export interface PaymentMethod {
@@ -526,7 +529,7 @@ export interface PayLaterInstallment {
   dueDate: string;
   status: 'PENDING' | 'PAID';
   paidAt?: string;
-  moneyStorageId?: 'WARUNG' | 'IKAN' | 'UANG_DIGITAL';
+  moneyStorageId?: MoneyStorageId;
   financeEventId?: string;
 }
 

@@ -268,11 +268,23 @@ export default function Finance() {
 
     let serviceRevenue = 0;
     let operationalExpense = 0;
+    const nonExpensePrefixes = [
+      'Saldo Digital Keluar:',
+      'Penyerahan Tunai: Tarik Tunai',
+      'Kulakan Buah:',
+      'Setoran Barang Titipan:',
+      'Bayar Cicilan SPayLater',
+      'Pemberian Kasbon Karyawan'
+    ];
     for (const fe of allFinanceEvents) {
       if (fe.referenceType === 'SERVICE_REVENUE' && fe.direction === 'IN') {
         serviceRevenue += Number(fe.amount || 0);
       } else if (fe.referenceType === 'EXPENSE' && fe.direction === 'OUT') {
-        operationalExpense += Number(fe.amount || 0);
+        const desc = fe.description || '';
+        const isLegacyNonExpense = nonExpensePrefixes.some(prefix => desc.startsWith(prefix));
+        if (!isLegacyNonExpense) {
+          operationalExpense += Number(fe.amount || 0);
+        }
       }
     }
 
@@ -287,14 +299,15 @@ export default function Finance() {
     for (const m of movements) {
       const qty = m.baseQty || m.qty || 0;
       const cost = m.costSnapshot || 0;
+      const isLossMovement = ['DAMAGED_OUT', 'LOST_OUT', 'EXPIRED_OUT'].includes(m.movementType);
 
       if (m.movementType === 'FISH_DEAD_OUT' || (m.segmentId === 'IKAN' && m.reason?.toLowerCase().includes('ikan mati'))) {
         fishDeathLossKg += qty;
         fishDeathLossRp += (qty * cost);
-      } else if (m.segmentId === 'BUAH' || m.reason?.toLowerCase().includes('buah')) {
+      } else if (isLossMovement && (m.segmentId === 'BUAH' || m.reason?.toLowerCase().includes('buah'))) {
         fruitLossKg += qty;
         fruitLossRp += (qty * cost);
-      } else if (['DAMAGED_OUT', 'LOST_OUT', 'EXPIRED_OUT'].includes(m.movementType)) {
+      } else if (isLossMovement) {
         otherLossRp += (qty * cost);
       }
     }

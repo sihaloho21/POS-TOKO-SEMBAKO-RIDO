@@ -194,7 +194,7 @@ export class ConsignmentService {
         storageId: selectedStorage,
         direction: 'OUT',
         referenceId: params.itemId,
-        referenceType: 'EXPENSE',
+        referenceType: 'PURCHASE',
         description: `Setoran Barang Titipan: ${item.name} (${soldQty} terjual @ Rp${item.costPrice.toLocaleString()}) [${storageLabel}]`,
         userId: params.userId,
         deviceId: params.deviceId,

@@ -1,9 +1,10 @@
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '../database';
-import type { PayLaterBill, PayLaterInstallment, FinanceEvent } from '../types';
+import type { PayLaterBill, PayLaterInstallment, FinanceEvent, MoneyStorageId } from '../types';
 import { FinanceService } from './finance-service';
 import { AuditEngine } from '../audit-engine';
 import { addMonths, setDate } from 'date-fns';
+import { cloudSetDoc } from '../firestore-realtime';
 
 export class PayLaterService {
   /**
@@ -72,7 +73,7 @@ export class PayLaterService {
    */
   static async payInstallment(params: {
     installmentId: string;
-    moneyStorageId: 'WARUNG' | 'IKAN' | 'UANG_DIGITAL';
+    moneyStorageId: MoneyStorageId;
     userId: string;
     role: string;
     deviceId: string;
@@ -87,42 +88,36 @@ export class PayLaterService {
     const now = new Date().toISOString();
     const financeEventId = uuidv4();
 
-    await db.transaction('rw', [
-      db.payLaterInstallments, 
-      db.payLaterBills,
-      db.financeEvents, 
-      db.auditLogs, 
-      db.syncQueue
-    ], async () => {
-      // 1. Mark installment as PAID
-      await db.payLaterInstallments.update(params.installmentId, {
-        status: 'PAID',
-        paidAt: now,
-        moneyStorageId: params.moneyStorageId,
-        financeEventId
-      });
+    const updatedInstallment = {
+      ...inst,
+      status: 'PAID' as const,
+      paidAt: now,
+      moneyStorageId: params.moneyStorageId,
+      financeEventId
+    };
 
-      // 2. Record Finance Outflow
-      const financeEvent: FinanceEvent = {
-        financeEventId,
-        amount: inst.amount,
-        storageId: params.moneyStorageId,
-        direction: 'OUT',
-        referenceId: params.installmentId,
-        referenceType: 'EXPENSE', // Or a new type if we want to be specific
-        description: `Bayar Cicilan SPayLater Faktur Purchase #${bill.purchaseId.slice(0, 8)}`,
-        userId: params.userId,
-        deviceId: params.deviceId,
-        timestamp: now
-      };
+    const financeEvent: FinanceEvent = {
+      financeEventId,
+      amount: inst.amount,
+      storageId: params.moneyStorageId,
+      direction: 'OUT',
+      referenceId: params.installmentId,
+      referenceType: 'PURCHASE',
+      description: `Bayar Cicilan SPayLater Faktur Purchase #${bill.purchaseId.slice(0, 8)}`,
+      userId: params.userId,
+      deviceId: params.deviceId,
+      timestamp: now
+    };
+
+    await db.transaction('rw', [db.payLaterInstallments, db.payLaterBills, db.financeEvents, db.auditLogs, db.syncQueue], async () => {
+      await db.payLaterInstallments.update(params.installmentId, updatedInstallment);
       await db.financeEvents.add(financeEvent);
 
-      // 3. Audit Log
-      await AuditEngine.log({
-        userId: params.userId,
-        role: params.role,
-        deviceId: params.deviceId,
-        action: 'PAYLATER_INSTALLMENT_PAID',
+    await AuditEngine.log({
+      userId: params.userId,
+      role: params.role,
+      deviceId: params.deviceId,
+      action: 'PAYLATER_INSTALLMENT_PAID',
         module: 'FINANCE',
         referenceId: params.installmentId,
         after: { installment: inst, storage: params.moneyStorageId }
@@ -147,5 +142,8 @@ export class PayLaterService {
         createdAt: now
       });
     });
+
+    await cloudSetDoc('payLaterInstallments', params.installmentId, updatedInstallment).catch(() => {});
+    await cloudSetDoc('financeEvents', financeEventId, financeEvent).catch(() => {});
   }
 }

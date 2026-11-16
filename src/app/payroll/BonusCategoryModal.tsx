@@ -7,6 +7,8 @@ import { useToastStore } from '@/core/toast-store';
 import type { BonusCategory } from '@/core/types';
 import { useFirestoreCollection } from '@/core/firestore-realtime';
 
+import ConfirmModal from '@/app/components/ConfirmModal';
+
 interface BonusCategoryModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -17,6 +19,8 @@ export function BonusCategoryModal({ isOpen, onClose }: BonusCategoryModalProps)
   const [newCatName, setNewCatName] = useState('');
   const [newCatDesc, setNewCatDesc] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [catToDelete, setCatToDelete] = useState<BonusCategory | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Realtime Cloud Firestore for Bonus Categories
   const { data: cloudCategories } = useFirestoreCollection<BonusCategory>('bonusCategories');
@@ -64,18 +68,17 @@ export function BonusCategoryModal({ isOpen, onClose }: BonusCategoryModalProps)
     }
   };
 
-  const handleDelete = async (cat: BonusCategory) => {
-    if (cat.isSystem) {
-      addToast('Kategori default sistem tidak dapat dihapus, hanya bisa dinonaktifkan', 'warning');
-      return;
-    }
-    if (!confirm(`Hapus kategori bonus "${cat.name}"?`)) return;
-
+  const handleConfirmDelete = async () => {
+    if (!catToDelete) return;
+    setIsDeleting(true);
     try {
-      await PayrollService.deleteCategory(cat.id);
+      await PayrollService.deleteCategory(catToDelete.id);
       addToast('Kategori bonus berhasil dihapus', 'success');
+      setCatToDelete(null);
     } catch (err: any) {
       addToast('Gagal menghapus kategori', 'error');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -194,7 +197,7 @@ export function BonusCategoryModal({ isOpen, onClose }: BonusCategoryModalProps)
                     {!cat.isSystem && (
                       <button
                         type="button"
-                        onClick={() => handleDelete(cat)}
+                        onClick={() => setCatToDelete(cat)}
                         title="Hapus Kategori"
                         className="p-1.5 rounded-lg border border-rose-200 bg-rose-50 text-rose-600 hover:bg-rose-100 transition-colors"
                       >
@@ -219,6 +222,16 @@ export function BonusCategoryModal({ isOpen, onClose }: BonusCategoryModalProps)
           </button>
         </div>
       </div>
+
+      <ConfirmModal
+        isOpen={Boolean(catToDelete)}
+        onClose={() => setCatToDelete(null)}
+        onConfirm={handleConfirmDelete}
+        isProcessing={isDeleting}
+        title="Hapus Kategori Bonus?"
+        message={catToDelete ? `Hapus kategori bonus "${catToDelete.name}"? Kategori yang sudah pernah digunakan dalam catatan penggajian historis sebaiknya dinonaktifkan saja daripada dihapus.` : ''}
+        confirmText="Ya, Hapus"
+      />
     </div>
   );
 }

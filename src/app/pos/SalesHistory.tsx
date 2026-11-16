@@ -126,9 +126,9 @@ export function SalesHistory() {
       await TransactionEngine.voidTransaction(txId, currentUser.userId, 'device-1', voidReason);
       setIsVoiding(null);
       setVoidReason('');
-      alert('Transaksi berhasil di-void.');
+      addToast('Transaksi berhasil dibatalkan (void).', 'success');
     } catch (err: any) {
-      alert('Gagal void: ' + err.message);
+      addToast('Gagal membatalkan transaksi: ' + err.message, 'error');
     }
   };
 

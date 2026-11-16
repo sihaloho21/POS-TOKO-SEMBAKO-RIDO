@@ -25,7 +25,8 @@ import {
   Scale,
   Camera,
   X,
-  Layers
+  Layers,
+  RotateCcw
 } from 'lucide-react';
 import { CameraBarcodeScanner } from '@/components/CameraBarcodeScanner';
 import { useToastStore } from '@/core/toast-store';
@@ -39,6 +40,7 @@ import { StockAdjustmentModal } from './StockAdjustmentModal';
 import { InventoryHeatmap } from './InventoryHeatmap';
 import { ShelfTalkerModule } from './ShelfTalkerModule';
 import { useAuthStore } from '@/core/auth-store';
+import { DataResetService } from '@/core/services/data-reset-service';
 
 import { QRLabelModal } from './QRLabelModal';
 import { BulkBarcodeModal } from './BulkBarcodeModal';
@@ -73,6 +75,12 @@ export default function Inventory() {
   const [viewingConversionProduct, setViewingConversionProduct] = useState<Product | null>(null);
   const [isAdjustmentOpen, setIsAdjustmentOpen] = useState(false);
   const [adjustmentProductId, setAdjustmentProductId] = useState<string | undefined>(undefined);
+
+  // Inventory Reset State (Owner Only)
+  const [showResetAllModal, setShowResetAllModal] = useState(false);
+  const [resetConfirmWord, setResetConfirmWord] = useState('');
+  const [keepOpeningBalance, setKeepOpeningBalance] = useState(true);
+  const [isResetting, setIsResetting] = useState(false);
   
   const { data: cloudProducts } = useFirestoreCollection<Product>('products');
   const localProducts = useLiveQuery(() => db.products.toArray(), []);
@@ -235,6 +243,31 @@ export default function Inventory() {
     await ProductService.toggleStatus(productId);
   };
 
+  const handleResetAll = async () => {
+    if (!currentUser || !isOwner) return;
+    if (resetConfirmWord !== 'RESET STOK') {
+      addToast('Ketik "RESET STOK" persis untuk konfirmasi.', 'error');
+      return;
+    }
+
+    setIsResetting(true);
+    try {
+      const res = await DataResetService.resetInventoryStock(
+        keepOpeningBalance,
+        currentUser.userId,
+        currentUser.role,
+        'LOCAL'
+      );
+      addToast(res.message, 'success');
+      setShowResetAllModal(false);
+      setResetConfirmWord('');
+    } catch (err: any) {
+      addToast(err.message || 'Gagal me-reset stok inventaris.', 'error');
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -294,6 +327,19 @@ export default function Inventory() {
             <Barcode size={18} />
             Bulk Barcodes
           </button>
+          {isOwner && (
+            <button 
+              onClick={() => {
+                setResetConfirmWord('');
+                setShowResetAllModal(true);
+              }}
+              className="flex items-center gap-2 px-4 py-2 bg-rose-50 border border-rose-200 text-rose-600 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-rose-100 transition-all shadow-xs cursor-pointer"
+              title="Reset seluruh riwayat mutasi stok (Persiapan Rilis Resmi)"
+            >
+              <RotateCcw size={18} />
+              Reset Stok
+            </button>
+          )}
           <button 
             onClick={handleAdd}
             className="flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-xl font-black text-xs uppercase tracking-widest hover:bg-blue-500 transition-all shadow-lg shadow-blue-200"
@@ -493,7 +539,7 @@ export default function Inventory() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {products?.map((product) => (
+                {products && products.length > 0 ? products.map((product) => (
                   <React.Fragment key={product.productId}>
                     <tr className={`hover:bg-slate-50/50 transition-colors group ${selectedIds.includes(product.productId) ? 'bg-blue-50/30' : ''} ${viewingHistoryId === product.productId ? 'bg-slate-50' : ''}`}>
                       <td className="px-6 py-4">
@@ -643,7 +689,19 @@ export default function Inventory() {
                       </tr>
                     )}
                   </React.Fragment>
-                ))}
+                )) : (
+                  <tr>
+                    <td colSpan={7} className="px-6 py-16 text-center text-slate-400">
+                      <Package size={40} className="mx-auto mb-3 text-slate-300" />
+                      <p className="text-sm font-black text-slate-600 uppercase tracking-tight">
+                        Belum Ada Produk di Inventori
+                      </p>
+                      <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto">
+                        Daftar produk kosong. Tambahkan produk secara manual melalui tombol &quot;+ Tambah Produk&quot; atau gunakan fitur Import CSV.
+                      </p>
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -992,6 +1050,70 @@ export default function Inventory() {
           label: p.name.length > 16 ? p.name.slice(0, 16) + '...' : p.name
         })) || []}
       />
+
+      {/* Inventory Reset Modal */}
+      {showResetAllModal && (
+        <div className="fixed inset-0 z-[200] bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-rose-200 animate-in zoom-in-95">
+            <h3 className="font-black text-rose-600 text-base uppercase tracking-tight mb-2">
+              Reset Riwayat Mutasi Stok
+            </h3>
+            <p className="text-xs text-slate-600 mb-4 leading-relaxed">
+              Tindakan ini untuk membersihkan data percobaan sebelum rilis resmi. Semua catatan mutasi stok akan dihapus.
+            </p>
+
+            <div className="space-y-4 mb-6">
+              <label className="flex items-center gap-3 p-4 bg-slate-50 rounded-2xl border border-slate-100 cursor-pointer hover:bg-white transition-all">
+                <input
+                  type="checkbox"
+                  checked={keepOpeningBalance}
+                  onChange={(e) => setKeepOpeningBalance(e.target.checked)}
+                  className="w-5 h-5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                />
+                <div>
+                  <p className="text-xs font-black text-slate-900 uppercase">Pertahankan Stok Awal (Opening Balance)</p>
+                  <p className="text-[10px] text-slate-500 font-medium">Jangan hapus saldo awal yang diinput saat tambah produk baru.</p>
+                </div>
+              </label>
+
+              <div className="p-4 bg-rose-50 rounded-2xl border border-rose-100">
+                <label className="text-[10px] font-black text-rose-800 uppercase tracking-widest block mb-2">
+                  Ketik "RESET STOK" untuk konfirmasi:
+                </label>
+                <input
+                  type="text"
+                  value={resetConfirmWord}
+                  onChange={(e) => setResetConfirmWord(e.target.value)}
+                  placeholder="RESET STOK"
+                  className="w-full bg-white border border-rose-200 rounded-xl px-3 py-2.5 text-sm font-black uppercase text-rose-700 tracking-widest focus:outline-none focus:ring-2 focus:ring-rose-400"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowResetAllModal(false);
+                  setResetConfirmWord('');
+                }}
+                disabled={isResetting}
+                className="flex-1 py-3 font-bold text-xs uppercase tracking-wider text-slate-500 hover:bg-slate-100 rounded-xl cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleResetAll}
+                disabled={isResetting || resetConfirmWord !== 'RESET STOK'}
+                className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-rose-200 disabled:opacity-50 cursor-pointer"
+              >
+                {isResetting ? 'Mereset...' : 'Reset Sekarang'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

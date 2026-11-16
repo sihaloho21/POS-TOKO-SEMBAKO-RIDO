@@ -5,6 +5,7 @@ import { StockOpnameService } from '@/core/services/stock-opname-service';
 import { useAuthStore } from '@/core/auth-store';
 import { useDeviceId } from '@/core/device-store';
 import { useToastStore } from '@/core/toast-store';
+import { DataResetService } from '@/core/services/data-reset-service';
 import type { StockOpname as StockOpnameType } from '@/core/types';
 import { 
   ClipboardList, 
@@ -17,7 +18,8 @@ import {
   Search,
   ShieldCheck,
   X,
-  Camera
+  Camera,
+  RotateCcw
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
@@ -35,6 +37,31 @@ export default function StockOpname() {
   const [pinError, setPinError] = useState('');
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
+
+  // Reset State (Owner Only)
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [resetConfirmWord, setResetConfirmWord] = useState('');
+  const [isResetting, setIsResetting] = useState(false);
+
+  const handleResetHistory = async () => {
+    if (!currentUser || currentUser.role !== 'OWNER') return;
+    if (resetConfirmWord !== 'RESET OPNAME') {
+      addToast('Ketik "RESET OPNAME" persis untuk konfirmasi.', 'error');
+      return;
+    }
+
+    setIsResetting(true);
+    try {
+      const res = await DataResetService.resetAllStockOpnames(currentUser.userId, currentUser.role, deviceId);
+      addToast(res.message, 'success');
+      setShowResetModal(false);
+      setResetConfirmWord('');
+    } catch (err: any) {
+      addToast(err.message || 'Gagal mereset histori opname.', 'error');
+    } finally {
+      setIsResetting(false);
+    }
+  };
   
   const opnames = useLiveQuery(() => db.stockOpnames.orderBy('createdAt').reverse().toArray());
   const products = useLiveQuery(() => db.products.toArray());
@@ -106,13 +133,28 @@ export default function StockOpname() {
           <p className="text-slate-500 text-sm font-medium">Verifikasi stok fisik dan sesuaikan perbedaan sistem.</p>
         </div>
         {!isCreating && (
-          <button 
-            onClick={handleStart}
-            className="flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-xl font-black text-xs uppercase tracking-widest hover:bg-blue-500 transition-all shadow-lg shadow-blue-200"
-          >
-            <Plus size={18} />
-            Mulai Opname Baru
-          </button>
+          <div className="flex gap-2">
+            {currentUser?.role === 'OWNER' && (
+              <button 
+                onClick={() => {
+                  setResetConfirmWord('');
+                  setShowResetModal(true);
+                }}
+                className="flex items-center gap-2 px-4 py-2 bg-rose-50 border border-rose-200 text-rose-600 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-rose-100 transition-all shadow-xs cursor-pointer"
+                title="Hapus seluruh riwayat stock opname (Persiapan Rilis Resmi)"
+              >
+                <RotateCcw size={18} />
+                Reset Histori
+              </button>
+            )}
+            <button 
+              onClick={handleStart}
+              className="flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-xl font-black text-xs uppercase tracking-widest hover:bg-blue-500 transition-all shadow-lg shadow-blue-200"
+            >
+              <Plus size={18} />
+              Mulai Opname Baru
+            </button>
+          </div>
         )}
       </div>
 
@@ -396,6 +438,53 @@ export default function StockOpname() {
             }
           }}
         />
+      )}
+
+      {/* Reset Opname History Modal */}
+      {showResetModal && (
+        <div className="fixed inset-0 z-[280] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-rose-200 animate-in zoom-in-95">
+            <h3 className="font-black text-rose-600 text-base uppercase tracking-tight mb-2">
+              Reset Seluruh Histori Opname
+            </h3>
+            <p className="text-xs text-slate-600 mb-4 leading-relaxed">
+              Tindakan ini akan menghapus permanen semua riwayat stock opname terdahulu. Hanya untuk persiapan rilis resmi.
+            </p>
+            <div className="p-4 bg-rose-50 rounded-2xl border border-rose-100 mb-5">
+              <label className="text-[10px] font-black text-rose-800 uppercase tracking-widest block mb-1.5">
+                Ketik "RESET OPNAME" untuk konfirmasi:
+              </label>
+              <input
+                type="text"
+                value={resetConfirmWord}
+                onChange={(e) => setResetConfirmWord(e.target.value)}
+                placeholder="RESET OPNAME"
+                className="w-full bg-white border border-rose-200 rounded-xl px-3 py-2 text-sm font-black uppercase text-rose-700 tracking-wider focus:outline-none focus:ring-2 focus:ring-rose-400"
+              />
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowResetModal(false);
+                  setResetConfirmWord('');
+                }}
+                disabled={isResetting}
+                className="flex-1 py-3 font-bold text-xs uppercase tracking-wider text-slate-500 hover:bg-slate-100 rounded-xl cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleResetHistory}
+                disabled={isResetting || resetConfirmWord !== 'RESET OPNAME'}
+                className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-rose-200 disabled:opacity-50 cursor-pointer"
+              >
+                {isResetting ? 'Mereset...' : 'Reset Sekarang'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

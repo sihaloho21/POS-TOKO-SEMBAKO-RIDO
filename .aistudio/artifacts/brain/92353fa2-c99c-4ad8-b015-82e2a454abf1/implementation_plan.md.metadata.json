@@ -1,6 +1,0 @@
-{
-  "summary":  "Rencana implementasi transisi arsitektur Toko Harapan Jaya dari Local-First Sync Queue ke Realtime Cloud-First Firestore Database (Zero Interval, Realtime onSnapshot Multi-Device).",
-  "updatedAt":  "2026-10-31T08:28:27.751035749Z",
-  "requestFeedback":  true,
-  "userFacing":  true
-}

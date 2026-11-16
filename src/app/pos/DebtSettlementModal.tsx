@@ -5,6 +5,8 @@ import { TransactionEngine } from '@/core/transaction-engine';
 import { X, CreditCard, CheckCircle2, Loader2, Wallet } from 'lucide-react';
 import { format } from 'date-fns';
 
+import { useToastStore } from '@/core/toast-store';
+
 interface DebtSettlementModalProps {
   customerId: string;
   cashierId: string;
@@ -13,6 +15,7 @@ interface DebtSettlementModalProps {
 }
 
 export function DebtSettlementModal({ customerId, cashierId, shiftId, onClose }: DebtSettlementModalProps) {
+  const { addToast } = useToastStore();
   const [amount, setAmount] = useState<number>(0);
   const [selectedReceivableId, setSelectedReceivableId] = useState<string | null>(null);
   const [moneyStorageId, setMoneyStorageId] = useState<'WARUNG' | 'IKAN' | 'UANG_DIGITAL'>('WARUNG');
@@ -43,10 +46,11 @@ export function DebtSettlementModal({ customerId, cashierId, shiftId, onClose }:
         paymentMethodId: 'CASH',
         moneyStorageId
       });
+      addToast('Pelunasan berhasil diproses.', 'success');
       onClose();
     } catch (error) {
       console.error('Settlement failed:', error);
-      alert('Gagal memproses pelunasan.');
+      addToast('Gagal memproses pelunasan.', 'error');
     } finally {
       setIsProcessing(false);
     }

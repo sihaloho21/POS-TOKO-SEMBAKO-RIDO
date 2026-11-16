@@ -37,6 +37,7 @@ import {
   DollarSign
 } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
+import ConfirmModal from '@/app/components/ConfirmModal';
 
 interface ServiceTabMeta {
   type: DigitalServiceType;
@@ -112,6 +113,7 @@ export default function DigitalFeeSettings() {
 
   // Live Simulation Test State
   const [simTestNominal, setSimTestNominal] = useState<number>(75000);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
 
   // Load from Dexie settings when query resolves
   useEffect(() => {
@@ -227,17 +229,16 @@ export default function DigitalFeeSettings() {
   };
 
   // Reset to recommended defaults
-  const handleResetDefaults = () => {
-    if (confirm(`Kembalikan pengaturan tarif ${currentConfig.label} ke rekomendasi default toko?`)) {
-      setFormData(prev => ({
-        ...prev,
-        configs: {
-          ...prev.configs,
-          [activeService]: DEFAULT_DIGITAL_FEE_SETTINGS.configs[activeService]
-        }
-      }));
-      addToast(`Tarif ${currentConfig.label} dikembalikan ke default.`, 'info');
-    }
+  const handleConfirmResetDefaults = () => {
+    setFormData(prev => ({
+      ...prev,
+      configs: {
+        ...prev.configs,
+        [activeService]: DEFAULT_DIGITAL_FEE_SETTINGS.configs[activeService]
+      }
+    }));
+    addToast(`Tarif ${currentConfig.label} dikembalikan ke default.`, 'info');
+    setShowResetConfirm(false);
   };
 
   // Save Settings to Dexie & Firestore
@@ -516,7 +517,7 @@ export default function DigitalFeeSettings() {
                 </button>
                 <button
                   type="button"
-                  onClick={handleResetDefaults}
+                  onClick={() => setShowResetConfirm(true)}
                   className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold transition-colors"
                   title="Kembalikan ke default"
                 >
@@ -766,6 +767,14 @@ export default function DigitalFeeSettings() {
           </div>
         </div>
       </div>
+      <ConfirmModal
+        isOpen={showResetConfirm}
+        onClose={() => setShowResetConfirm(false)}
+        onConfirm={handleConfirmResetDefaults}
+        title="Reset ke Default?"
+        message={`Kembalikan pengaturan tarif ${currentConfig.label} ke rekomendasi default toko? Seluruh penyesuaian tier atau flat fee Anda untuk layanan ini akan hilang.`}
+        variant="warning"
+      />
     </div>
   );
 }

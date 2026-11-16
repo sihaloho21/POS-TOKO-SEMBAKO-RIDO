@@ -31,6 +31,7 @@ import {
   Table as TableIcon
 } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
+import ConfirmModal from '@/app/components/ConfirmModal';
 
 const COLOR_SCHEME_OPTIONS: { id: MemberTierColorScheme; label: string; badgeClass: string; borderClass: string; bgSoft: string }[] = [
   { id: 'BRONZE', label: 'Bronze Amber', badgeClass: 'bg-amber-800/15 text-amber-900 border-amber-600/40', borderClass: 'border-l-amber-700', bgSoft: 'bg-amber-50' },
@@ -62,6 +63,21 @@ export default function LoyaltySettings() {
   // Simulation calculator states
   const [simSpend, setSimSpend] = useState<number>(100000);
   const [simPointsToRedeem, setSimPointsToRedeem] = useState<number>(50);
+
+  // Confirmation Modal State
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+    variant: 'danger' | 'warning' | 'info';
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: () => {},
+    variant: 'danger'
+  });
 
   // Sync state when database loads
   useEffect(() => {
@@ -133,13 +149,21 @@ export default function LoyaltySettings() {
       return;
     }
     const targetTier = formData.tiers.find(t => t.id === tierId);
-    if (!confirm(`Hapus tingkatan member tier "${targetTier?.name || 'ini'}"?`)) return;
-
-    setFormData(prev => ({
-      ...prev,
-      tiers: prev.tiers.filter(t => t.id !== tierId)
-    }));
-    addToast('Tingkatan tier telah dihapus.', 'info');
+    
+    setConfirmModal({
+      isOpen: true,
+      title: 'Hapus Member Tier?',
+      message: `Hapus tingkatan member tier "${targetTier?.name || 'ini'}"? Pelanggan yang berada di tier ini mungkin akan turun ke tier di bawahnya.`,
+      variant: 'danger',
+      onConfirm: () => {
+        setFormData(prev => ({
+          ...prev,
+          tiers: prev.tiers.filter(t => t.id !== tierId)
+        }));
+        addToast('Tingkatan tier telah dihapus.', 'info');
+        setConfirmModal(prev => ({ ...prev, isOpen: false }));
+      }
+    });
   };
 
   const handleSortTiers = () => {
@@ -151,14 +175,20 @@ export default function LoyaltySettings() {
   };
 
   const handleResetTiersToDefault = () => {
-    if (!confirm('Muat ulang daftar tingkatan member tier ke standar (Bronze, Silver, Gold, Platinum)?')) {
-      return;
-    }
-    setFormData(prev => ({
-      ...prev,
-      tiers: DEFAULT_MEMBER_TIERS
-    }));
-    addToast('Daftar member tier dikembalikan ke preset standar.', 'info');
+    setConfirmModal({
+      isOpen: true,
+      title: 'Muat Ulang Tier Standar?',
+      message: 'Muat ulang daftar tingkatan member tier ke standar (Bronze, Silver, Gold, Platinum)? Data tier yang Anda buat sendiri akan terhapus.',
+      variant: 'warning',
+      onConfirm: () => {
+        setFormData(prev => ({
+          ...prev,
+          tiers: DEFAULT_MEMBER_TIERS
+        }));
+        addToast('Daftar member tier dikembalikan ke preset standar.', 'info');
+        setConfirmModal(prev => ({ ...prev, isOpen: false }));
+      }
+    });
   };
 
   const handleAddPerk = (tierId: string) => {
@@ -218,19 +248,25 @@ export default function LoyaltySettings() {
   };
 
   const handleReset = async () => {
-    if (!confirm('Kembalikan seluruh aturan loyalty & membership ke konfigurasi awal bawaan toko?')) {
-      return;
-    }
-    setIsSaving(true);
-    try {
-      const resetDoc = await LoyaltySettingsService.resetToDefaults(currentUser?.userId || 'OWNER');
-      setFormData(resetDoc);
-      addToast('Pengaturan loyalty & membership berhasil dikembalikan ke nilai awal.', 'info');
-    } catch (err: any) {
-      addToast(err?.message || 'Gagal mengembalikan pengaturan.', 'error');
-    } finally {
-      setIsSaving(false);
-    }
+    setConfirmModal({
+      isOpen: true,
+      title: 'Kembalikan Semua Pengaturan?',
+      message: 'Kembalikan seluruh aturan loyalty & membership ke konfigurasi awal bawaan toko? Seluruh perubahan Anda akan hilang.',
+      variant: 'danger',
+      onConfirm: async () => {
+        setIsSaving(true);
+        setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        try {
+          const resetDoc = await LoyaltySettingsService.resetToDefaults(currentUser?.userId || 'OWNER');
+          setFormData(resetDoc);
+          addToast('Pengaturan loyalty & membership berhasil dikembalikan ke nilai awal.', 'info');
+        } catch (err: any) {
+          addToast(err?.message || 'Gagal mengembalikan pengaturan.', 'error');
+        } finally {
+          setIsSaving(false);
+        }
+      }
+    });
   };
 
   // Calculations for interactive simulation preview
@@ -1023,6 +1059,15 @@ export default function LoyaltySettings() {
           {isSaving ? 'Menyimpan...' : 'Simpan Semua Pengaturan'}
         </button>
       </div>
+      <ConfirmModal
+        isOpen={confirmModal.isOpen}
+        onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+        onConfirm={confirmModal.onConfirm}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        variant={confirmModal.variant}
+        isProcessing={isSaving}
+      />
     </div>
   );
 }

@@ -35,6 +35,7 @@ import { OrderScheduleCard } from './OrderScheduleCard';
 import { OrderScheduleModal } from './OrderScheduleModal';
 import { OrderScheduleTicketModal } from './OrderScheduleTicketModal';
 import type { PrepOrder, PrepOrderStatus, ScheduleCategory, ScheduleFulfillmentType } from '@/core/types';
+import ConfirmModal from '@/app/components/ConfirmModal';
 
 export function OrderScheduleManagement() {
   const { currentUser } = useAuthStore();
@@ -65,6 +66,7 @@ export function OrderScheduleManagement() {
   const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
   const [showResetAllModal, setShowResetAllModal] = useState(false);
   const [resetConfirmWord, setResetConfirmWord] = useState('');
+  const [orderToDelete, setOrderToDelete] = useState<string | null>(null);
 
   // Modals state
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -240,16 +242,18 @@ export function OrderScheduleManagement() {
     }
   };
 
-  const handleDeleteOrder = async (orderId: string) => {
-    if (!window.confirm('Apakah Anda yakin ingin menghapus jadwal pesanan ini?')) {
-      return;
-    }
+  const handleConfirmDeleteOrder = async () => {
+    if (!orderToDelete) return;
+    setIsDeleting(true);
     try {
-      await PrepOrderService.deleteOrder(orderId);
+      await PrepOrderService.deleteOrder(orderToDelete);
       addToast('Jadwal pesanan berhasil dihapus', 'success');
+      setOrderToDelete(null);
     } catch (err) {
       console.error(err);
       addToast('Gagal menghapus pesanan', 'error');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -681,7 +685,7 @@ export function OrderScheduleManagement() {
                       order={order}
                       onEdit={handleOpenEditModal}
                       onPrint={handleOpenPrintModal}
-                      onDelete={handleDeleteOrder}
+                      onDelete={(id) => setOrderToDelete(id)}
                       onStatusChange={handleStatusChange}
                       showCheckbox={isOwner}
                       isSelected={selectedOrderIds.has(order.orderId)}
@@ -869,7 +873,7 @@ export function OrderScheduleManagement() {
                               <Edit size={14} />
                             </button>
                             <button
-                              onClick={() => handleDeleteOrder(order.orderId)}
+                              onClick={() => setOrderToDelete(order.orderId)}
                               className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
                               title="Hapus"
                             >
@@ -993,6 +997,15 @@ export function OrderScheduleManagement() {
           </div>
         </div>
       )}
+      <ConfirmModal
+        isOpen={Boolean(orderToDelete)}
+        onClose={() => setOrderToDelete(null)}
+        onConfirm={handleConfirmDeleteOrder}
+        isProcessing={isDeleting}
+        title="Hapus Jadwal Pesanan?"
+        message="Apakah Anda yakin ingin menghapus jadwal pesanan ini? Data yang dihapus tidak dapat dipulihkan."
+        confirmText="Ya, Hapus"
+      />
     </div>
   );
 }

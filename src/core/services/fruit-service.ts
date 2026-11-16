@@ -20,112 +20,14 @@ export interface FruitProductDef {
   notes?: string;
 }
 
-export const DEFAULT_FRUIT_SPECIES: FruitProductDef[] = [
-  {
-    productId: 'fruit_mangga_arum_manis',
-    name: 'Mangga Arum Manis',
-    barcode: '888101',
-    sku: 'BUAH-MANGGA',
-    normalPrice: 28000,
-    initialHpp: 20000,
-    initialStock: 25,
-    minStock: 10,
-    targetStock: 50,
-    baseUnit: 'KG',
-    notes: 'Kualitas super matang pohon, harum manis legit'
-  },
-  {
-    productId: 'fruit_jeruk_berastagi',
-    name: 'Jeruk Berastagi',
-    barcode: '888102',
-    sku: 'BUAH-JERUK',
-    normalPrice: 22000,
-    initialHpp: 16000,
-    initialStock: 30,
-    minStock: 15,
-    targetStock: 60,
-    baseUnit: 'KG',
-    notes: 'Segar manis asal Berastagi Medan, kaya air'
-  }
-];
+export const DEFAULT_FRUIT_SPECIES: FruitProductDef[] = [];
 
 export class FruitService {
   /**
-   * Ensures default fruit products (Mangga Arum Manis & Jeruk Berastagi) exist in the database.
+   * Auto-seeding disabled: fruit catalog items must always be added manually.
    */
-  static async ensureMinimalFruitProducts(userId: string = 'SYSTEM'): Promise<number> {
-    // USER REQUEST 2026-11-01: No automatic fruit stock list. Only manual.
+  static async ensureMinimalFruitProducts(_userId: string = 'SYSTEM'): Promise<number> {
     return 0;
-
-    const deletedSetting = await db.settings.get('deleted_product_ids');
-    const deletedIds: string[] = deletedSetting?.ids || [];
-
-    const existingProducts = await db.products.toArray();
-    const existingFruits = existingProducts.filter(p => p.productType === 'FRUIT');
-    let addedCount = 0;
-    const now = new Date().toISOString();
-
-    for (const item of DEFAULT_FRUIT_SPECIES) {
-      if (deletedIds.includes(item.productId)) continue;
-
-      const alreadyExists = existingFruits.some(p => 
-        p.productId === item.productId ||
-        p.barcode === item.barcode ||
-        p.name.toLowerCase().includes(item.name.toLowerCase().split(' ')[0])
-      );
-
-      if (!alreadyExists) {
-        const newProduct: Product = {
-          productId: item.productId,
-          sku: item.sku,
-          barcode: item.barcode,
-          name: item.name,
-          categoryId: 'BUAH',
-          productType: 'FRUIT',
-          baseUnit: item.baseUnit,
-          saleUnits: ['KG', 'GRAM'],
-          conversionRules: [
-            { fromUnit: 'GRAM', toUnit: 'KG', factor: 0.001 }
-          ],
-          normalPrice: item.normalPrice,
-          hpp: item.initialHpp,
-          stock: item.initialStock,
-          minimumStock: item.minStock,
-          targetStock: item.targetStock,
-          status: 'ACTIVE',
-          createdAt: now,
-          updatedAt: now
-        };
-
-        await db.products.put(newProduct);
-        await db.productCosts.put({
-          productId: item.productId,
-          hpp: item.initialHpp,
-          updatedAt: now
-        });
-
-        // Record initial OPENING_BALANCE movement
-        await StockService.recordMovement({
-          productId: item.productId,
-          movementType: 'OPENING_BALANCE',
-          qty: item.initialStock,
-          unit: item.baseUnit,
-          baseQty: item.initialStock,
-          referenceId: `init_${item.productId}`,
-          segmentId: 'BUAH',
-          reason: `Stok Awal Penjualan Buah Segar: ${item.name}`,
-          costSnapshot: item.initialHpp,
-          userId,
-          deviceId: 'device-1',
-          timestamp: now
-        });
-
-        addedCount++;
-      }
-    }
-
-    await db.settings.put({ id: 'minimal_fruits_seeded', value: true, seededAt: now });
-    return addedCount;
   }
 
   /**
@@ -259,7 +161,7 @@ export class FruitService {
       storageId: 'BUAH',
       direction: 'OUT',
       referenceId: purchaseRef,
-      referenceType: 'EXPENSE',
+      referenceType: 'PURCHASE',
       description: `Kulakan Buah: ${product.name} ${params.incomingKg} kg @ Rp ${params.purchasePricePerKg.toLocaleString()} (${params.supplierName || 'Pasar Buah'})`,
       userId: params.userId,
       role: params.role || 'OWNER',

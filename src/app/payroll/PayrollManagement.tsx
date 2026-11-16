@@ -19,6 +19,7 @@ import {
   AlertTriangle
 } from 'lucide-react';
 import { db } from '@/core/database';
+import { useFirestoreCollection } from '@/core/firestore-realtime';
 import { useAuthStore } from '@/core/auth-store';
 import { useDeviceId } from '@/core/device-store';
 import { useToastStore } from '@/core/toast-store';
@@ -27,12 +28,7 @@ import { PayrollInputModal } from './PayrollInputModal';
 import { BonusCategoryModal } from './BonusCategoryModal';
 import { PayrollSlipModal } from './PayrollSlipModal';
 import type { PayrollRecord } from '@/core/types';
-import { useFirestoreCollection } from '@/core/firestore-realtime';
-
-const MONTH_NAMES = [
-  'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
-  'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
-];
+import ConfirmModal from '@/app/components/ConfirmModal';
 
 export default function PayrollManagement({ onNavigate }: { onNavigate?: (tab: string) => void }) {
   const { currentUser } = useAuthStore();
@@ -43,6 +39,8 @@ export default function PayrollManagement({ onNavigate }: { onNavigate?: (tab: s
   const [isInputModalOpen, setIsInputModalOpen] = useState(false);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [selectedSlipRecord, setSelectedSlipRecord] = useState<PayrollRecord | null>(null);
+  const [recordToDelete, setRecordToDelete] = useState<PayrollRecord | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Filters state
   const [searchQuery, setSearchQuery] = useState('');
@@ -128,16 +126,17 @@ export default function PayrollManagement({ onNavigate }: { onNavigate?: (tab: s
   const backdatedCount = filteredRecords.filter(r => r.isBackdated).length;
   const regularCount = filteredRecords.filter(r => !r.isBackdated).length;
 
-  const handleDeleteRecord = async (record: PayrollRecord) => {
-    if (!confirm(`Hapus catatan penggajian ${record.employeeName} untuk periode ${MONTH_NAMES[record.periodMonth - 1]} ${record.periodYear}?`)) {
-      return;
-    }
-
+  const handleConfirmDelete = async () => {
+    if (!recordToDelete) return;
+    setIsDeleting(true);
     try {
-      await PayrollService.deletePayroll(record.id, currentUser.role);
-      addToast(`Catatan penggajian ${record.employeeName} berhasil dihapus`, 'success');
+      await PayrollService.deletePayroll(recordToDelete.id, currentUser.role);
+      addToast(`Catatan penggajian ${recordToDelete.employeeName} berhasil dihapus`, 'success');
+      setRecordToDelete(null);
     } catch (err: any) {
       addToast('Gagal menghapus data: ' + (err?.message || ''), 'error');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -468,7 +467,7 @@ export default function PayrollManagement({ onNavigate }: { onNavigate?: (tab: s
                           </button>
                           <button
                             type="button"
-                            onClick={() => handleDeleteRecord(record)}
+                            onClick={() => setRecordToDelete(record)}
                             title="Hapus Catatan"
                             className="p-1.5 rounded-lg border border-rose-200 hover:bg-rose-50 text-rose-600 transition-colors"
                           >
@@ -505,6 +504,22 @@ export default function PayrollManagement({ onNavigate }: { onNavigate?: (tab: s
         onClose={() => setSelectedSlipRecord(null)}
         record={selectedSlipRecord}
       />
+
+      {/* Delete Confirmation Modal */}
+      <ConfirmModal
+        isOpen={Boolean(recordToDelete)}
+        onClose={() => setRecordToDelete(null)}
+        onConfirm={handleConfirmDelete}
+        isProcessing={isDeleting}
+        title="Hapus Catatan Gaji?"
+        message={recordToDelete ? `Hapus catatan penggajian ${recordToDelete.employeeName} untuk periode ${MONTH_NAMES[recordToDelete.periodMonth - 1]} ${recordToDelete.periodYear}? Tindakan ini tidak dapat dibatalkan.` : ''}
+        confirmText="Ya, Hapus"
+      />
     </div>
   );
 }
+
+const MONTH_NAMES = [
+  'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+  'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+];

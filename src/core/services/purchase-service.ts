@@ -1,9 +1,10 @@
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '../database';
-import type { Purchase, PurchaseItem, StockMovement, FinanceEvent, SyncQueueItem } from '../types';
+import type { Purchase, PurchaseItem, StockMovement, FinanceEvent, SyncQueueItem, MoneyStorageId } from '../types';
 import { CostingEngine } from '../costing-engine';
 import { AuditEngine } from '../audit-engine';
 import { StockService } from './stock-service';
+import { cloudSetDoc } from '../firestore-realtime';
 
 export class PurchaseService {
   static async createPurchase(params: {
@@ -21,7 +22,7 @@ export class PurchaseService {
     additionalCostNotes?: string;
     paymentStatus: 'PAID' | 'PAYABLE' | 'SPAYLATER';
     tenor?: 1 | 3;
-    moneyStorageId?: 'WARUNG' | 'IKAN' | 'UANG_DIGITAL';
+    moneyStorageId?: MoneyStorageId;
     userId: string;
     deviceId: string;
   }): Promise<string> {
@@ -93,7 +94,7 @@ export class PurchaseService {
         unit: item.unit,
         baseQty,
         referenceId: purchaseId,
-        segmentId: product.productType === 'FISH' ? 'IKAN' : 'WARUNG',
+        segmentId: product.productType === 'FISH' ? 'IKAN' : product.productType === 'FRUIT' ? 'BUAH' : 'WARUNG',
         reason: `Penerimaan Pembelian Faktur #${params.invoiceNumber || purchaseId} (Diskon: Rp ${item.discount.toLocaleString()}${itemAdditionalCostShare > 0 ? `, Biaya Tambahan WAC: Rp ${itemAdditionalCostShare.toLocaleString()}` : ''})`,
         costSnapshot: Math.round((itemSubtotal + itemAdditionalCostShare) / (baseQty || 1)),
         userId: params.userId || 'SYSTEM',
@@ -114,6 +115,7 @@ export class PurchaseService {
     };
 
     await db.purchases.add(purchase);
+    await cloudSetDoc('purchases', purchaseId, purchase).catch(() => {});
 
     // If SPAYLATER, create the bill and installments
     if (params.paymentStatus === 'SPAYLATER') {
@@ -147,6 +149,7 @@ export class PurchaseService {
             timestamp
           };
           await db.financeEvents.add(expenseEvent);
+          await cloudSetDoc('financeEvents', expenseEvent.financeEventId, expenseEvent).catch(() => {});
           await this.addToQueue('financeEvents', expenseEvent.financeEventId, 'CREATE', expenseEvent);
         }
 
@@ -202,6 +205,7 @@ export class PurchaseService {
         timestamp
       };
       await db.financeEvents.add(financeEvent);
+      await cloudSetDoc('financeEvents', financeEvent.financeEventId, financeEvent).catch(() => {});
       await this.addToQueue('financeEvents', financeEvent.financeEventId, 'CREATE', financeEvent);
     }
 
@@ -221,7 +225,7 @@ export class PurchaseService {
 
   static async payPurchasePayable(params: {
     purchaseId: string;
-    moneyStorageId: 'WARUNG' | 'IKAN' | 'UANG_DIGITAL';
+    moneyStorageId: MoneyStorageId;
     userId: string;
     deviceId: string;
   }): Promise<void> {
@@ -249,7 +253,9 @@ export class PurchaseService {
     };
 
     await db.purchases.update(params.purchaseId, { status: 'PAID' });
+    await cloudSetDoc('purchases', params.purchaseId, updatedPurchase).catch(() => {});
     await db.financeEvents.add(financeEvent);
+    await cloudSetDoc('financeEvents', financeEvent.financeEventId, financeEvent).catch(() => {});
 
     await this.addToQueue('purchases', params.purchaseId, 'UPDATE', updatedPurchase);
     await this.addToQueue('financeEvents', financeEvent.financeEventId, 'CREATE', financeEvent);

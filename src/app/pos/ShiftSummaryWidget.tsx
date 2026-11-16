@@ -22,8 +22,11 @@ import { format } from 'date-fns';
 import { useDeviceId } from '@/core/device-store';
 import ClockOutModal from '@/app/shift/ClockOutModal';
 
+import { useToastStore } from '@/core/toast-store';
+
 export default function ShiftSummaryWidget({ onOpenShiftTab }: { onOpenShiftTab?: () => void }) {
   const { currentUser } = useAuthStore();
+  const { addToast } = useToastStore();
   const [isExpanded, setIsExpanded] = useState(false);
   const [isOpeningShift, setIsOpeningShift] = useState(false);
   const [isClockOutModalOpen, setIsClockOutModalOpen] = useState(false);
@@ -149,7 +152,7 @@ export default function ShiftSummaryWidget({ onOpenShiftTab }: { onOpenShiftTab?
       });
       setIsOpeningShift(false);
     } catch (err: any) {
-      alert(err.message || 'Gagal membuka shift');
+      addToast(err.message || 'Gagal membuka shift', 'error');
     } finally {
       setIsSubmitting(false);
     }

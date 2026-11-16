@@ -172,7 +172,7 @@ export class DataResetService {
     const count = allTxs.length;
 
     for (const tx of allTxs) {
-      // Clean linked receivables
+      // 1. Clean linked receivables
       const linkedReceivables = await db.receivables
         .filter((r) => r.transactionId === tx.transactionId)
         .toArray();
@@ -191,8 +191,39 @@ export class DataResetService {
         await cloudDeleteDoc('receivables', rec.receivableId).catch(() => {});
       }
 
+      // 2. Clean associated stock movements (SALE_OUT, SALE_RETURN_IN, etc.)
+      const movements = await db.stockMovements
+        .filter((m) => m.transactionId === tx.transactionId || m.referenceId === tx.transactionId)
+        .toArray();
+      
+      for (const m of movements) {
+        await db.stockMovements.delete(m.stockMovementId);
+        await cloudDeleteDoc('stockMovements', m.stockMovementId).catch(() => {});
+      }
+
+      // 3. Delete transaction
       await db.transactions.delete(tx.transactionId);
       await cloudDeleteDoc('transactions', tx.transactionId).catch(() => {});
+    }
+
+    // 4. Reconcile all product stocks after clearing sales movements
+    const products = await db.products.toArray();
+    for (const p of products) {
+      const movements = await db.stockMovements.where('productId').equals(p.productId).toArray();
+      let derived = 0;
+      for (const m of movements) {
+        // Need to import getMovementDelta or implement locally
+        const rawBase = m.baseQty ?? m.qty ?? (m.quantity !== undefined ? Math.abs(m.quantity) : 0);
+        const base = isNaN(rawBase) ? 0 : Math.abs(rawBase);
+        const mType = (m.movementType || '').toUpperCase();
+        
+        if (['OPENING_BALANCE', 'PURCHASE_IN', 'SALE_RETURN_IN', 'STOCK_OPNAME_IN', 'ADJUSTMENT_IN', 'VOID_REVERSAL_IN', 'IN'].includes(mType)) {
+          derived += base;
+        } else if (['SALE_OUT', 'SALE', 'STOCK_OPNAME_OUT', 'DAMAGED_OUT', 'LOST_OUT', 'EXPIRED_OUT', 'FISH_DEAD_OUT', 'ADJUSTMENT_OUT', 'VOID_REVERSAL_OUT', 'SUPPLIER_RETURN_OUT', 'OUT'].includes(mType)) {
+          derived -= base;
+        }
+      }
+      await db.products.update(p.productId, { stock: Number(derived.toFixed(4)), updatedAt: new Date().toISOString() });
     }
 
     await AuditEngine.log({
@@ -207,7 +238,69 @@ export class DataResetService {
     return {
       success: true,
       count,
-      message: `Seluruh riwayat transaksi penjualan (${count} transaksi) berhasil di-reset bersih.`
+      message: `Seluruh riwayat transaksi penjualan (${count} transaksi) dan mutasi stok terkait berhasil di-reset bersih.`
+    };
+  }
+
+  // ==========================================
+  // 3. INVENTORY & STOCK HISTORY
+  // ==========================================
+
+  /**
+   * Reset all stock levels and clear stock movement history.
+   * Option to keep Opening Balances (baseline stock).
+   */
+  static async resetInventoryStock(
+    keepOpeningBalance: boolean,
+    userId: string,
+    role: string,
+    deviceId: string = 'device-1'
+  ): Promise<DataResetResult> {
+    this.assertOwner(role);
+
+    const allMovements = await db.stockMovements.toArray();
+    let deletedCount = 0;
+
+    for (const m of allMovements) {
+      if (keepOpeningBalance && m.movementType === 'OPENING_BALANCE') {
+        continue;
+      }
+      await db.stockMovements.delete(m.stockMovementId);
+      await cloudDeleteDoc('stockMovements', m.stockMovementId).catch(() => {});
+      deletedCount++;
+    }
+
+    // Reconcile all products
+    const allProducts = await db.products.toArray();
+    for (const p of allProducts) {
+      const movements = await db.stockMovements.where('productId').equals(p.productId).toArray();
+      let derived = 0;
+      for (const m of movements) {
+        const rawBase = m.baseQty ?? m.qty ?? (m.quantity !== undefined ? Math.abs(m.quantity) : 0);
+        const base = isNaN(rawBase) ? 0 : Math.abs(rawBase);
+        const mType = (m.movementType || '').toUpperCase();
+        if (['OPENING_BALANCE', 'PURCHASE_IN', 'SALE_RETURN_IN', 'STOCK_OPNAME_IN', 'ADJUSTMENT_IN', 'VOID_REVERSAL_IN', 'IN'].includes(mType)) {
+          derived += base;
+        } else {
+          derived -= base;
+        }
+      }
+      await db.products.update(p.productId, { stock: Number(derived.toFixed(4)), updatedAt: new Date().toISOString() });
+    }
+
+    await AuditEngine.log({
+      userId,
+      role,
+      deviceId,
+      action: 'RESET_INVENTORY_STOCK',
+      module: 'INVENTORY',
+      after: { movementsDeleted: deletedCount, keptOpeningBalance: keepOpeningBalance }
+    });
+
+    return {
+      success: true,
+      count: deletedCount,
+      message: `Riwayat mutasi stok berhasil dibersihkan (${deletedCount} log dihapus). Stok produk telah direkonsiliasi.`
     };
   }
 
@@ -554,4 +647,341 @@ export class DataResetService {
       message: `Seluruh jadwal pesanan & to-do (${count} data) berhasil di-reset bersih untuk peluncuran resmi.`
     };
   }
+
+  // ==========================================
+  // 7. PURCHASES & FAKTUR PEMBELIAN
+  // ==========================================
+
+  /**
+   * Delete specific purchases by their IDs.
+   * Also cleans up linked payLater bills/installments.
+   */
+  static async deletePurchases(
+    purchaseIds: string[],
+    userId: string,
+    role: string,
+    deviceId: string = 'device-1'
+  ): Promise<DataResetResult> {
+    this.assertOwner(role);
+    if (!purchaseIds || purchaseIds.length === 0) {
+      return { success: true, count: 0, message: 'Tidak ada faktur pembelian yang dipilih.' };
+    }
+
+    let deletedCount = 0;
+    for (const pId of purchaseIds) {
+      // Clean linked payLater bills
+      const bills = await db.payLaterBills.filter(b => b.purchaseId === pId).toArray();
+      for (const b of bills) {
+        const insts = await db.payLaterInstallments.filter(i => i.billId === b.billId).toArray();
+        for (const inst of insts) {
+          await db.payLaterInstallments.delete(inst.installmentId);
+          await cloudDeleteDoc('payLaterInstallments', inst.installmentId).catch(() => {});
+        }
+        await db.payLaterBills.delete(b.billId);
+        await cloudDeleteDoc('payLaterBills', b.billId).catch(() => {});
+      }
+
+      await db.purchases.delete(pId);
+      await cloudDeleteDoc('purchases', pId).catch(() => {});
+      deletedCount++;
+    }
+
+    await AuditEngine.log({
+      userId,
+      role,
+      deviceId,
+      action: 'BULK_DELETE_PURCHASES',
+      module: 'PURCHASES',
+      after: { purchaseIds, count: deletedCount }
+    });
+
+    return {
+      success: true,
+      count: deletedCount,
+      message: `Berhasil menghapus ${deletedCount} faktur pembelian.`
+    };
+  }
+
+  /**
+   * Reset all purchases (clean slate for official launch).
+   */
+  static async resetAllPurchases(
+    userId: string,
+    role: string,
+    deviceId: string = 'device-1'
+  ): Promise<DataResetResult> {
+    this.assertOwner(role);
+
+    const allPurchases = await db.purchases.toArray();
+    const count = allPurchases.length;
+
+    for (const p of allPurchases) {
+      // 1. Clean linked payLater bills
+      const bills = await db.payLaterBills.filter(b => b.purchaseId === p.purchaseId).toArray();
+      for (const b of bills) {
+        const insts = await db.payLaterInstallments.filter(i => i.billId === b.billId).toArray();
+        for (const inst of insts) {
+          await db.payLaterInstallments.delete(inst.installmentId);
+          await cloudDeleteDoc('payLaterInstallments', inst.installmentId).catch(() => {});
+        }
+        await db.payLaterBills.delete(b.billId);
+        await cloudDeleteDoc('payLaterBills', b.billId).catch(() => {});
+      }
+
+      // 2. Clean associated stock movements (PURCHASE_IN, etc.)
+      const movements = await db.stockMovements
+        .filter((m) => m.referenceId === p.purchaseId || m.transactionId === p.purchaseId)
+        .toArray();
+      
+      for (const m of movements) {
+        await db.stockMovements.delete(m.stockMovementId);
+        await cloudDeleteDoc('stockMovements', m.stockMovementId).catch(() => {});
+      }
+
+      // 3. Delete purchase
+      await db.purchases.delete(p.purchaseId);
+      await cloudDeleteDoc('purchases', p.purchaseId).catch(() => {});
+    }
+
+    // 4. Reconcile all product stocks after clearing purchase movements
+    const allProds = await db.products.toArray();
+    for (const prod of allProds) {
+      const movements = await db.stockMovements.where('productId').equals(prod.productId).toArray();
+      let derived = 0;
+      for (const m of movements) {
+        const rawBase = m.baseQty ?? m.qty ?? (m.quantity !== undefined ? Math.abs(m.quantity) : 0);
+        const base = isNaN(rawBase) ? 0 : Math.abs(rawBase);
+        const mType = (m.movementType || '').toUpperCase();
+        if (['OPENING_BALANCE', 'PURCHASE_IN', 'SALE_RETURN_IN', 'STOCK_OPNAME_IN', 'ADJUSTMENT_IN', 'VOID_REVERSAL_IN', 'IN'].includes(mType)) {
+          derived += base;
+        } else {
+          derived -= base;
+        }
+      }
+      await db.products.update(prod.productId, { stock: Number(derived.toFixed(4)), updatedAt: new Date().toISOString() });
+    }
+
+    await AuditEngine.log({
+      userId,
+      role,
+      deviceId,
+      action: 'RESET_ALL_PURCHASES',
+      module: 'PURCHASES',
+      after: { count }
+    });
+
+    return {
+      success: true,
+      count,
+      message: `Seluruh riwayat pembelian (${count} faktur) dan mutasi stok terkait berhasil di-reset bersih.`
+    };
+  }
+
+  // ==========================================
+  // 8. STOCK OPNAME HISTORY
+  // ==========================================
+
+  /**
+   * Reset all stock opname records.
+   */
+  static async resetAllStockOpnames(
+    userId: string,
+    role: string,
+    deviceId: string = 'device-1'
+  ): Promise<DataResetResult> {
+    this.assertOwner(role);
+
+    const allOpnames = await db.stockOpnames.toArray();
+    const count = allOpnames.length;
+
+    for (const op of allOpnames) {
+      await db.stockOpnames.delete(op.opnameId);
+      await cloudDeleteDoc('stockOpnames', op.opnameId).catch(() => {});
+    }
+
+    await AuditEngine.log({
+      userId,
+      role,
+      deviceId,
+      action: 'RESET_ALL_STOCK_OPNAMES',
+      module: 'INVENTORY',
+      after: { count }
+    });
+
+    return {
+      success: true,
+      count,
+      message: `Seluruh riwayat stock opname (${count} data) berhasil di-reset bersih.`
+    };
+  }
+
+  // ==========================================
+  // 9. DIGITAL SERVICES
+  // ==========================================
+
+  /**
+   * Delete specific digital service transactions by their IDs.
+   */
+  static async deleteDigitalServices(
+    serviceIds: string[],
+    userId: string,
+    role: string,
+    deviceId: string = 'device-1'
+  ): Promise<DataResetResult> {
+    this.assertOwner(role);
+    if (!serviceIds || serviceIds.length === 0) {
+      return { success: true, count: 0, message: 'Tidak ada transaksi digital yang dipilih.' };
+    }
+
+    let deletedCount = 0;
+    for (const sId of serviceIds) {
+      await db.digitalServices.delete(sId);
+      await cloudDeleteDoc('digitalServices', sId).catch(() => {});
+      deletedCount++;
+    }
+
+    await AuditEngine.log({
+      userId,
+      role,
+      deviceId,
+      action: 'BULK_DELETE_DIGITAL_SERVICES',
+      module: 'DIGITAL_SERVICES',
+      after: { serviceIds, count: deletedCount }
+    });
+
+    return {
+      success: true,
+      count: deletedCount,
+      message: `Berhasil menghapus ${deletedCount} transaksi layanan digital.`
+    };
+  }
+
+  /**
+   * Reset all digital service records.
+   */
+  static async resetAllDigitalServices(
+    userId: string,
+    role: string,
+    deviceId: string = 'device-1'
+  ): Promise<DataResetResult> {
+    this.assertOwner(role);
+
+    const allServices = await db.digitalServices.toArray();
+    const count = allServices.length;
+
+    for (const s of allServices) {
+      await db.digitalServices.delete(s.serviceId);
+      await cloudDeleteDoc('digitalServices', s.serviceId).catch(() => {});
+    }
+
+    await AuditEngine.log({
+      userId,
+      role,
+      deviceId,
+      action: 'RESET_ALL_DIGITAL_SERVICES',
+      module: 'DIGITAL_SERVICES',
+      after: { count }
+    });
+
+    return {
+      success: true,
+      count,
+      message: `Seluruh riwayat layanan digital (${count} transaksi) berhasil di-reset bersih.`
+    };
+  }
+
+  // ==========================================
+  // 10. CONSIGNMENT (TITIPAN BARANG)
+  // ==========================================
+
+  /**
+   * Reset all consignment history (settlements and arrivals).
+   */
+  static async resetConsignmentHistory(
+    userId: string,
+    role: string,
+    deviceId: string = 'device-1'
+  ): Promise<DataResetResult> {
+    this.assertOwner(role);
+
+    const settlements = await db.consignmentSettlements.toArray();
+    for (const s of settlements) {
+      await db.consignmentSettlements.delete(s.id);
+      await cloudDeleteDoc('consignmentSettlements', s.id).catch(() => {});
+    }
+
+    const arrivals = await db.consignmentArrivals.toArray();
+    for (const a of arrivals) {
+      await db.consignmentArrivals.delete(a.id);
+      await cloudDeleteDoc('consignmentArrivals', a.id).catch(() => {});
+    }
+
+    // Reset totalSold on all items
+    const allItems = await db.consignmentItems.toArray();
+    for (const item of allItems) {
+      await db.consignmentItems.update(item.id, {
+        totalSold: 0,
+        lastSettlementAt: undefined,
+        updatedAt: new Date().toISOString()
+      });
+    }
+
+    await AuditEngine.log({
+      userId,
+      role,
+      deviceId,
+      action: 'RESET_CONSIGNMENT_HISTORY',
+      module: 'CONSIGNMENT',
+      after: { 
+        settlementsDeleted: settlements.length, 
+        arrivalsDeleted: arrivals.length 
+      }
+    });
+
+    return {
+      success: true,
+      count: settlements.length + arrivals.length,
+      message: `Riwayat konsinyasi (${settlements.length} setoran & ${arrivals.length} stok masuk) berhasil di-reset.`
+    };
+  }
+
+  // ==========================================
+  // 11. AUDIT LOGS
+  // ==========================================
+
+  /**
+   * Reset all audit logs.
+   */
+  static async resetAuditLogs(
+    userId: string,
+    role: string,
+    deviceId: string = 'device-1'
+  ): Promise<DataResetResult> {
+    this.assertOwner(role);
+
+    const allLogs = await db.auditLogs.toArray();
+    const count = allLogs.length;
+
+    for (const log of allLogs) {
+      await db.auditLogs.delete(log.auditId);
+      await cloudDeleteDoc('auditLogs', log.auditId).catch(() => {});
+    }
+
+    // Log the reset action itself as the only remaining log
+    await AuditEngine.log({
+      userId,
+      role,
+      deviceId,
+      action: 'RESET_AUDIT_LOGS',
+      module: 'SYSTEM',
+      after: { count }
+    });
+
+    return {
+      success: true,
+      count,
+      message: `Seluruh log audit (${count} data) berhasil dibersihkan.`
+    };
+  }
 }
+

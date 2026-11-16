@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/core/database';
 import { ConsignmentService } from '@/core/services/consignment-service';
+import { DataResetService } from '@/core/services/data-reset-service';
 import { useAuthStore } from '@/core/auth-store';
 import { useDeviceId } from '@/core/device-store';
 import { useToastStore } from '@/core/toast-store';
@@ -59,6 +60,7 @@ export default function ConsignmentPage() {
 
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [editingItem, setEditingItem] = useState<ConsignmentItem | null>(null);
+  const [deletingItem, setDeletingItem] = useState<ConsignmentItem | null>(null);
   const [deletingSettlementId, setDeletingSettlementId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [copiedRecap, setCopiedRecap] = useState(false);
@@ -222,22 +224,27 @@ export default function ConsignmentPage() {
     }
   };
 
-  // Delete Item Handler
-  const handleDeleteItem = async (id: string, name: string) => {
-    if (!currentUser) return;
+  // Delete Item Trigger
+  const handleDeleteItemTrigger = (item: ConsignmentItem) => {
     if (!isOwner) {
       addToast('Akses Ditolak: Hanya Owner yang dapat menghapus barang titipan', 'error');
       return;
     }
-    if (!confirm(`Hapus barang titipan "${name}"? Seluruh histori setoran & kedatangan terkait juga akan dibersihkan.`)) {
-      return;
-    }
-    
+    setDeletingItem(item);
+  };
+
+  // Real Delete Item Handler
+  const confirmDeleteItem = async () => {
+    if (!currentUser || !deletingItem) return;
+    setIsSubmitting(true);
     try {
-      await ConsignmentService.deleteItem(id, currentUser.userId, deviceId, currentUser.role);
-      addToast(`Barang titipan "${name}" berhasil dihapus`, 'success');
+      await ConsignmentService.deleteItem(deletingItem.id, currentUser.userId, deviceId, currentUser.role);
+      setDeletingItem(null);
+      addToast(`Barang titipan "${deletingItem.name}" berhasil dihapus`, 'success');
     } catch (err) {
       addToast(err instanceof Error ? err.message : 'Gagal menghapus barang', 'error');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -328,19 +335,22 @@ export default function ConsignmentPage() {
     }
   };
 
-  // Delete Individual Settlement Handler
-  const handleDeleteSettlement = async (settlementId: string) => {
-    if (!currentUser || !isOwner) {
+  // Delete Individual Settlement Trigger
+  const handleDeleteSettlementTrigger = (settlementId: string) => {
+    if (!isOwner) {
       addToast('Akses Ditolak: Hanya Owner yang dapat menghapus data setoran', 'error');
       return;
     }
-    if (!confirm('Hapus transaksi setoran ini? Saldo kas akan dikembalikan (refund) jika setoran memiliki nominal bayar.')) {
-      return;
-    }
+    setDeletingSettlementId(settlementId);
+  };
 
+  // Real Delete Settlement Handler
+  const confirmDeleteSettlement = async () => {
+    if (!currentUser || !deletingSettlementId) return;
+    setIsSubmitting(true);
     try {
       await ConsignmentService.deleteSettlement({
-        settlementId,
+        settlementId: deletingSettlementId,
         rollbackFinance: true,
         userId: currentUser.userId,
         deviceId,
@@ -350,6 +360,8 @@ export default function ConsignmentPage() {
       addToast('Data setoran berhasil dihapus dan saldo kas dikembalikan', 'success');
     } catch (err) {
       addToast(err instanceof Error ? err.message : 'Gagal menghapus setoran', 'error');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -362,13 +374,13 @@ export default function ConsignmentPage() {
 
     setIsSubmitting(true);
     try {
-      const res = await ConsignmentService.resetConsignmentHistory({
-        userId: currentUser.userId,
-        deviceId,
-        role: currentUser.role
-      });
+      const res = await DataResetService.resetConsignmentHistory(
+        currentUser.userId,
+        currentUser.role,
+        deviceId
+      );
       setIsResetHistoryModalOpen(false);
-      addToast(`Histori berhasil direset (${res.settlementsDeleted} setoran & ${res.arrivalsDeleted} stok masuk dibersihkan)`, 'success');
+      addToast(res.message, 'success');
     } catch (err) {
       addToast(err instanceof Error ? err.message : 'Gagal mereset data histori', 'error');
     } finally {
@@ -699,7 +711,7 @@ Terima kasih atas kerja samanya.`;
                           {/* Hapus Item (Owner only) */}
                           {isOwner && (
                             <button
-                              onClick={() => handleDeleteItem(item.id, item.name)}
+                              onClick={() => handleDeleteItemTrigger(item)}
                               className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all"
                               title="Hapus Barang Titipan"
                             >
@@ -828,7 +840,7 @@ Terima kasih atas kerja samanya.`;
                           {/* Delete Settlement (Owner only) */}
                           {isOwner && (
                             <button
-                              onClick={() => handleDeleteSettlement(s.id)}
+                              onClick={() => handleDeleteSettlementTrigger(s.id)}
                               className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                               title="Hapus Catatan Setoran Ini & Kembalikan Saldo Kas"
                             >
@@ -1502,6 +1514,75 @@ Terima kasih atas kerja samanya.`;
                   className="flex-1 py-3 bg-red-600 text-white rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-red-700 transition-all shadow-md shadow-red-200 disabled:opacity-50"
                 >
                   {isSubmitting ? 'Mereset...' : 'Ya, Reset Histori'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: KONFIRMASI HAPUS ITEM TITIPAN */}
+      {deletingItem && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-100">
+            <div className="p-6 text-center">
+              <div className="w-16 h-16 bg-red-50 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Trash2 size={32} />
+              </div>
+              <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Hapus Barang Titipan?</h3>
+              <p className="text-sm text-slate-500 mt-2">
+                Yakin ingin menghapus <span className="font-bold text-slate-900">"{deletingItem.name}"</span>? 
+                Seluruh histori setoran & kedatangan terkait juga akan dibersihkan secara permanen.
+              </p>
+              
+              <div className="grid grid-cols-2 gap-3 mt-8">
+                <button
+                  onClick={() => setDeletingItem(null)}
+                  disabled={isSubmitting}
+                  className="px-4 py-3 bg-slate-100 text-slate-600 rounded-2xl font-bold text-sm hover:bg-slate-200 transition-all uppercase tracking-wider disabled:opacity-50"
+                >
+                  Batal
+                </button>
+                <button
+                  onClick={confirmDeleteItem}
+                  disabled={isSubmitting}
+                  className="px-4 py-3 bg-red-600 text-white rounded-2xl font-bold text-sm hover:bg-red-700 shadow-lg shadow-red-200 transition-all uppercase tracking-wider disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {isSubmitting ? 'Menghapus...' : 'Ya, Hapus Item'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: KONFIRMASI HAPUS SETORAN */}
+      {deletingSettlementId && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-100">
+            <div className="p-6 text-center">
+              <div className="w-16 h-16 bg-red-50 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                <RotateCcw size={32} />
+              </div>
+              <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Batalkan & Hapus Setoran?</h3>
+              <p className="text-sm text-slate-500 mt-2">
+                Saldo kas akan dikembalikan (refund) otomatis jika transaksi setoran memiliki nominal bayar.
+              </p>
+              
+              <div className="grid grid-cols-2 gap-3 mt-8">
+                <button
+                  onClick={() => setDeletingSettlementId(null)}
+                  disabled={isSubmitting}
+                  className="px-4 py-3 bg-slate-100 text-slate-600 rounded-2xl font-bold text-sm hover:bg-slate-200 transition-all uppercase tracking-wider disabled:opacity-50"
+                >
+                  Batal
+                </button>
+                <button
+                  onClick={confirmDeleteSettlement}
+                  disabled={isSubmitting}
+                  className="px-4 py-3 bg-red-600 text-white rounded-2xl font-bold text-sm hover:bg-red-700 shadow-lg shadow-red-200 transition-all uppercase tracking-wider disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {isSubmitting ? 'Proses Hapus' : 'Ya, Hapus & Refund'}
                 </button>
               </div>
             </div>

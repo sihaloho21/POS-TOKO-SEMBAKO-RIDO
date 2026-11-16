@@ -22,16 +22,18 @@ import { PurchaseService } from '@/core/services/purchase-service';
 import { PayLaterService } from '@/core/services/paylater-service';
 import { useAuthStore } from '@/core/auth-store';
 import { useDeviceId } from '@/core/device-store';
-import { useToastStore } from '@/core/toast-store';
-import type { Product, Supplier, Purchase, PayLaterBill, PayLaterInstallment } from '@/core/types';
+import type { Product, Supplier, Purchase, PayLaterBill, PayLaterInstallment, MoneyStorageId } from '@/core/types';
 import { SupplierModal } from '@/app/suppliers/SupplierModal';
 import { ReceiptScannerModal } from '@/app/purchases/ReceiptScannerModal';
+import { DataResetService } from '@/core/services/data-reset-service';
+import { useToastStore } from '@/core/toast-store';
 
 export default function Purchases() {
   const { currentUser } = useAuthStore();
   const { addToast } = useToastStore();
   const deviceId = useDeviceId();
   const [paymentStatus, setPaymentStatus] = useState<'PAID' | 'PAYABLE' | 'SPAYLATER'>('PAID');
+  const isOwner = currentUser?.role === 'OWNER';
   const [payLaterTenor, setPayLaterTenor] = useState<1 | 3>(1);
   const [currentTab, setCurrentTab] = useState<'NEW' | 'HISTORY' | 'PAYLATER'>('NEW');
   const [selectedSupplierId, setSelectedSupplierId] = useState('');
@@ -41,12 +43,19 @@ export default function Purchases() {
   const [additionalCost, setAdditionalCost] = useState<number>(0);
   const [additionalCostAllocation, setAdditionalCostAllocation] = useState<'CAPITALIZE_INTO_WAC' | 'OPERATIONAL_EXPENSE'>('CAPITALIZE_INTO_WAC');
   const [additionalCostNotes, setAdditionalCostNotes] = useState<string>('');
-  const [moneyStorageId, setMoneyStorageId] = useState<'WARUNG' | 'IKAN' | 'UANG_DIGITAL'>('WARUNG');
+  const [moneyStorageId, setMoneyStorageId] = useState<MoneyStorageId>('WARUNG');
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSupplierModalOpen, setIsSupplierModalOpen] = useState(false);
   const [isScannerModalOpen, setIsScannerModalOpen] = useState(false);
   const [settlePurchaseTarget, setSettlePurchaseTarget] = useState<Purchase | null>(null);
-  const [settleStorageId, setSettleStorageId] = useState<'WARUNG' | 'IKAN' | 'UANG_DIGITAL'>('WARUNG');
+  const [settleStorageId, setSettleStorageId] = useState<MoneyStorageId>('WARUNG');
+
+  // Multi-select & Reset State (OWNER only)
+  const [selectedPurchaseIds, setSelectedPurchaseIds] = useState<Set<string>>(new Set());
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
+  const [showResetAllModal, setShowResetAllModal] = useState(false);
+  const [resetConfirmWord, setResetConfirmWord] = useState('');
 
   const suppliers = useLiveQuery(() => db.suppliers.where('status').equals('ACTIVE').toArray());
   const products = useLiveQuery(() => db.products.where('status').equals('ACTIVE').toArray());
@@ -191,6 +200,62 @@ export default function Purchases() {
       addToast(err.message || 'Gagal membayar cicilan.', 'error');
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  const handleSelectAll = () => {
+    if (!purchaseHistory) return;
+    if (selectedPurchaseIds.size === purchaseHistory.length) {
+      setSelectedPurchaseIds(new Set());
+    } else {
+      setSelectedPurchaseIds(new Set(purchaseHistory.map(p => p.purchaseId)));
+    }
+  };
+
+  const handleToggleSelect = (id: string) => {
+    setSelectedPurchaseIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedPurchaseIds.size === 0 || !isOwner) return;
+    setIsDeleting(true);
+    try {
+      await DataResetService.deletePurchases(Array.from(selectedPurchaseIds), currentUser.userId, currentUser.role, deviceId);
+      addToast(`${selectedPurchaseIds.size} faktur pembelian berhasil dihapus.`, 'success');
+      setSelectedPurchaseIds(new Set());
+      setShowBulkDeleteModal(false);
+    } catch (err: any) {
+      addToast(err.message || 'Terjadi kesalahan saat menghapus data faktur.', 'error');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleResetAll = async () => {
+    if (!isOwner || !currentUser) return;
+    if (resetConfirmWord !== 'RESET PEMBELIAN') {
+      addToast('Ketik "RESET PEMBELIAN" persis untuk konfirmasi.', 'error');
+      return;
+    }
+    setIsDeleting(true);
+    try {
+      await DataResetService.resetAllPurchases(currentUser.userId, currentUser.role, deviceId);
+      addToast('Seluruh riwayat faktur pembelian dan tagihan telah dibersihkan.', 'success');
+      setSelectedPurchaseIds(new Set());
+      setShowResetAllModal(false);
+      setResetConfirmWord('');
+    } catch (err: any) {
+      addToast(err.message || 'Gagal mereset histori pembelian.', 'error');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -344,6 +409,7 @@ export default function Purchases() {
                   >
                     <option value="WARUNG">Kas Warung</option>
                     <option value="IKAN">Kas Ikan</option>
+                    <option value="BUAH">Kas Buah</option>
                     <option value="UANG_DIGITAL">Kas Uang Digital</option>
                   </select>
                 </div>
@@ -539,50 +605,133 @@ export default function Purchases() {
     )}
 
       {currentTab === 'HISTORY' && (
-        <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-50/50 text-slate-400 text-[10px] uppercase tracking-widest font-black border-b border-slate-100">
-                  <th className="px-6 py-4">Waktu</th>
-                  <th className="px-6 py-4">No. Invoice</th>
-                  <th className="px-6 py-4">Supplier</th>
-                  <th className="px-6 py-4">Total</th>
-                  <th className="px-6 py-4">Status</th>
-                  <th className="px-6 py-4"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {purchaseHistory?.map(p => (
-                  <tr key={p.purchaseId} className="hover:bg-slate-50/50 transition-colors group">
-                    <td className="px-6 py-4 text-xs font-bold text-slate-500">{new Date(p.timestamp).toLocaleDateString()}</td>
-                    <td className="px-6 py-4 font-black text-xs text-slate-900 uppercase">{p.invoiceNumber}</td>
-                    <td className="px-6 py-4 text-xs font-bold text-slate-600 uppercase">{suppliers?.find(s => s.supplierId === p.supplierId)?.name || 'Unknown'}</td>
-                    <td className="px-6 py-4 text-sm font-black text-slate-900 tabular-nums">Rp {p.total.toLocaleString()}</td>
-                    <td className="px-6 py-4">
-                      <span className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest border ${p.status === 'PAID' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-amber-50 text-amber-600 border-amber-100'}`}>
-                        {p.status === 'PAID' ? 'PAID (LUNAS)' : 'HUTANG SUPPLIER'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      {p.status !== 'PAID' && p.status !== 'CANCELLED' ? (
-                        <button
-                          onClick={() => {
-                            setSettlePurchaseTarget(p);
-                            setSettleStorageId('WARUNG');
-                          }}
-                          className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-[10px] font-black uppercase tracking-wider shadow-sm transition-all cursor-pointer"
-                        >
-                          Lunasi Hutang
-                        </button>
-                      ) : (
-                        <ChevronRight size={18} className="text-slate-300 ml-auto" />
-                      )}
-                    </td>
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
+            <div>
+              <h3 className="text-sm font-black text-slate-900 uppercase tracking-tight">Riwayat Faktur Pembelian</h3>
+              <p className="text-xs text-slate-500 font-medium">Daftar transaksi kulakan barang masuk dan pembayaran supplier.</p>
+            </div>
+            {isOwner && (
+              <button
+                type="button"
+                onClick={() => {
+                  setResetConfirmWord('');
+                  setShowResetAllModal(true);
+                }}
+                className="px-4 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-2xl text-xs font-black uppercase tracking-wider border border-rose-200 transition-all flex items-center gap-2 cursor-pointer"
+              >
+                <Trash2 size={14} />
+                Reset Histori Pembelian
+              </button>
+            )}
+          </div>
+
+          {selectedPurchaseIds.size > 0 && isOwner && (
+            <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 animate-in fade-in">
+              <div className="flex items-center gap-3">
+                <span className="w-8 h-8 rounded-full bg-rose-600 text-white flex items-center justify-center text-xs font-black">
+                  {selectedPurchaseIds.size}
+                </span>
+                <p className="text-xs font-black text-rose-900 uppercase tracking-wide">
+                  {selectedPurchaseIds.size} Faktur Pembelian Dipilih
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedPurchaseIds(new Set())}
+                  className="px-3 py-1.5 text-xs font-bold text-slate-600 hover:text-slate-900 cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowBulkDeleteModal(true)}
+                  className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-sm flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Trash2 size={13} />
+                  Hapus Terpilih
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50/50 text-slate-400 text-[10px] uppercase tracking-widest font-black border-b border-slate-100">
+                    {isOwner && (
+                      <th className="px-4 py-4 w-12 text-center">
+                        <input
+                          type="checkbox"
+                          checked={purchaseHistory && purchaseHistory.length > 0 && selectedPurchaseIds.size === purchaseHistory.length}
+                          onChange={handleSelectAll}
+                          className="w-4 h-4 rounded text-blue-600 border-slate-300 focus:ring-blue-500 cursor-pointer"
+                        />
+                      </th>
+                    )}
+                    <th className="px-6 py-4">Waktu</th>
+                    <th className="px-6 py-4">No. Invoice</th>
+                    <th className="px-6 py-4">Supplier</th>
+                    <th className="px-6 py-4">Total</th>
+                    <th className="px-6 py-4">Status</th>
+                    <th className="px-6 py-4"></th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {purchaseHistory?.length === 0 ? (
+                    <tr>
+                      <td colSpan={isOwner ? 7 : 6} className="px-6 py-12 text-center text-slate-400 text-xs font-bold uppercase tracking-wider">
+                        Belum ada riwayat pembelian
+                      </td>
+                    </tr>
+                  ) : (
+                    purchaseHistory?.map(p => {
+                      const isSelected = selectedPurchaseIds.has(p.purchaseId);
+                      return (
+                        <tr key={p.purchaseId} className={`hover:bg-slate-50/50 transition-colors group ${isSelected ? 'bg-blue-50/40' : ''}`}>
+                          {isOwner && (
+                            <td className="px-4 py-4 text-center">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => handleToggleSelect(p.purchaseId)}
+                                className="w-4 h-4 rounded text-blue-600 border-slate-300 focus:ring-blue-500 cursor-pointer"
+                              />
+                            </td>
+                          )}
+                          <td className="px-6 py-4 text-xs font-bold text-slate-500">{new Date(p.timestamp).toLocaleDateString()}</td>
+                          <td className="px-6 py-4 font-black text-xs text-slate-900 uppercase">{p.invoiceNumber}</td>
+                          <td className="px-6 py-4 text-xs font-bold text-slate-600 uppercase">{suppliers?.find(s => s.supplierId === p.supplierId)?.name || 'Unknown'}</td>
+                          <td className="px-6 py-4 text-sm font-black text-slate-900 tabular-nums">Rp {p.total.toLocaleString()}</td>
+                          <td className="px-6 py-4">
+                            <span className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest border ${p.status === 'PAID' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-amber-50 text-amber-600 border-amber-100'}`}>
+                              {p.status === 'PAID' ? 'PAID (LUNAS)' : 'HUTANG SUPPLIER'}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            {p.status !== 'PAID' && p.status !== 'CANCELLED' ? (
+                              <button
+                                onClick={() => {
+                                  setSettlePurchaseTarget(p);
+                                  setSettleStorageId('WARUNG');
+                                }}
+                                className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-[10px] font-black uppercase tracking-wider shadow-sm transition-all cursor-pointer"
+                              >
+                                Lunasi Hutang
+                              </button>
+                            ) : (
+                              <ChevronRight size={18} className="text-slate-300 ml-auto" />
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
@@ -728,6 +877,7 @@ export default function Purchases() {
               >
                 <option value="WARUNG">Kas Warung</option>
                 <option value="IKAN">Kas Ikan</option>
+                <option value="BUAH">Kas Buah</option>
                 <option value="UANG_DIGITAL">Kas Uang Digital</option>
               </select>
             </div>
@@ -775,6 +925,7 @@ export default function Purchases() {
               >
                 <option value="WARUNG">Kas Warung</option>
                 <option value="IKAN">Kas Ikan</option>
+                <option value="BUAH">Kas Buah</option>
                 <option value="UANG_DIGITAL">Kas Uang Digital</option>
               </select>
             </div>
@@ -815,6 +966,85 @@ export default function Purchases() {
         isOpen={isSupplierModalOpen}
         onClose={() => setIsSupplierModalOpen(false)}
       />
+
+      {/* Modal Hapus Terpilih */}
+      {showBulkDeleteModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-in zoom-in-95">
+            <h3 className="font-black text-rose-600 text-base uppercase tracking-tight mb-2">
+              Hapus {selectedPurchaseIds.size} Faktur Pembelian?
+            </h3>
+            <p className="text-xs text-slate-600 mb-5 leading-relaxed">
+              Tindakan ini akan menghapus riwayat faktur pembelian terpilih dan tagihan PayLater terkait dari database lokal dan cloud.
+            </p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setShowBulkDeleteModal(false)}
+                disabled={isDeleting}
+                className="flex-1 py-3 font-bold text-xs uppercase tracking-wider text-slate-500 hover:bg-slate-100 rounded-xl cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleBulkDelete}
+                disabled={isDeleting}
+                className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-rose-200 disabled:opacity-50 cursor-pointer"
+              >
+                {isDeleting ? 'Menghapus...' : 'Ya, Hapus'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Reset Semua Faktur */}
+      {showResetAllModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-rose-200 animate-in zoom-in-95">
+            <h3 className="font-black text-rose-600 text-base uppercase tracking-tight mb-2">
+              Reset Seluruh Histori Pembelian
+            </h3>
+            <p className="text-xs text-slate-600 mb-4 leading-relaxed">
+              Tindakan ini hanya untuk <strong className="text-slate-900">Owner</strong> saat persiapan rilis resmi. Semua faktur pembelian dan tagihan PayLater supplier akan dihapus bersih.
+            </p>
+            <div className="p-3 bg-rose-50 rounded-2xl border border-rose-100 mb-4">
+              <label className="text-[10px] font-black text-rose-800 uppercase tracking-widest block mb-1.5">
+                Ketik "RESET PEMBELIAN" untuk konfirmasi:
+              </label>
+              <input
+                type="text"
+                value={resetConfirmWord}
+                onChange={(e) => setResetConfirmWord(e.target.value)}
+                placeholder="RESET PEMBELIAN"
+                className="w-full bg-white border border-rose-200 rounded-xl px-3 py-2 text-xs font-black uppercase text-rose-700 tracking-wider focus:outline-none focus:ring-2 focus:ring-rose-400"
+              />
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowResetAllModal(false);
+                  setResetConfirmWord('');
+                }}
+                disabled={isDeleting}
+                className="flex-1 py-3 font-bold text-xs uppercase tracking-wider text-slate-500 hover:bg-slate-100 rounded-xl cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleResetAll}
+                disabled={isDeleting || resetConfirmWord !== 'RESET PEMBELIAN'}
+                className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-rose-200 disabled:opacity-50 cursor-pointer"
+              >
+                {isDeleting ? 'Mereset...' : 'Reset Sekarang'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

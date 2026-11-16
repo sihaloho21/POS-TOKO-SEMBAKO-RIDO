@@ -59,6 +59,16 @@ export class TransactionEngine {
     
     // Validate items and resolve bundle HPP/component snapshots at finalization
     for (const item of params.items) {
+      if (item.isConsignment) {
+        const ci = await db.consignmentItems.get(item.productId);
+        if (!ci) {
+          throw new Error(`Barang titipan dengan ID ${item.productId} tidak ditemukan.`);
+        }
+        item.hppSnapshot = ci.costPrice;
+        item.isConsignment = true;
+        continue;
+      }
+
       const product = await db.products.get(item.productId);
       if (!product) continue;
 
@@ -124,6 +134,24 @@ export class TransactionEngine {
 
     // 4. Handle Stock Movements & Audit
     for (const item of params.items) {
+      if (item.isConsignment) {
+        // Handle Consignment Item Sale
+        const ci = await db.consignmentItems.get(item.productId);
+        if (ci) {
+          const updatedStock = Math.max(0, ci.currentStock - item.quantity);
+          const updatedSold = (ci.totalSold || 0) + item.quantity;
+          await cloudUpdateDoc('consignmentItems', ci.id, {
+            currentStock: updatedStock,
+            totalSold: updatedSold,
+            updatedAt: new Date().toISOString()
+          });
+          
+          // We can also record a stock movement for audit, but consignment usually tracks separately.
+          // For now, we follow the primary source of truth which is consignmentItems.
+        }
+        continue;
+      }
+
       const product = await db.products.get(item.productId);
       if (!product) continue;
 
@@ -476,6 +504,18 @@ export class TransactionEngine {
 
     // 2. Reverse Stock Movements
     for (const item of transaction.items) {
+      if (item.isConsignment) {
+        const ci = await db.consignmentItems.get(item.productId);
+        if (ci) {
+          await cloudUpdateDoc('consignmentItems', ci.id, {
+            currentStock: (ci.currentStock || 0) + item.quantity,
+            totalSold: Math.max(0, (ci.totalSold || 0) - item.quantity),
+            updatedAt: timestamp
+          });
+        }
+        continue;
+      }
+
       if (item.isBundle && item.bundleComponentsSnapshot?.length) {
         // Return/void whole bundle - reverses each component movement
         const compReversalType = params.actionType === 'VOID' ? 'VOID_REVERSAL_IN' : 'BUNDLE_RETURN_COMPONENT_IN';
@@ -489,7 +529,7 @@ export class TransactionEngine {
             baseQty: comp.totalQty,
             referenceId: params.transactionId,
             transactionId: params.transactionId,
-            segmentId: compProduct?.productType === 'FISH' ? 'IKAN' : 'WARUNG',
+            segmentId: compProduct?.productType === 'FRUIT' ? 'BUAH' : compProduct?.productType === 'FISH' ? 'IKAN' : 'WARUNG',
             reason: params.reason || (params.actionType === 'VOID' ? `Batal Transaksi (Void) Komponen Paket ${item.nameSnapshot}` : `Retur Komponen Paket: ${item.nameSnapshot}`),
             costSnapshot: comp.wacSnapshot,
             userId: params.userId,
@@ -512,7 +552,7 @@ export class TransactionEngine {
           baseQty,
           referenceId: params.transactionId,
           transactionId: params.transactionId,
-          segmentId: transaction.moneyStorageId === 'IKAN' ? 'IKAN' : 'WARUNG',
+          segmentId: (product.productType === 'FRUIT' || transaction.moneyStorageId === 'BUAH') ? 'BUAH' : (transaction.moneyStorageId === 'IKAN' ? 'IKAN' : 'WARUNG'),
           reason: params.reason || (params.actionType === 'VOID' ? 'VOID_REVERSAL_IN' : 'SALE_RETURN_IN'),
           costSnapshot: item.hppSnapshot ?? product.hpp,
           userId: params.userId,

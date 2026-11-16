@@ -22,6 +22,7 @@ export { firestoreDb, auth };
 
 const PRIMARY_KEYS: Record<string, string> = {
   products: 'productId',
+  productCosts: 'productId',
   transactions: 'transactionId',
   customers: 'customerId',
   shifts: 'shiftId',
@@ -31,6 +32,14 @@ const PRIMARY_KEYS: Record<string, string> = {
   receivablePayments: 'paymentId',
   bundles: 'bundleId',
   suppliers: 'supplierId',
+  purchases: 'purchaseId',
+  digitalServices: 'serviceId',
+  stockOpnames: 'opnameId',
+  notifications: 'notificationId',
+  conflicts: 'conflictId',
+  payLaterBills: 'billId',
+  payLaterInstallments: 'installmentId',
+  paymentMethods: 'id',
   settings: 'id',
   payrolls: 'id',
   bonusCategories: 'id',

@@ -1,14 +1,15 @@
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '../database';
-import type { StockMovement, FinanceEvent, AuditLog } from '../types';
+import type { StockMovement, FinanceEvent, AuditLog, MoneyStorageId } from '../types';
 import { AuditEngine } from '../audit-engine';
 import { StockService } from './stock-service';
+import { cloudSetDoc } from '../firestore-realtime';
 
 export class SupplierReturnService {
   static async processReturn(params: {
     supplierId: string;
     items: { productId: string; quantity: number; unit: string; price: number }[];
-    moneyStorageId: 'WARUNG' | 'IKAN' | 'UANG_DIGITAL';
+    moneyStorageId: MoneyStorageId;
     userId: string;
     deviceId: string;
     reason: string;
@@ -39,7 +40,7 @@ export class SupplierReturnService {
         unit: unitUsed,
         baseQty,
         referenceId: returnId,
-        segmentId: params.moneyStorageId === 'IKAN' ? 'IKAN' : 'WARUNG',
+        segmentId: params.moneyStorageId === 'IKAN' ? 'IKAN' : params.moneyStorageId === 'BUAH' ? 'BUAH' : 'WARUNG',
         reason: params.reason || 'Retur Barang ke Supplier (SUPPLIER_RETURN_OUT)',
         costSnapshot: item.price,
         userId: params.userId,
@@ -62,6 +63,7 @@ export class SupplierReturnService {
       timestamp
     };
     await db.financeEvents.add(financeEvent);
+    await cloudSetDoc('financeEvents', financeEvent.financeEventId, financeEvent).catch(() => {});
 
     await db.syncQueue.add({
       entityType: 'financeEvents',

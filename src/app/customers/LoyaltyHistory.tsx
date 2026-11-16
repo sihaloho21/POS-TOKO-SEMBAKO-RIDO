@@ -18,6 +18,8 @@ import {
   X 
 } from 'lucide-react';
 
+import { useToastStore } from '@/core/toast-store';
+
 interface LoyaltyHistoryProps {
   customerId: string;
 }
@@ -33,6 +35,7 @@ const TIER_GRADIENT_MAP: Record<string, string> = {
 };
 
 export function LoyaltyHistory({ customerId }: LoyaltyHistoryProps) {
+  const { addToast } = useToastStore();
   const customer = useLiveQuery(() => db.customers.get(customerId), [customerId]);
   const history = useLiveQuery(() => LoyaltyEngine.getHistory(customerId), [customerId]);
 
@@ -58,7 +61,7 @@ export function LoyaltyHistory({ customerId }: LoyaltyHistoryProps) {
     if (adjustPoints <= 0 || !adjustReason.trim()) return;
 
     if (adjustType === 'REDEEM' && (customer?.loyaltyPoints || 0) < adjustPoints) {
-      alert(`Saldo poin tidak mencukupi! Saldo saat ini hanya ${(customer?.loyaltyPoints || 0).toLocaleString()} Pts.`);
+      addToast(`Saldo poin tidak mencukupi! Saldo saat ini hanya ${(customer?.loyaltyPoints || 0).toLocaleString()} Pts.`, 'warning');
       return;
     }
 
@@ -71,16 +74,16 @@ export function LoyaltyHistory({ customerId }: LoyaltyHistoryProps) {
         reason: adjustReason.trim()
       });
 
-      setFeedbackMsg(
+      addToast(
         adjustType === 'EARN'
           ? `Berhasil menambahkan +${adjustPoints} Pts untuk ${customer?.name}!`
-          : `Berhasil menukarkan -${adjustPoints} Pts untuk ${customer?.name}!`
+          : `Berhasil menukarkan -${adjustPoints} Pts untuk ${customer?.name}!`,
+        'success'
       );
-      setTimeout(() => setFeedbackMsg(''), 4000);
       setIsAdjustmentModalOpen(false);
       setAdjustPoints(50);
     } catch (err: any) {
-      alert(err.message || 'Gagal memperbarui poin.');
+      addToast(err.message || 'Gagal memperbarui poin.', 'error');
     } finally {
       setIsSubmitting(false);
     }

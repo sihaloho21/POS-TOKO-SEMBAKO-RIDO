@@ -38,6 +38,7 @@ import {
   Trash2
 } from 'lucide-react';
 import { ReceivableService } from '@/core/services/receivable-service';
+import ConfirmModal from '@/app/components/ConfirmModal';
 
 interface StaffDebtManagerProps {
   onOpenPaymentModal: (receivable: Receivable) => void;
@@ -84,6 +85,11 @@ export function StaffDebtManager({ onOpenPaymentModal }: StaffDebtManagerProps) 
   const [formOwnerPin, setFormOwnerPin] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
+
+  // Deletion Confirmation State
+  const [debtToDelete, setDebtToDelete] = useState<StaffDebtItem | null>(null);
+  const [paymentToDelete, setPaymentToDelete] = useState<ReceivablePayment | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // 1. Real-time Cloud Queries (Multi-device Sync)
   const { data: cloudReceivables } = useFirestoreCollection<Receivable>('receivables');
@@ -204,51 +210,43 @@ export function StaffDebtManager({ onOpenPaymentModal }: StaffDebtManagerProps) 
     return cloudUsers?.filter(u => u.status === 'ACTIVE' && (u.role === 'KASIR' || u.role === 'MANAGER' || u.role === 'WAREHOUSE')) || [];
   }, [cloudUsers]);
 
-  const handleDeleteKasbon = async (item: StaffDebtItem) => {
-    if (currentUser?.role !== 'OWNER') {
-      addToast('Akses Ditolak: Hanya Owner yang bisa menghapus data kasbon.', 'error');
-      return;
-    }
-
-    if (!confirm(`Hapus permanen data kasbon ${item.customer.name} (Rp ${item.totalAmount.toLocaleString()})?\nSemua riwayat cicilan & kas masuk terkait akan ikut terhapus.`)) {
-      return;
-    }
-
+  const handleConfirmDeleteKasbon = async () => {
+    if (!debtToDelete || !currentUser) return;
+    setIsDeleting(true);
     try {
       await ReceivableService.deleteReceivable(
-        item.receivable.receivableId,
+        debtToDelete.receivable.receivableId,
         currentUser.userId,
         deviceId,
         currentUser.role
       );
       addToast('Data kasir / kasbon berhasil dihapus', 'success');
+      setDebtToDelete(null);
       setRefreshKey(prev => prev + 1);
     } catch (err: any) {
       addToast(err.message || 'Gagal menghapus kasbon', 'error');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
-  const handleDeleteHistoryPayment = async (payment: ReceivablePayment) => {
-    if (currentUser?.role !== 'OWNER') {
-      addToast('Akses Ditolak: Hanya Owner yang bisa menghapus data pembayaran.', 'error');
-      return;
-    }
-
-    if (!confirm(`Hapus catatan pembayaran Rp ${payment.amount.toLocaleString()}?\nSaldo kasbon kasir akan dihitung ulang.`)) {
-      return;
-    }
-
+  const handleConfirmDeletePayment = async () => {
+    if (!paymentToDelete || !currentUser) return;
+    setIsDeleting(true);
     try {
       await ReceivableService.deletePayment(
-        payment.paymentId,
+        paymentToDelete.paymentId,
         currentUser.userId,
         deviceId,
         currentUser.role
       );
       addToast('Data pembayaran berhasil dihapus', 'success');
+      setPaymentToDelete(null);
       setRefreshKey(prev => prev + 1);
     } catch (err: any) {
       addToast(err.message || 'Gagal menghapus pembayaran', 'error');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -882,7 +880,7 @@ export function StaffDebtManager({ onOpenPaymentModal }: StaffDebtManagerProps) 
                           {currentUser?.role === 'OWNER' && (
                             <button
                               type="button"
-                              onClick={() => handleDeleteKasbon(item)}
+                              onClick={() => setDebtToDelete(item)}
                               className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
                               title="Hapus Permanen Kasbon (Owner Only)"
                             >
@@ -1168,7 +1166,7 @@ export function StaffDebtManager({ onOpenPaymentModal }: StaffDebtManagerProps) 
                         {currentUser?.role === 'OWNER' && (
                           <button
                             type="button"
-                            onClick={() => handleDeleteHistoryPayment(h.payment)}
+                            onClick={() => setPaymentToDelete(h.payment)}
                             className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
                             title="Hapus Catatan Pembayaran"
                           >
@@ -1580,6 +1578,26 @@ export function StaffDebtManager({ onOpenPaymentModal }: StaffDebtManagerProps) 
         onSuccess={() => {
           setRefreshKey(prev => prev + 1);
         }}
+      />
+      {/* Repayment History Payments loop correction - I need to find where handleDeleteHistoryPayment was used */}
+      <ConfirmModal
+        isOpen={Boolean(debtToDelete)}
+        onClose={() => setDebtToDelete(null)}
+        onConfirm={handleConfirmDeleteKasbon}
+        isProcessing={isDeleting}
+        title="Hapus Permanen Kasbon?"
+        message={debtToDelete ? `Hapus permanen data kasbon ${debtToDelete.customer.name} (Rp ${debtToDelete.totalAmount.toLocaleString()})? Semua riwayat cicilan & kas masuk terkait akan ikut terhapus.` : ''}
+        confirmText="Ya, Hapus"
+      />
+
+      <ConfirmModal
+        isOpen={Boolean(paymentToDelete)}
+        onClose={() => setPaymentToDelete(null)}
+        onConfirm={handleConfirmDeletePayment}
+        isProcessing={isDeleting}
+        title="Hapus Catatan Pembayaran?"
+        message={paymentToDelete ? `Hapus catatan pembayaran Rp ${paymentToDelete.amount.toLocaleString()}? Saldo kasbon kasir akan dihitung ulang.` : ''}
+        confirmText="Ya, Hapus"
       />
     </div>
   );

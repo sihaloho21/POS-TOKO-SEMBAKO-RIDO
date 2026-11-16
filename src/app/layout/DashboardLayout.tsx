@@ -106,12 +106,15 @@ function NavItem({ icon, label, active, onClick, disabled, disabledReason, badge
   );
 }
 
+import { useToastStore } from '@/core/toast-store';
+
 export default function DashboardLayout({ children, currentTab, onTabChange }: { 
   children: React.ReactNode;
   currentTab: string;
   onTabChange: (tab: string) => void;
 }) {
   const { currentUser, logout } = useAuthStore();
+  const { addToast } = useToastStore();
   const { isOnline, isRetrying, retryConnection } = useFirestoreConnection();
   const deviceId = useDeviceId();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -129,7 +132,7 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
       setIsDeveloperMode(newState);
       localStorage.setItem('riama_dev_mode', String(newState));
       setLogoClicks(0);
-      alert(newState ? 'Developer Mode: AKTIF' : 'Developer Mode: NON-AKTIF');
+      addToast(newState ? 'Developer Mode: AKTIF' : 'Developer Mode: NON-AKTIF', 'info');
     } else {
       setLogoClicks(newCount);
       // Reset clicks after 2 seconds of inactivity
@@ -251,9 +254,9 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
     { id: 'receivables', label: 'Receivables & Kasbon', icon: <CreditCard size={18} />, badge: overdueKasbonCount > 0 ? overdueKasbonCount : undefined, disabled: !isOwner },
     { id: 'finance', label: 'Finance', icon: <TrendingUp size={18} />, disabled: !isOwner },
     ...(isOwner ? [{ id: 'payroll', label: 'Penggajian Karyawan', icon: <Banknote size={18} /> }] : []),
-    ...(isDeveloperMode && isOwner ? [
-      { id: 'audit', label: 'Audit Log', icon: <ShieldCheck size={18} /> },
+    ...(isOwner ? [
       { id: 'conflicts', label: 'Persetujuan Shift Kasir', icon: <ShieldCheck size={18} />, badge: pendingDiscrepanciesCount && pendingDiscrepanciesCount > 0 ? pendingDiscrepanciesCount : undefined },
+      { id: 'audit', label: 'Audit Log', icon: <ShieldCheck size={18} /> },
       { id: 'system-health', label: 'System Health', icon: <Activity size={18} /> },
     ] : []),
     { id: 'consignment', label: 'Titipan Barang (Bagi Hasil)', icon: <TrendingUp size={18} />, disabled: !isOwner },

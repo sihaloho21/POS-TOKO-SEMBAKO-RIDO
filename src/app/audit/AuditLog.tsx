@@ -11,8 +11,36 @@ import {
   ArrowRight
 } from 'lucide-react';
 import { format } from 'date-fns';
+import { DataResetService } from '@/core/services/data-reset-service';
+import { useAuthStore } from '@/core/auth-store';
+import { useDeviceId } from '@/core/device-store';
+import { useToastStore } from '@/core/toast-store';
+import { RotateCcw, AlertTriangle, X } from 'lucide-react';
 
 export default function AuditLog() {
+  const { currentUser } = useAuthStore();
+  const deviceId = useDeviceId();
+  const { addToast } = useToastStore();
+  const isOwner = currentUser?.role === 'OWNER';
+  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleReset = async () => {
+    if (!currentUser) return;
+    setIsSubmitting(true);
+    try {
+      const res = await DataResetService.resetAuditLogs(currentUser.userId, currentUser.role, deviceId);
+      if (res.success) {
+        addToast(res.message, 'success');
+        setIsResetModalOpen(false);
+      }
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Gagal reset audit log', 'error');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const [search, setSearch] = useState('');
   
   const logs = useLiveQuery(
@@ -31,7 +59,51 @@ export default function AuditLog() {
           <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Audit Log</h2>
           <p className="text-slate-500 text-sm font-medium">Histori aktivitas sistem append-only untuk transparansi penuh.</p>
         </div>
+        {isOwner && (
+          <button
+            onClick={() => setIsResetModalOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-red-50 text-red-700 border border-red-200 rounded-xl text-xs font-black uppercase tracking-wider hover:bg-red-100 transition-all"
+          >
+            <RotateCcw size={16} />
+            Reset Audit Log
+          </button>
+        )}
       </div>
+
+      {/* Reset Modal */}
+      {isResetModalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-100">
+            <div className="p-6 text-center">
+              <div className="w-16 h-16 bg-red-50 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                <AlertTriangle size={32} />
+              </div>
+              <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Hapus Semua Log Audit?</h3>
+              <p className="text-sm text-slate-500 mt-2">
+                Tindakan ini akan menghapus seluruh catatan aktivitas sistem secara permanen. 
+                Gunakan fitur ini hanya untuk membersihkan data percobaan sebelum rilis resmi.
+              </p>
+              
+              <div className="grid grid-cols-2 gap-3 mt-8">
+                <button
+                  onClick={() => setIsResetModalOpen(false)}
+                  disabled={isSubmitting}
+                  className="px-4 py-3 bg-slate-100 text-slate-600 rounded-2xl font-bold text-sm hover:bg-slate-200 transition-all uppercase tracking-wider disabled:opacity-50"
+                >
+                  Batal
+                </button>
+                <button
+                  onClick={handleReset}
+                  disabled={isSubmitting}
+                  className="px-4 py-3 bg-red-600 text-white rounded-2xl font-bold text-sm hover:bg-red-700 shadow-lg shadow-red-200 transition-all uppercase tracking-wider disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {isSubmitting ? 'Memproses...' : 'Ya, Hapus Semua'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="p-4 border-b border-slate-100 bg-slate-50/50">

@@ -39,6 +39,7 @@ import {
   Edit3,
   Trash2
 } from 'lucide-react';
+import ConfirmModal from '@/app/components/ConfirmModal';
 
 type ViewMode = 'INVOICES' | 'CUSTOMERS' | 'PAYMENTS' | 'KASBON_KASIR';
 type StatusFilter = 'ALL' | 'ACTIVE' | 'OPEN' | 'PARTIAL' | 'OVERDUE' | 'PAID';
@@ -80,6 +81,11 @@ export default function Receivables() {
   // Due Date Edit State
   const [newDueDate, setNewDueDate] = useState('');
   const [dueDateReason, setDueDateReason] = useState('');
+
+  // Deletion Confirmation State
+  const [receivableToDelete, setReceivableToDelete] = useState<any | null>(null);
+  const [paymentToDelete, setPaymentToDelete] = useState<any | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Real-time Cloud Queries (Multi-device Sync)
   const { data: cloudReceivables } = useFirestoreCollection<Receivable>('receivables');
@@ -422,51 +428,43 @@ export default function Receivables() {
     }
   };
 
-  const handleDeleteReceivable = async (inv: any) => {
-    if (currentUser?.role !== 'OWNER') {
-      addToast('Akses Ditolak: Hanya Owner yang bisa menghapus data piutang.', 'error');
-      return;
-    }
-
-    if (!confirm(`Hapus permanen nota piutang ${inv.receiptNumber}?\nSemua riwayat cicilan & kas masuk terkait akan ikut terhapus.`)) {
-      return;
-    }
-
+  const handleConfirmDeleteReceivable = async () => {
+    if (!receivableToDelete || !currentUser) return;
+    setIsDeleting(true);
     try {
       await ReceivableService.deleteReceivable(
-        inv.receivableId,
+        receivableToDelete.receivableId,
         currentUser.userId,
         deviceId,
         currentUser.role
       );
       addToast('Nota piutang berhasil dihapus permanen', 'success');
+      setReceivableToDelete(null);
       setRefreshKey(prev => prev + 1);
     } catch (err: any) {
       addToast(err.message || 'Gagal menghapus piutang', 'error');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
-  const handleDeletePayment = async (payment: any) => {
-    if (currentUser?.role !== 'OWNER') {
-      addToast('Akses Ditolak: Hanya Owner yang bisa menghapus data pembayaran.', 'error');
-      return;
-    }
-
-    if (!confirm(`Hapus catatan pembayaran Rp ${payment.amount.toLocaleString()}?\nSaldo piutang pelanggan akan dihitung ulang.`)) {
-      return;
-    }
-
+  const handleConfirmDeletePayment = async () => {
+    if (!paymentToDelete || !currentUser) return;
+    setIsDeleting(true);
     try {
       await ReceivableService.deletePayment(
-        payment.paymentId,
+        paymentToDelete.paymentId,
         currentUser.userId,
         deviceId,
         currentUser.role
       );
       addToast('Data pembayaran berhasil dihapus', 'success');
+      setPaymentToDelete(null);
       setRefreshKey(prev => prev + 1);
     } catch (err: any) {
       addToast(err.message || 'Gagal menghapus pembayaran', 'error');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -911,7 +909,7 @@ export default function Receivables() {
                           )}
                           {currentUser?.role === 'OWNER' && (
                             <button
-                              onClick={() => handleDeleteReceivable(inv)}
+                              onClick={() => setReceivableToDelete(inv)}
                               className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
                               title="Hapus Permanen Nota Piutang (Owner Only)"
                             >
@@ -1118,7 +1116,7 @@ export default function Receivables() {
                         <td className="px-6 py-4 text-right">
                           {currentUser?.role === 'OWNER' && (
                             <button
-                              onClick={() => handleDeletePayment(p)}
+                              onClick={() => setPaymentToDelete(p)}
                               className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
                               title="Hapus Catatan Pembayaran"
                             >
@@ -1463,6 +1461,25 @@ export default function Receivables() {
           </div>
         </div>
       )}
+      <ConfirmModal
+        isOpen={Boolean(receivableToDelete)}
+        onClose={() => setReceivableToDelete(null)}
+        onConfirm={handleConfirmDeleteReceivable}
+        isProcessing={isDeleting}
+        title="Hapus Nota Piutang?"
+        message={receivableToDelete ? `Hapus permanen nota piutang ${receivableToDelete.receiptNumber}? Semua riwayat cicilan & kas masuk terkait akan ikut terhapus.` : ''}
+        confirmText="Ya, Hapus"
+      />
+
+      <ConfirmModal
+        isOpen={Boolean(paymentToDelete)}
+        onClose={() => setPaymentToDelete(null)}
+        onConfirm={handleConfirmDeletePayment}
+        isProcessing={isDeleting}
+        title="Hapus Catatan Pembayaran?"
+        message={paymentToDelete ? `Hapus catatan pembayaran Rp ${paymentToDelete.amount.toLocaleString()}? Saldo piutang pelanggan akan dihitung ulang.` : ''}
+        confirmText="Ya, Hapus"
+      />
     </div>
   );
 }

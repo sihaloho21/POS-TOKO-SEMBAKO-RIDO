@@ -34,11 +34,13 @@ import { motion, AnimatePresence } from 'motion/react';
 import { QuickRefundModal } from './QuickRefundModal';
 import { DebtCorrectionModal } from '../pos/DebtCorrectionModal';
 import { DataResetService } from '@/core/services/data-reset-service';
+import { useToastStore } from '@/core/toast-store';
 
 import { useFirestoreCollection } from '@/core/firestore-realtime';
 
 export default function TransactionHistory() {
   const { currentUser } = useAuthStore();
+  const { addToast } = useToastStore();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'COMPLETED' | 'RETURN' | 'approval_pending' | 'HOLD' | 'VOIDED'>('ALL');
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
@@ -149,7 +151,7 @@ export default function TransactionHistory() {
   const handleResetAll = async () => {
     if (!currentUser || !isOwner) return;
     if (resetConfirmWord !== 'RESET') {
-      alert('Ketik kata konfirmasi "RESET" dengan tepat.');
+      addToast('Ketik kata konfirmasi "RESET" dengan tepat.', 'error');
       return;
     }
     setIsBulkDeleting(true);

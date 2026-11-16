@@ -15,13 +15,17 @@ import {
   X,
   Lock,
   Sparkles,
-  Info
+  Info,
+  RotateCcw,
+  Trash2
 } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { useAuthStore } from '@/core/auth-store';
 import { AuditEngine } from '@/core/audit-engine';
 import { useDeviceId } from '@/core/device-store';
 import { useToastStore } from '@/core/toast-store';
+import { cloudSetDoc } from '@/core/firestore-realtime';
+import { DataResetService } from '@/core/services/data-reset-service';
 import type { DigitalServiceType } from '@/core/types';
 import { 
   DigitalFeeService, 
@@ -51,12 +55,53 @@ export default function DigitalServices() {
   const [formData, setFormData] = useState({ ref: '', principal: '', fee: '2000' });
   const [isProcessing, setIsProcessing] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [deletingServiceId, setDeletingServiceId] = useState<string | null>(null);
 
   // Live subscription to digital fee settings from database
   const liveSettings = useLiveQuery(() => db.settings.get(DIGITAL_FEE_SETTINGS_ID));
   const feeSettings = liveSettings || DEFAULT_DIGITAL_FEE_SETTINGS;
 
-  const recentServices = useLiveQuery(() => db.digitalServices.orderBy('serviceId').reverse().limit(10).toArray());
+  const recentServices = useLiveQuery(async () => {
+    const list = await db.digitalServices.toArray();
+    return list.sort((a, b) => 
+      new Date((b as any).createdAt || (b as any).timestamp || 0).getTime() - 
+      new Date((a as any).createdAt || (a as any).timestamp || 0).getTime()
+    ).slice(0, 20);
+  }, []);
+
+  const handleDeleteServiceTrigger = (serviceId: string) => {
+    if (!currentUser || !isOwner) return;
+    setDeletingServiceId(serviceId);
+  };
+
+  const confirmDeleteService = async () => {
+    if (!currentUser || !deletingServiceId) return;
+    setIsProcessing(true);
+    try {
+      await DataResetService.deleteDigitalServices([deletingServiceId], currentUser.userId, currentUser.role, deviceId);
+      setDeletingServiceId(null);
+      addToast('Transaksi digital berhasil dihapus.', 'success');
+    } catch (err: any) {
+      addToast(err.message || 'Gagal menghapus transaksi.', 'error');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleResetAllServices = async () => {
+    if (!currentUser || !isOwner) return;
+    setIsProcessing(true);
+    try {
+      const res = await DataResetService.resetAllDigitalServices(currentUser.userId, currentUser.role, deviceId);
+      setShowResetModal(false);
+      addToast(res.message, 'success');
+    } catch (err: any) {
+      addToast(err.message || 'Gagal mereset transaksi digital.', 'error');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
 
   // Realtime fee calculation based on selectedType and principal
   const calculatedFeeInfo = useMemo(() => {
@@ -101,18 +146,35 @@ export default function DigitalServices() {
         principal,
         fee,
         total,
-        status: 'SUCCESS' as const
+        status: 'SUCCESS' as const,
+        createdAt: timestamp,
+        timestamp
       };
 
-      // 1. Save Service Record
-      await db.digitalServices.add(serviceData);
+      // 1. Save Service Record (cloudSetDoc updates local Dexie + queues Firestore sync)
+      await cloudSetDoc('digitalServices', serviceId, serviceData);
 
-      // 2. Finance Events: Strictly UANG_DIGITAL storage vault (Pemisahan 4 Kas Toko: WARUNG, IKAN, BUAH, UANG_DIGITAL)
+      // 2. Finance Events: Strictly separating WARUNG (Physical) and UANG_DIGITAL (Digital) vaults as per PRD
       const financeEvents: any[] = [];
       const serviceLabel = SERVICES.find(s => s.type === selectedType)?.label || selectedType;
 
       if (selectedType === 'TARIK_TUNAI') {
-        // Tarik Tunai: Uang masuk saldo rekening/e-wallet pos digital & uang fisik ditarik dari kas digital toko
+        // TARIK TUNAI: 
+        // 1. Physical cash leaves WARUNG vault (Pokok) - internal asset swap, not expense
+        financeEvents.push({
+          financeEventId: uuidv4(),
+          amount: principal,
+          storageId: 'WARUNG',
+          direction: 'OUT',
+          referenceId: serviceId,
+          referenceType: 'INTERNAL_TRANSFER',
+          description: `Penyerahan Tunai: Tarik Tunai ${formData.ref}`,
+          userId: currentUser.userId,
+          deviceId,
+          timestamp
+        });
+        
+        // 2. Digital balance enters UANG_DIGITAL (Pokok)
         financeEvents.push({
           financeEventId: uuidv4(),
           amount: principal,
@@ -120,23 +182,13 @@ export default function DigitalServices() {
           direction: 'IN',
           referenceId: serviceId,
           referenceType: 'INTERNAL_TRANSFER',
-          description: `Tarik Tunai Masuk Saldo Digital (${formData.ref})`,
+          description: `Saldo Digital Masuk: Tarik Tunai ${formData.ref}`,
           userId: currentUser.userId,
           deviceId,
           timestamp
         });
-        financeEvents.push({
-          financeEventId: uuidv4(),
-          amount: principal,
-          storageId: 'UANG_DIGITAL',
-          direction: 'OUT',
-          referenceId: serviceId,
-          referenceType: 'INTERNAL_TRANSFER',
-          description: `Penyerahan Tunai Tarik Tunai (${formData.ref})`,
-          userId: currentUser.userId,
-          deviceId,
-          timestamp
-        });
+
+        // 3. Fee enters UANG_DIGITAL as SERVICE_REVENUE
         if (fee > 0) {
           financeEvents.push({
             financeEventId: uuidv4(),
@@ -145,7 +197,7 @@ export default function DigitalServices() {
             direction: 'IN',
             referenceId: serviceId,
             referenceType: 'SERVICE_REVENUE',
-            description: `Biaya Admin Tarik Tunai (${formData.ref})`,
+            description: `Fee Admin Tarik Tunai: ${formData.ref}`,
             userId: currentUser.userId,
             deviceId,
             timestamp
@@ -153,7 +205,37 @@ export default function DigitalServices() {
         }
       } else {
         // PULSA / PAKET_DATA / TOKEN_LISTRIK / TOPUP / TRANSFER:
-        // Seluruh mutasi pokok dan fee admin masuk eksklusif ke storage UANG_DIGITAL (Kas Digital)
+        // 1a. Physical Cash (Pokok) -> WARUNG (asset swap, not revenue)
+        financeEvents.push({
+          financeEventId: uuidv4(),
+          amount: principal,
+          storageId: 'WARUNG',
+          direction: 'IN',
+          referenceId: serviceId,
+          referenceType: 'INTERNAL_TRANSFER',
+          description: `Tunai Pokok: ${serviceLabel} ${formData.ref}`,
+          userId: currentUser.userId,
+          deviceId,
+          timestamp
+        });
+        
+        // 1b. Fee Admin -> WARUNG (SERVICE_REVENUE)
+        if (fee > 0) {
+          financeEvents.push({
+            financeEventId: uuidv4(),
+            amount: fee,
+            storageId: 'WARUNG',
+            direction: 'IN',
+            referenceId: serviceId,
+            referenceType: 'SERVICE_REVENUE',
+            description: `Fee Admin: ${serviceLabel} ${formData.ref}`,
+            userId: currentUser.userId,
+            deviceId,
+            timestamp
+          });
+        }
+        
+        // 2. Digital Balance -> UANG_DIGITAL (asset swap, not expense)
         financeEvents.push({
           financeEventId: uuidv4(),
           amount: principal,
@@ -161,50 +243,15 @@ export default function DigitalServices() {
           direction: 'OUT',
           referenceId: serviceId,
           referenceType: 'INTERNAL_TRANSFER',
-          description: `Potong Saldo Digital ${serviceLabel} (${formData.ref})`,
+          description: `Saldo Digital Keluar: ${serviceLabel} ${formData.ref}`,
           userId: currentUser.userId,
           deviceId,
           timestamp
         });
-        financeEvents.push({
-          financeEventId: uuidv4(),
-          amount: principal,
-          storageId: 'UANG_DIGITAL',
-          direction: 'IN',
-          referenceId: serviceId,
-          referenceType: 'INTERNAL_TRANSFER',
-          description: `Terima Tunai Pokok ${serviceLabel} (${formData.ref})`,
-          userId: currentUser.userId,
-          deviceId,
-          timestamp
-        });
-        if (fee > 0) {
-          financeEvents.push({
-            financeEventId: uuidv4(),
-            amount: fee,
-            storageId: 'UANG_DIGITAL',
-            direction: 'IN',
-            referenceId: serviceId,
-            referenceType: 'SERVICE_REVENUE',
-            description: `Pendapatan Jasa / Fee ${serviceLabel} (${formData.ref})`,
-            userId: currentUser.userId,
-            deviceId,
-            timestamp
-          });
-        }
       }
 
       for (const fe of financeEvents) {
-        await db.financeEvents.add(fe);
-        await db.syncQueue.add({
-          entityType: 'financeEvents',
-          entityId: fe.financeEventId,
-          action: 'CREATE',
-          payload: fe,
-          status: 'PENDING',
-          retryCount: 0,
-          createdAt: timestamp
-        });
+        await cloudSetDoc('financeEvents', fe.financeEventId, fe);
       }
 
       // 3. Audit
@@ -216,17 +263,6 @@ export default function DigitalServices() {
         module: 'DIGITAL',
         referenceId: serviceId,
         after: { ...serviceData, financeEventsCount: financeEvents.length }
-      });
-
-      // 4. Queue Sync
-      await db.syncQueue.add({
-        entityType: 'digitalServices',
-        entityId: serviceId,
-        action: 'CREATE',
-        payload: serviceData,
-        status: 'PENDING',
-        retryCount: 0,
-        createdAt: timestamp
       });
 
       setFormData({ ref: '', principal: '', fee: '2000' });
@@ -251,14 +287,25 @@ export default function DigitalServices() {
         </div>
 
         {isOwner && (
-          <button
-            type="button"
-            onClick={() => setShowSettingsModal(true)}
-            className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs uppercase tracking-wider rounded-xl shadow-md shadow-indigo-200 transition-all hover:scale-105 active:scale-95 shrink-0"
-          >
-            <Sliders size={16} />
-            ⚙️ Atur Tarif & Biaya Admin (Tiered)
-          </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => setShowResetModal(true)}
+              className="flex items-center gap-1.5 px-3.5 py-2.5 bg-rose-50 text-rose-700 border border-rose-200 font-bold text-xs uppercase tracking-wider rounded-xl hover:bg-rose-100 transition-all active:scale-95 shrink-0"
+              title="Reset data transaksi digital percobaan sebelum peluncuran resmi"
+            >
+              <RotateCcw size={15} />
+              Reset Histori Digital
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowSettingsModal(true)}
+              className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs uppercase tracking-wider rounded-xl shadow-md shadow-indigo-200 transition-all hover:scale-105 active:scale-95 shrink-0"
+            >
+              <Sliders size={16} />
+              ⚙️ Atur Tarif & Biaya Admin (Tiered)
+            </button>
+          </div>
         )}
       </div>
 
@@ -446,9 +493,21 @@ export default function DigitalServices() {
                       <div className="text-[10px] text-slate-400 font-semibold">{s.serviceType}</div>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <div className="font-black text-xs text-slate-900 tabular-nums">Rp {s.total?.toLocaleString('id-ID')}</div>
-                    <div className="text-[10px] text-emerald-600 font-bold tabular-nums">+Fee Rp {s.fee?.toLocaleString('id-ID')}</div>
+                  <div className="flex items-center gap-3">
+                    <div className="text-right">
+                      <div className="font-black text-xs text-slate-900 tabular-nums">Rp {s.total?.toLocaleString('id-ID')}</div>
+                      <div className="text-[10px] text-emerald-600 font-bold tabular-nums">+Fee Rp {s.fee?.toLocaleString('id-ID')}</div>
+                    </div>
+                    {isOwner && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteServiceTrigger(s.serviceId)}
+                        className="p-1.5 text-slate-300 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                        title="Hapus transaksi ini"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    )}
                   </div>
                 </div>
               ))
@@ -456,6 +515,43 @@ export default function DigitalServices() {
           </div>
         </div>
       </div>
+
+      {/* Modal Konfirmasi Hapus Transaksi Tunggal (Owner Only) */}
+      {deletingServiceId && isOwner && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-md p-6">
+            <div className="text-center">
+              <div className="w-16 h-16 bg-rose-50 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Trash2 size={32} />
+              </div>
+              <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Hapus Transaksi Digital?</h3>
+              <p className="text-sm text-slate-500 mt-2">
+                Tindakan ini akan menghapus catatan transaksi ini dari riwayat. 
+                Pastikan Anda sudah melakukan penyesuaian kas manual jika diperlukan.
+              </p>
+              
+              <div className="grid grid-cols-2 gap-3 mt-8">
+                <button
+                  type="button"
+                  onClick={() => setDeletingServiceId(null)}
+                  disabled={isProcessing}
+                  className="px-4 py-3 bg-slate-100 text-slate-600 rounded-2xl font-bold text-sm hover:bg-slate-200 transition-all uppercase tracking-wider disabled:opacity-50"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmDeleteService}
+                  disabled={isProcessing}
+                  className="px-4 py-3 bg-rose-600 text-white rounded-2xl font-bold text-sm hover:bg-rose-700 shadow-lg shadow-rose-200 transition-all uppercase tracking-wider disabled:opacity-50"
+                >
+                  {isProcessing ? 'Menghapus...' : 'Ya, Hapus'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal Pengaturan Biaya Admin (Owner Only) */}
       {showSettingsModal && (
@@ -471,6 +567,45 @@ export default function DigitalServices() {
 
             <div className="mt-2">
               <DigitalFeeSettings />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Reset Histori Transaksi Digital (Owner Only) */}
+      {showResetModal && isOwner && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-md p-6 relative">
+            <div className="flex items-center gap-3 mb-4 text-rose-600">
+              <div className="p-3 bg-rose-50 rounded-2xl">
+                <RotateCcw size={24} />
+              </div>
+              <div>
+                <h3 className="font-black text-slate-900 text-base uppercase tracking-tight">Reset Histori Digital</h3>
+                <p className="text-xs text-slate-400">Pembersihan data percobaan sebelum launching</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 mb-6 leading-relaxed">
+              Apakah Anda yakin ingin menghapus seluruh riwayat transaksi layanan digital? Tindakan ini akan mengosongkan riwayat transaksi digital untuk persiapan peluncuran resmi.
+            </p>
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setShowResetModal(false)}
+                className="flex-1 py-3 text-xs font-bold uppercase tracking-wider text-slate-500 hover:bg-slate-100 rounded-xl transition-all"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={isProcessing}
+                onClick={handleResetAllServices}
+                className="flex-1 py-3 bg-rose-600 hover:bg-rose-700 text-white text-xs font-black uppercase tracking-wider rounded-xl shadow-lg shadow-rose-200 transition-all disabled:opacity-50"
+              >
+                {isProcessing ? 'Mereset...' : 'Ya, Reset Bersih'}
+              </button>
             </div>
           </div>
         </div>
