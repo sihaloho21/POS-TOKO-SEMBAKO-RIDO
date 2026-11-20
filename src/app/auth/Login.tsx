@@ -35,23 +35,6 @@ export default function Login() {
           ]);
         }
 
-        // Ensure initial customers exist
-        const customerCount = await db.customers.count();
-        if (customerCount === 0) {
-          await db.customers.bulkAdd([
-            { 
-              customerId: 'c1', name: 'Bpk. Ahmad', isReseller: true, creditLimit: 5000000, 
-              defaultDueDateDays: 14, loyaltyPoints: 0, status: 'ACTIVE',
-              createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
-            },
-            { 
-              customerId: 'c2', name: 'Ibu Siti', isReseller: false, creditLimit: 1000000, 
-              defaultDueDateDays: 7, loyaltyPoints: 120, status: 'ACTIVE',
-              createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
-            }
-          ]);
-        }
-
         // Ensure store status is initialized
         await StoreStatusService.ensureInitialized().catch(e => console.warn('Store status init error:', e));
       } catch (err) {

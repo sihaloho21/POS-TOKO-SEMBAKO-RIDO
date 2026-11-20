@@ -1,6 +1,13 @@
+import { v4 as uuidv4 } from 'uuid';
+import { collection, doc, getDocs, writeBatch, deleteDoc } from 'firebase/firestore';
 import { db } from '../database';
+import { db as firestoreDb, auth } from '../../firebase/config';
 import { cloudDeleteDoc } from '../firestore-realtime';
 import { AuditEngine } from '../audit-engine';
+import { SyncEngine } from '../sync-engine';
+import { CloudAuthService } from './cloud-auth-service';
+import { PerformanceTracker } from './performance-tracker';
+import type { StockMovement } from '../types';
 
 export interface DataResetResult {
   success: boolean;
@@ -982,6 +989,231 @@ export class DataResetService {
       count,
       message: `Seluruh log audit (${count} data) berhasil dibersihkan.`
     };
+  }
+
+  // ==========================================
+  // 12. GLOBAL LAUNCH RESET (KEEP INVENTORY/PRODUCTS & PAYROLL)
+  // ==========================================
+
+  /**
+   * Reset ALL operational/example data across BOTH Local IndexedDB and Cloud Firestore,
+   * while strictly preserving:
+   * - Inventory Management & Products (products, productCosts, bundles + clean OPENING_BALANCE stock baselines)
+   * - Penggajian Karyawan (payrolls, bonusCategories)
+   * - User login accounts, payment methods, and store configuration settings
+   */
+  static async resetAllExceptInventoryAndPayroll(
+    userId: string,
+    role: string,
+    deviceId: string = 'device-1',
+    onProgress?: (statusText: string) => void
+  ): Promise<DataResetResult & {
+    localDeleted: number;
+    cloudDeleted: number;
+    preservedProducts: number;
+    preservedPayrolls: number;
+    rebaselinedStockMovements: number;
+  }> {
+    this.assertOwner(role);
+
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      throw new Error(
+        'Koneksi internet diperlukan untuk mereset database Cloud Firestore sekaligus dengan data lokal.'
+      );
+    }
+
+    if (!auth.currentUser) {
+      await CloudAuthService.ensureAuthenticated('OWNER', userId).catch(() => null);
+    }
+
+    SyncEngine.stop();
+
+    try {
+      onProgress?.('Membersihkan antrian sinkronisasi...');
+      await db.syncQueue.clear();
+
+      // Snapshot preserved Inventory & Payroll data before clearing operational ledgers
+      const preservedProductsList = await db.products.toArray();
+      const preservedCosts = await db.productCosts.toArray();
+      const costMap = new Map(preservedCosts.map((c) => [c.productId, c.hpp]));
+      const preservedPayrollsCount = await db.payrolls.count();
+
+      // 1. Wipe all non-inventory, non-payroll collections directly in Cloud Firestore
+      const CLOUD_COLLECTIONS_TO_WIPE = [
+        'transactions',
+        'TRANSACTION',
+        'TRANSACTIONS',
+        'transaction',
+        'receivables',
+        'receivablePayments',
+        'shifts',
+        'customers',
+        'loyaltyEvents',
+        'suppliers',
+        'purchases',
+        'payLaterBills',
+        'payLaterInstallments',
+        'financeEvents',
+        'stockOpnames',
+        'digitalServices',
+        'prepOrders',
+        'consignmentItems',
+        'consignmentArrivals',
+        'consignmentSettlements',
+        'conflicts',
+        'notifications',
+        'auditLogs',
+        'stockMovements',
+        '_health'
+      ];
+
+      let cloudDeleted = 0;
+      const BATCH_LIMIT = 400;
+
+      for (const colName of CLOUD_COLLECTIONS_TO_WIPE) {
+        onProgress?.(`Menghapus koleksi Cloud: ${colName}...`);
+        const snap = await getDocs(collection(firestoreDb, colName));
+        if (!snap.empty) {
+          const docs = snap.docs;
+          for (let i = 0; i < docs.length; i += BATCH_LIMIT) {
+            const chunk = docs.slice(i, i + BATCH_LIMIT);
+            const batch = writeBatch(firestoreDb);
+            for (const d of chunk) {
+              batch.delete(d.ref);
+            }
+            await batch.commit();
+            cloudDeleted += chunk.length;
+          }
+        }
+      }
+
+      // Clean sample-tracking settings docs in Firestore
+      await deleteDoc(doc(firestoreDb, 'settings', 'fish_procurement_cycles')).catch(() => {});
+      await deleteDoc(doc(firestoreDb, 'settings', 'minimal_fish_seeded')).catch(() => {});
+
+      // 2. Wipe all corresponding local IndexedDB tables
+      onProgress?.('Membersihkan database lokal perangkat...');
+      const LOCAL_TABLES_TO_CLEAR = [
+        'transactions',
+        'receivables',
+        'receivablePayments',
+        'shifts',
+        'customers',
+        'loyaltyEvents',
+        'suppliers',
+        'purchases',
+        'payLaterBills',
+        'payLaterInstallments',
+        'financeEvents',
+        'stockOpnames',
+        'digitalServices',
+        'prepOrders',
+        'consignmentItems',
+        'consignmentArrivals',
+        'consignmentSettlements',
+        'conflicts',
+        'notifications',
+        'auditLogs',
+        'stockMovements'
+      ] as const;
+
+      let localDeleted = 0;
+      for (const tableName of LOCAL_TABLES_TO_CLEAR) {
+        const table = db[tableName];
+        localDeleted += await table.count();
+        await table.clear();
+      }
+
+      await db.settings.bulkDelete(['fish_procurement_cycles', 'minimal_fish_seeded']).catch(() => {});
+
+      // 3. Re-baseline stockMovements for preserved non-zero-stock products so derived stock stays exact
+      onProgress?.('Menjaga konsistensi stok awal Inventory Management...');
+      const now = new Date().toISOString();
+      const baselineMovements: StockMovement[] = [];
+
+      for (const p of preservedProductsList) {
+        if (p.productType === 'BUNDLE') continue;
+        const stockVal = Number(p.stock || 0);
+        if (stockVal === 0) continue;
+
+        const isPositive = stockVal > 0;
+        const absQty = Math.abs(stockVal);
+        const hppSnapshot = costMap.get(p.productId) ?? p.hpp ?? 0;
+
+        baselineMovements.push({
+          stockMovementId: uuidv4(),
+          productId: p.productId,
+          referenceId: 'reset_opening_balance',
+          movementType: isPositive ? 'OPENING_BALANCE' : 'ADJUSTMENT_OUT',
+          qty: absQty,
+          unit: p.baseUnit || 'PCS',
+          baseQty: absQty,
+          segmentId: p.productType === 'FISH' ? 'IKAN' : p.productType === 'FRUIT' ? 'BUAH' : 'WARUNG',
+          clientTimestamp: now,
+          serverTimestamp: null,
+          deviceId,
+          userId,
+          reason: 'Stok Awal (Dipertahankan saat Reset Sistem)',
+          costSnapshot: hppSnapshot,
+          createdAt: now,
+          quantity: stockVal,
+          type: isPositive ? 'IN' : 'OUT',
+          referenceType: 'STOCK_ADJUSTMENT',
+          timestamp: now
+        });
+      }
+
+      if (baselineMovements.length > 0) {
+        await db.stockMovements.bulkPut(baselineMovements);
+
+        for (let i = 0; i < baselineMovements.length; i += BATCH_LIMIT) {
+          const chunk = baselineMovements.slice(i, i + BATCH_LIMIT);
+          const batch = writeBatch(firestoreDb);
+          for (const mv of chunk) {
+            const cleanMv = JSON.parse(JSON.stringify(mv));
+            batch.set(doc(firestoreDb, 'stockMovements', mv.stockMovementId), cleanMv);
+          }
+          await batch.commit();
+        }
+      }
+
+      // 4. Clear cached diagnostic/seeder localStorage entries
+      PerformanceTracker.clearMetrics();
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('last_auto_backup');
+        localStorage.removeItem('riama_prep_orders_seeded_v1');
+      }
+
+      // 5. Clear syncQueue again so no residual ops survive, then log clean reset audit
+      await db.syncQueue.clear();
+      await AuditEngine.log({
+        userId,
+        role,
+        deviceId,
+        action: 'RESET_ALL_EXCEPT_INVENTORY_AND_PAYROLL',
+        module: 'SYSTEM',
+        after: {
+          localDeleted,
+          cloudDeleted,
+          preservedProducts: preservedProductsList.length,
+          preservedPayrolls: preservedPayrollsCount,
+          rebaselinedStockMovements: baselineMovements.length
+        }
+      });
+
+      return {
+        success: true,
+        count: localDeleted + cloudDeleted,
+        localDeleted,
+        cloudDeleted,
+        preservedProducts: preservedProductsList.length,
+        preservedPayrolls: preservedPayrollsCount,
+        rebaselinedStockMovements: baselineMovements.length,
+        message: `Reset selesai! ${localDeleted} data lokal & ${cloudDeleted} dokumen Cloud dihapus. ${preservedProductsList.length} Produk Inventory & ${preservedPayrollsCount} data Penggajian Karyawan tetap aman.`
+      };
+    } finally {
+      SyncEngine.start();
+    }
   }
 }
 

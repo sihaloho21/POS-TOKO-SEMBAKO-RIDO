@@ -88,12 +88,13 @@ class PerformanceTrackerService {
         this.transactions = parsed.transactions || [];
         this.syncs = parsed.syncs || [];
       } else {
-        // Seed initial representative baseline for immediate diagnostic visibility
-        this.seedInitialMetrics();
+        this.transactions = [];
+        this.syncs = [];
       }
     } catch (e) {
       console.warn('Failed to load performance metrics from localStorage:', e);
-      this.seedInitialMetrics();
+      this.transactions = [];
+      this.syncs = [];
     }
   }
 

@@ -295,9 +295,13 @@ export class PrepOrderService {
   }
 
   /**
-   * Seed realistic sample orders for Fish, Fruit, and Sembako if database has none
+   * Auto-seeding disabled: scheduled orders must be entered manually.
    */
   static async seedInitialOrdersIfEmpty(): Promise<void> {
+    return;
+  }
+
+  private static async _legacySeedDisabled(): Promise<void> {
     try {
       if (typeof window !== 'undefined' && localStorage.getItem('riama_prep_orders_seeded_v1') === 'true') {
         return;

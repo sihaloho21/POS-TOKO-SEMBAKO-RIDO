@@ -488,10 +488,7 @@ export class FishService {
    */
   static async getProcurementCycles(productId?: string): Promise<FishProcurementCycle[]> {
     const doc = await db.settings.get('fish_procurement_cycles');
-    let cycles: FishProcurementCycle[] = doc?.data || [];
-    if (cycles.length === 0) {
-      cycles = await this.ensureSampleProcurementCycles();
-    }
+    const cycles: FishProcurementCycle[] = doc?.data || [];
 
     try {
       // Also inspect stock movements for any purchase logs of fish products
@@ -546,9 +543,14 @@ export class FishService {
   }
 
   /**
-   * Populates rich baseline procurement cycles for all 5 minimal fish species.
+   * Auto-seeding disabled: procurement cycles are only built from real purchase movements.
    */
   static async ensureSampleProcurementCycles(): Promise<FishProcurementCycle[]> {
+    const doc = await db.settings.get('fish_procurement_cycles');
+    return doc?.data || [];
+  }
+
+  private static async _legacySampleCyclesDisabled(): Promise<FishProcurementCycle[]> {
     const doc = await db.settings.get('fish_procurement_cycles');
     if (doc?.data && doc.data.length > 0) return doc.data;
 

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { 
   Calendar, 
@@ -42,11 +42,6 @@ export function OrderScheduleManagement() {
   const { addToast } = useToastStore();
 
   const isOwner = currentUser?.role === 'OWNER';
-
-  // Seed initial realistic sample orders for Fish, Fruit, and Sembako on first load if table is empty
-  useEffect(() => {
-    PrepOrderService.seedInitialOrdersIfEmpty();
-  }, []);
 
   const todayStr = useMemo(() => format(new Date(), 'yyyy-MM-dd'), []);
   const tomorrowStr = useMemo(() => format(addDays(new Date(), 1), 'yyyy-MM-dd'), []);

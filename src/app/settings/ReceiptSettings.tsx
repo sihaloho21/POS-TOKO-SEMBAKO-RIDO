@@ -27,11 +27,15 @@ import {
   ExternalLink,
   AlertCircle,
   Check,
-  HelpCircle
+  HelpCircle,
+  Trash2,
+  AlertTriangle,
+  ShieldCheck
 } from 'lucide-react';
 import FirebaseAuthGuideModal from './FirebaseAuthGuideModal';
 import { CloudSyncService } from '@/core/services/cloud-sync-service';
 import { CloudAuthService, useCloudAuthStore } from '@/core/services/cloud-auth-service';
+import { DataResetService } from '@/core/services/data-reset-service';
 import { auth } from '@/firebase/config';
 import { useAuthStore } from '@/core/auth-store';
 import { useDeviceId } from '@/core/device-store';
@@ -62,8 +66,44 @@ export default function ReceiptSettings() {
   const [copiedDomain, setCopiedDomain] = useState(false);
   const [isGuideOpen, setIsGuideOpen] = useState(false);
   const [guideInitialStep, setGuideInitialStep] = useState(1);
+  const [isGlobalResetModalOpen, setIsGlobalResetModalOpen] = useState(false);
+  const [resetConfirmWord, setResetConfirmWord] = useState('');
+  const [isGlobalResetting, setIsGlobalResetting] = useState(false);
+  const [resetProgressText, setResetProgressText] = useState('');
 
+  const isOwner = currentUser?.role === 'OWNER';
   const pendingQueueCount = useLiveQuery(() => db.syncQueue.where('status').anyOf(['PENDING', 'FAILED', 'SYNCING']).count());
+
+  const handleGlobalSelectiveReset = async () => {
+    if (!currentUser || !isOwner) {
+      addToast('Hanya akun OWNER yang dapat menjalankan reset sistem.', 'error');
+      return;
+    }
+    if (resetConfirmWord.trim().toUpperCase() !== 'RESET') {
+      addToast('Ketik kata "RESET" dengan tepat untuk konfirmasi.', 'error');
+      return;
+    }
+    setIsGlobalResetting(true);
+    setResetProgressText('Memulai pembersihan data sistem & database...');
+    try {
+      const result = await DataResetService.resetAllExceptInventoryAndPayroll(
+        currentUser.userId,
+        currentUser.role,
+        deviceId,
+        (step) => setResetProgressText(step)
+      );
+      addToast(result.message, 'success');
+      setIsGlobalResetModalOpen(false);
+      setResetConfirmWord('');
+      setTimeout(() => window.location.reload(), 1500);
+    } catch (err: any) {
+      console.error('Global reset failed:', err);
+      addToast(err?.message || 'Gagal mereset data sistem & database.', 'error');
+    } finally {
+      setIsGlobalResetting(false);
+      setResetProgressText('');
+    }
+  };
 
   const handleConnectGoogle = async () => {
     setIsConnectingGoogle(true);
@@ -455,6 +495,59 @@ export default function ReceiptSettings() {
                   </button>
                 </div>
               </div>
+
+              {/* Owner-Only: Global Selective Reset (Keep Inventory & Payroll) */}
+              {isOwner && (
+                <div className="p-6 bg-rose-50/70 rounded-2xl border border-rose-200 space-y-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle size={18} className="text-rose-600 shrink-0" />
+                      <h4 className="text-xs font-black text-rose-950 uppercase tracking-tight">
+                        Reset Data Percobaan (Sistem & Database)
+                      </h4>
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] text-rose-900/80 font-medium leading-relaxed">
+                    Bersihkan seluruh data contoh dari perangkat lokal dan database Cloud Firestore sebelum penggunaan operasional resmi.
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[10px]">
+                    <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl space-y-1">
+                      <p className="font-black text-emerald-800 uppercase flex items-center gap-1">
+                        <ShieldCheck size={12} /> Tetap Dipertahankan:
+                      </p>
+                      <ul className="list-disc pl-4 text-emerald-900 font-medium space-y-0.5">
+                        <li>Inventory Management &amp; Produk (termasuk Stok &amp; HPP)</li>
+                        <li>Penggajian Karyawan &amp; Kategori Bonus</li>
+                        <li>Akun Login &amp; Pengaturan Toko</li>
+                      </ul>
+                    </div>
+                    <div className="p-3 bg-white border border-rose-200 rounded-xl space-y-1">
+                      <p className="font-black text-rose-700 uppercase flex items-center gap-1">
+                        <Trash2 size={12} /> Dihapus Bersih:
+                      </p>
+                      <ul className="list-disc pl-4 text-rose-900 font-medium space-y-0.5">
+                        <li>Transaksi, Shift, Buku Kas &amp; Layanan Digital</li>
+                        <li>Pelanggan, Piutang/Kasbon, Supplier, Pembelian &amp; PayLater</li>
+                        <li>Titipan Barang, Jadwal Pesanan, Opname &amp; Log Audit</li>
+                      </ul>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setResetConfirmWord('');
+                      setIsGlobalResetModalOpen(true);
+                    }}
+                    className="w-full flex items-center justify-center gap-2 px-6 py-3.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-black text-xs uppercase tracking-widest transition-all shadow-md shadow-rose-200 cursor-pointer"
+                  >
+                    <Trash2 size={16} />
+                    <span>Reset Semua Data (Kecuali Produk &amp; Penggajian)</span>
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -548,6 +641,76 @@ export default function ReceiptSettings() {
         onClose={() => setIsGuideOpen(false)} 
         initialStep={guideInitialStep} 
       />
+
+      {/* Modal: Global Selective Reset Confirmation */}
+      {isGlobalResetModalOpen && (
+        <div className="fixed inset-0 z-[600] flex items-center justify-center p-4 bg-slate-900/65 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden p-6 space-y-5">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                <AlertTriangle size={24} />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">
+                  Reset Data Sistem &amp; Database?
+                </h3>
+                <p className="text-xs font-medium text-slate-600 leading-relaxed">
+                  Tindakan ini akan menghapus permanen seluruh data percobaan di perangkat ini dan di database Cloud Firestore. Pastikan perangkat terhubung ke internet.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs text-emerald-900 space-y-1">
+              <p className="font-black uppercase text-[11px] text-emerald-800">Data yang AMAN (Tidak Direset):</p>
+              <p className="font-medium">
+                Seluruh daftar Produk &amp; stok terkini di <strong>Inventory Management</strong> serta seluruh riwayat <strong>Penggajian Karyawan</strong> tetap dipertahankan utuh.
+              </p>
+            </div>
+
+            <div className="space-y-2 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+              <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                Ketik <span className="text-rose-600 font-black">RESET</span> untuk mengonfirmasi:
+              </label>
+              <input
+                type="text"
+                value={resetConfirmWord}
+                onChange={(e) => setResetConfirmWord(e.target.value)}
+                disabled={isGlobalResetting}
+                placeholder="Ketik RESET"
+                className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl font-black text-sm text-slate-900 uppercase tracking-widest outline-none focus:ring-2 focus:ring-rose-500"
+              />
+              {resetProgressText && (
+                <p className="text-[11px] font-bold text-indigo-700 animate-pulse pt-1">
+                  {resetProgressText}
+                </p>
+              )}
+            </div>
+
+            <div className="flex gap-3 pt-1">
+              <button
+                type="button"
+                disabled={isGlobalResetting}
+                onClick={() => {
+                  setIsGlobalResetModalOpen(false);
+                  setResetConfirmWord('');
+                }}
+                className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-black text-xs uppercase tracking-widest transition-all disabled:opacity-50"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={isGlobalResetting || resetConfirmWord.trim().toUpperCase() !== 'RESET'}
+                onClick={handleGlobalSelectiveReset}
+                className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 disabled:bg-slate-300 text-white rounded-xl font-black text-xs uppercase tracking-widest transition-all shadow-lg shadow-rose-200 flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Trash2 size={16} />
+                <span>{isGlobalResetting ? 'Mereset...' : 'Ya, Reset Bersih Sekarang'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
