@@ -7,7 +7,6 @@ import POS from './app/pos/POS';
 import Inventory from './app/inventory/Inventory';
 import Finance from './app/finance/Finance';
 import Customers from './app/customers/Customers';
-import SystemHealth from './app/system/SystemHealth';
 import AuditLog from './app/audit/AuditLog';
 import DigitalServices from './app/digital/DigitalServices';
 import BundleManagement from './app/inventory/BundleManagement';
@@ -87,7 +86,6 @@ export default function App() {
     'finance',
     'audit',
     'conflicts',
-    'system-health',
     'consignment',
     'settings'
   ];
@@ -161,8 +159,6 @@ export default function App() {
         return <ConflictCenter />;
       case 'audit':
         return <AuditLog />;
-      case 'system-health':
-        return <SystemHealth />;
       case 'consignment':
         return <ConsignmentPage />;
       case 'settings':

@@ -16,7 +16,6 @@ import {
   History,
   AlertTriangle,
   ClipboardList,
-  Activity,
   ShieldCheck,
   Bell,
   Archive,
@@ -257,7 +256,6 @@ export default function DashboardLayout({ children, currentTab, onTabChange }: {
     ...(isOwner ? [
       { id: 'conflicts', label: 'Persetujuan Shift Kasir', icon: <ShieldCheck size={18} />, badge: pendingDiscrepanciesCount && pendingDiscrepanciesCount > 0 ? pendingDiscrepanciesCount : undefined },
       { id: 'audit', label: 'Audit Log', icon: <ShieldCheck size={18} /> },
-      { id: 'system-health', label: 'System Health', icon: <Activity size={18} /> },
     ] : []),
     { id: 'consignment', label: 'Titipan Barang (Bagi Hasil)', icon: <TrendingUp size={18} />, disabled: !isOwner },
     { id: 'settings', label: 'Settings', icon: <Settings size={18} />, disabled: !isOwner },
